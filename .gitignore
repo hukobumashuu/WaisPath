@@ -32,6 +32,28 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env
+.env.development
+.env.production
+
+# API Keys and Secrets - NEVER COMMIT THESE!
+app.config.js
+app.config.ts
+google-services.json
+GoogleService-Info.plist
+
+# Firebase config files
+firebase-config.js
+firebase-config.ts
+
+# Any file with secrets or keys
+*secret*
+*key*
+*.keystore
 
 # typescript
 *.tsbuildinfo
+
+# WAISPATH specific - sensitive config
+src/config/keys.js
+src/config/keys.ts

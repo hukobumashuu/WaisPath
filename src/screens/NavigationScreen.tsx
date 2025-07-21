@@ -61,10 +61,45 @@ export default function NavigationScreen() {
   };
 
   const handleSearch = () => {
-    if (destination.trim()) {
+    if (!destination.trim()) {
+      Alert.alert("Search Error", "Please enter a destination to search for.");
+      return;
+    }
+
+    // Simple local search in our POI list
+    const query = destination.toLowerCase();
+    const results = pasigPOIs.filter(
+      (poi) =>
+        poi.name.toLowerCase().includes(query) ||
+        poi.type.toLowerCase().includes(query)
+    );
+
+    if (results.length > 0) {
+      // Zoom to first result
+      const firstResult = results[0];
+      if (mapRef.current) {
+        mapRef.current.animateToRegion(
+          {
+            latitude: firstResult.lat,
+            longitude: firstResult.lng,
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01,
+          },
+          1000
+        );
+      }
+
       Alert.alert(
-        "Search Feature",
-        `Searching for: ${destination}\n\nThis will connect to Google Places API in the next sprint.`,
+        "Search Results",
+        `Found ${results.length} result(s) for "${destination}":\n\n${results
+          .map((r) => `• ${r.name}`)
+          .join("\n")}\n\nCheck the map for the location!`,
+        [{ text: "OK" }]
+      );
+    } else {
+      Alert.alert(
+        "No Results",
+        `No results found for "${destination}" in Pasig area.\n\nTry searching for:\n• City Hall\n• Hospital\n• Mall`,
         [{ text: "OK" }]
       );
     }
