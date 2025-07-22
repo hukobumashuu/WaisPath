@@ -1,3 +1,4 @@
+// src/types/index.ts - Updated with User Profile features
 // WAISPATH Core Types - Philippine Context
 
 export interface UserLocation {
@@ -33,15 +34,24 @@ export type ObstacleType =
   | "open_manhole" // Safety hazard
   | "other";
 
+// Enhanced User Mobility Profile for Option B implementation
 export interface UserMobilityProfile {
   id: string;
   type: "wheelchair" | "walker" | "cane" | "crutches" | "none";
+
+  // Physical requirements (calculated from device type + user preferences)
   maxRampSlope: number; // Maximum ramp slope tolerable (degrees)
   minPathWidth: number; // Minimum path width needed (cm)
   avoidStairs: boolean;
   avoidCrowds: boolean;
+
+  // Filipino context preferences
   preferShade: boolean; // Important in Philippine heat
-  maxWalkingDistance: number; // meters
+  maxWalkingDistance: number; // meters before rest needed
+
+  // Profile metadata
+  createdAt?: Date;
+  lastUpdated?: Date;
 }
 
 export interface AccessibilityScore {
@@ -69,6 +79,13 @@ export interface WaispathRoute {
   overallScore: AccessibilityScore;
   generatedAt: Date;
   userProfile: UserMobilityProfile;
+
+  // Route personalization info
+  personalizedFor: {
+    deviceType: UserMobilityProfile["type"];
+    avoidedObstacles: ObstacleType[];
+    routeReasons: string[]; // ["Avoided stairs at City Hall", "Used shaded path on Ortigas"]
+  };
 }
 
 // AHP (Analytic Hierarchy Process) weights for Philippine context
@@ -92,9 +109,18 @@ export interface PointOfInterest {
     | "business";
   accessibilityRating?: AccessibilityScore;
   verified: boolean;
+
+  // Enhanced POI info for user profiles
+  accessibilityFeatures?: {
+    hasRamp: boolean;
+    hasElevator: boolean;
+    doorWidth: number; // cm
+    accessibleParking: boolean;
+    accessibleRestroom: boolean;
+  };
 }
 
-// Screen navigation types
+// Screen navigation types - Enhanced for user profiles
 export type RootTabParamList = {
   Home: undefined;
   Navigate: {
@@ -105,13 +131,49 @@ export type RootTabParamList = {
     location?: UserLocation;
     obstacleType?: ObstacleType;
   };
+  Profile: undefined; // New profile management screen
 };
 
-// Simple "make it work" data structure for Month 1
-export interface SimpleRoute {
-  from: UserLocation;
-  to: UserLocation;
-  waypoints: UserLocation[];
-  avoidAreas: UserLocation[]; // Known problem spots
-  safetyNotes: string[];
+// Enhanced route interface for personalized navigation
+export interface PersonalizedRoute {
+  route: WaispathRoute;
+  alternatives: WaispathRoute[]; // Alternative routes for comparison
+  personalizedInsights: {
+    whyThisRoute: string; // "This route avoids stairs and has shade"
+    timeComparison: string; // "2 minutes longer than fastest route, but fully accessible"
+    accessibilityScore: number; // 0-100 overall accessibility for this user
+  };
+}
+
+// User preferences for UI/UX
+export interface UserPreferences {
+  language: "en" | "fil"; // English or Filipino
+  notifications: {
+    obstacleAlerts: boolean;
+    routeUpdates: boolean;
+    communityReports: boolean;
+  };
+  display: {
+    highContrast: boolean;
+    largeText: boolean;
+    reduceMotion: boolean;
+  };
+}
+
+// Community reporting types
+export interface ObstacleReport {
+  id: string;
+  location: UserLocation;
+  obstacleType: ObstacleType;
+  severity: "low" | "medium" | "high" | "blocking";
+  description: string;
+  photoUri?: string;
+  reportedBy: {
+    userId: string;
+    deviceType: UserMobilityProfile["type"];
+  };
+  reportedAt: Date;
+  status: "pending" | "verified" | "resolved" | "false_report";
+  upvotes: number;
+  downvotes: number;
 }
