@@ -1,3 +1,4 @@
+import "./global.css"; // Add this line at the top
 import React from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
@@ -12,19 +13,10 @@ import NavigationScreen from "./src/screens/NavigationScreen";
 import { View, Text } from "react-native";
 
 const PlaceholderScreen = ({ title }: { title: string }) => (
-  <View
-    style={{
-      flex: 1,
-      justifyContent: "center",
-      alignItems: "center",
-      backgroundColor: "white",
-    }}
-  >
+  <View className="flex-1 justify-center items-center bg-white">
     <Ionicons name="construct" size={48} color="#3B82F6" />
-    <Text style={{ fontSize: 24, fontWeight: "bold", marginTop: 16 }}>
-      {title}
-    </Text>
-    <Text style={{ fontSize: 16, marginTop: 8, color: "#6B7280" }}>
+    <Text className="text-2xl font-bold mt-4">{title}</Text>
+    <Text className="text-base mt-2 text-accessible-gray">
       Coming in Month 2...
     </Text>
   </View>

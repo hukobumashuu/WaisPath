@@ -1,11 +1,5 @@
 import React from "react";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  ScrollView,
-  StyleSheet,
-} from "react-native";
+import { View, Text, TouchableOpacity, ScrollView } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 interface HomeScreenProps {
@@ -14,48 +8,56 @@ interface HomeScreenProps {
 
 export default function HomeScreen({ navigation }: HomeScreenProps) {
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView className="flex-1 bg-white">
       {/* Hero Section */}
-      <View style={styles.heroSection}>
-        <Text style={styles.heroTitle}>WAISPATH</Text>
-        <Text style={styles.heroSubtitle}>
+      <View className="bg-accessible-blue px-6 py-8 mb-6">
+        <Text className="text-6xl font-bold text-white mb-2">WAISPath</Text>
+        <Text className="text-touch-optimal text-blue-100 mb-2">
           Accessible navigation para sa Pasig City
         </Text>
-        <Text style={styles.heroDescription}>
+        <Text className="text-base text-blue-200">
           Handog namin ang ligtas at accessible na routes para sa mga PWD
         </Text>
       </View>
 
-      <View style={styles.content}>
+      <View className="px-6">
         {/* Quick Actions */}
-        <Text style={styles.sectionTitle}>Ano ang kailangan mo?</Text>
+        <Text className="text-2xl font-bold text-gray-900 mb-6">
+          Ano ang kailangan mo?
+        </Text>
 
         {/* Primary Action - Find Route */}
         <TouchableOpacity
-          style={[styles.actionButton, styles.primaryAction]}
+          className="bg-accessible-green p-touch-safe rounded-lg mb-4 flex-row items-center min-h-touch-min shadow-sm"
           onPress={() => navigation.navigate("Navigate")}
           accessibilityLabel="Maghanap ng accessible route"
           accessibilityHint="Mag-navigate sa route finder screen"
         >
           <Ionicons name="navigate-circle" size={32} color="white" />
-          <View style={styles.actionContent}>
-            <Text style={styles.actionTitle}>Maghanap ng Route</Text>
-            <Text style={styles.actionSubtitle}>Accessible paths sa Pasig</Text>
+          <View className="flex-1 ml-4">
+            <Text className="text-touch-optimal font-semibold text-white">
+              Maghanap ng Route
+            </Text>
+            <Text className="text-base text-green-100">
+              Accessible paths sa Pasig
+            </Text>
           </View>
           <Ionicons name="chevron-forward" size={24} color="white" />
         </TouchableOpacity>
 
         {/* Secondary Action - Report Problem */}
         <TouchableOpacity
-          style={[styles.actionButton, styles.secondaryAction]}
+          className="bg-accessible-yellow p-touch-safe rounded-lg mb-6 flex-row items-center min-h-touch-min shadow-sm"
           onPress={() => navigation.navigate("Report")}
           accessibilityLabel="Mag-report ng obstacle"
           accessibilityHint="I-report ang mga hadlang sa daan"
         >
           <Ionicons name="alert-circle" size={32} color="white" />
-          <View style={styles.actionContent}>
-            <Text style={styles.actionTitle}>I-report ang Hadlang</Text>
-            <Text style={styles.actionSubtitle}>
+          <View className="flex-1 ml-4">
+            <Text className="text-touch-optimal font-semibold text-white">
+              I-report ang Hadlang
+            </Text>
+            <Text className="text-base text-yellow-100">
               Tulungang i-improve ang accessibility
             </Text>
           </View>
@@ -63,182 +65,80 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
         </TouchableOpacity>
 
         {/* Status Cards */}
-        <View style={styles.statusSection}>
-          <Text style={styles.sectionTitle}>Status ng Sistema</Text>
+        <View className="mb-6">
+          <Text className="text-2xl font-bold text-gray-900 mb-4">
+            Status ng Sistema
+          </Text>
 
           {/* Community Reports */}
-          <View style={[styles.statusCard, styles.grayCard]}>
-            <View style={styles.cardHeader}>
-              <Ionicons name="people" size={20} color="#6B7280" />
-              <Text style={styles.cardTitle}>Community Reports</Text>
+          <View className="bg-gray-50 p-6 rounded-lg mb-4">
+            <View className="flex-row items-center mb-3">
+              <Ionicons name="people" size={24} color="#6B7280" />
+              <View className="flex-1 ml-3">
+                <Text className="text-lg font-semibold text-gray-900">
+                  Community Reports
+                </Text>
+                <Text className="text-sm text-accessible-gray">
+                  Real-time na mga ulat mula sa community
+                </Text>
+              </View>
             </View>
-            <Text style={styles.cardText}>
-              Mga bagong report sa loob ng 24 oras:{" "}
-              <Text style={styles.boldText}>12</Text>
-            </Text>
+            <View className="flex-row justify-between">
+              <View className="items-center">
+                <Text className="text-2xl font-bold text-accessible-green">
+                  156
+                </Text>
+                <Text className="text-xs text-accessible-gray">
+                  Reports ngayong buwan
+                </Text>
+              </View>
+              <View className="items-center">
+                <Text className="text-2xl font-bold text-accessible-yellow">
+                  23
+                </Text>
+                <Text className="text-xs text-accessible-gray">
+                  Active obstacles
+                </Text>
+              </View>
+              <View className="items-center">
+                <Text className="text-2xl font-bold text-accessible-blue">
+                  89%
+                </Text>
+                <Text className="text-xs text-accessible-gray">
+                  Accuracy rate
+                </Text>
+              </View>
+            </View>
           </View>
 
-          {/* System Health */}
-          <View style={[styles.statusCard, styles.greenCard]}>
-            <View style={styles.cardHeader}>
-              <Ionicons name="checkmark-circle" size={20} color="#059669" />
-              <Text style={styles.cardTitle}>System Status</Text>
+          {/* System Status */}
+          <View className="bg-green-50 p-6 rounded-lg">
+            <View className="flex-row items-center">
+              <Ionicons name="checkmark-circle" size={24} color="#22C55E" />
+              <View className="flex-1 ml-3">
+                <Text className="text-lg font-semibold text-gray-900">
+                  System Status
+                </Text>
+                <Text className="text-sm text-accessible-gray">
+                  Lahat ng serbisyo ay gumagana nang maayos
+                </Text>
+              </View>
             </View>
-            <Text style={styles.cardText}>
-              Lahat ng serbisyo:{" "}
-              <Text style={[styles.boldText, { color: "#059669" }]}>
-                Normal
-              </Text>
-            </Text>
           </View>
         </View>
 
         {/* Quick Tips */}
-        <View style={styles.tipCard}>
-          <View style={styles.cardHeader}>
-            <Ionicons name="bulb" size={24} color="#1E40AF" />
-            <Text style={[styles.cardTitle, { color: "#1E40AF" }]}>
-              Tip para sa Araw
-            </Text>
-          </View>
-          <Text style={styles.tipText}>
-            Mag-report ng mga vendor na tumutubo sa sidewalk. Mas madaming
-            report, mas accurate ang aming routes para sa lahat ng PWD.
+        <View className="bg-blue-50 p-6 rounded-lg mb-8">
+          <Text className="text-lg font-semibold text-accessible-blue mb-3">
+            💡 Tip para sa PWD Navigation
           </Text>
-        </View>
-
-        {/* Version Info */}
-        <View style={styles.versionInfo}>
-          <Text style={styles.versionText}>
-            WAISPATH v1.0 • Para sa Pasig City PWD Community
+          <Text className="text-base text-gray-700 leading-relaxed">
+            I-update mo ang inyong mobility profile sa settings para sa mas
+            personalized na routes. Piliin ang tamang mobility aid at
+            preferences para sa pinaka-safe na daan.
           </Text>
         </View>
       </View>
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "white",
-  },
-  heroSection: {
-    paddingHorizontal: 24,
-    paddingTop: 32,
-    paddingBottom: 24,
-    backgroundColor: "#3B82F6",
-  },
-  heroTitle: {
-    fontSize: 36,
-    fontWeight: "bold",
-    color: "white",
-    marginBottom: 8,
-  },
-  heroSubtitle: {
-    fontSize: 18,
-    color: "#DBEAFE",
-    marginBottom: 16,
-  },
-  heroDescription: {
-    fontSize: 16,
-    color: "#DBEAFE",
-  },
-  content: {
-    paddingHorizontal: 24,
-    paddingVertical: 32,
-  },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: "#111827",
-    marginBottom: 24,
-  },
-  actionButton: {
-    padding: 24,
-    borderRadius: 12,
-    marginBottom: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    minHeight: 72,
-  },
-  primaryAction: {
-    backgroundColor: "#22C55E",
-  },
-  secondaryAction: {
-    backgroundColor: "#F59E0B",
-    marginBottom: 24,
-  },
-  actionContent: {
-    marginLeft: 16,
-    flex: 1,
-  },
-  actionTitle: {
-    color: "white",
-    fontSize: 20,
-    fontWeight: "bold",
-  },
-  actionSubtitle: {
-    color: "rgba(255,255,255,0.8)",
-    fontSize: 16,
-  },
-  statusSection: {
-    marginBottom: 32,
-  },
-  statusCard: {
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 16,
-    borderWidth: 1,
-  },
-  grayCard: {
-    backgroundColor: "#F9FAFB",
-    borderColor: "#E5E7EB",
-  },
-  greenCard: {
-    backgroundColor: "#F0FDF4",
-    borderColor: "#BBF7D0",
-  },
-  cardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 8,
-  },
-  cardTitle: {
-    marginLeft: 8,
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#111827",
-  },
-  cardText: {
-    color: "#6B7280",
-    fontSize: 16,
-  },
-  boldText: {
-    fontWeight: "bold",
-  },
-  tipCard: {
-    marginTop: 32,
-    padding: 24,
-    backgroundColor: "#EFF6FF",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#BFDBFE",
-  },
-  tipText: {
-    color: "#374151",
-    fontSize: 16,
-    lineHeight: 24,
-  },
-  versionInfo: {
-    marginTop: 24,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: "#E5E7EB",
-  },
-  versionText: {
-    textAlign: "center",
-    color: "#6B7280",
-    fontSize: 14,
-  },
-});

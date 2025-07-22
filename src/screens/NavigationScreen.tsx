@@ -3,9 +3,9 @@ import {
   View,
   Text,
   TouchableOpacity,
-  StyleSheet,
   Alert,
   TextInput,
+  StyleSheet, // Keep for MapView - NativeWind doesn't work with MapView
 } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import { Ionicons } from "@expo/vector-icons";
@@ -133,22 +133,26 @@ export default function NavigationScreen() {
 
   if (loading) {
     return (
-      <View style={styles.centerContainer}>
+      <View className="flex-1 justify-center items-center bg-white">
         <Ionicons name="location" size={48} color="#3B82F6" />
-        <Text style={styles.loadingText}>Getting your location...</Text>
-        <Text style={styles.subText}>Para sa accessible routes sa Pasig</Text>
+        <Text className="text-lg font-semibold text-gray-900 mt-4">
+          Getting your location...
+        </Text>
+        <Text className="text-sm text-accessible-gray mt-2">
+          Para sa accessible routes sa Pasig
+        </Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View className="flex-1 bg-white">
       {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <View style={styles.searchBar}>
+      <View className="absolute top-12 left-4 right-4 z-10">
+        <View className="flex-row items-center bg-white rounded-xl px-4 py-3 shadow-lg">
           <Ionicons name="search" size={20} color="#6B7280" />
           <TextInput
-            style={styles.searchInput}
+            className="flex-1 ml-3 text-base text-gray-900"
             placeholder="Saan ka pupunta? (e.g., City Hall, Mall)"
             value={destination}
             onChangeText={setDestination}
@@ -156,17 +160,14 @@ export default function NavigationScreen() {
             accessibilityLabel="Search for destination"
           />
           {destination.length > 0 && (
-            <TouchableOpacity
-              onPress={handleSearch}
-              style={styles.searchButton}
-            >
+            <TouchableOpacity onPress={handleSearch} className="p-1">
               <Ionicons name="arrow-forward" size={20} color="#3B82F6" />
             </TouchableOpacity>
           )}
         </View>
       </View>
 
-      {/* Map */}
+      {/* Map - Use StyleSheet for MapView as NativeWind doesn't work with it */}
       <MapView
         ref={mapRef}
         provider={PROVIDER_GOOGLE}
@@ -214,11 +215,11 @@ export default function NavigationScreen() {
         ))}
       </MapView>
 
-      {/* Control Buttons */}
-      <View style={styles.controlsContainer}>
+      {/* Control Buttons - Use NativeWind */}
+      <View className="absolute bottom-24 right-4">
         {/* My Location Button */}
         <TouchableOpacity
-          style={styles.locationButton}
+          className="bg-white w-12 h-12 rounded-full justify-center items-center mb-4 shadow-lg"
           onPress={handleLocationPress}
           accessibilityLabel="Go to my location"
         >
@@ -226,146 +227,43 @@ export default function NavigationScreen() {
         </TouchableOpacity>
 
         {/* Quick POI Buttons */}
-        <View style={styles.poiButtons}>
+        <View className="space-y-3 gap-3">
           <TouchableOpacity
-            style={[styles.poiButton, { backgroundColor: "#22C55E" }]}
+            className="bg-accessible-green flex-row items-center px-4 py-3 rounded-full shadow-lg"
             onPress={() => handlePOIPress(pasigPOIs[0])}
           >
             <Ionicons name="business" size={20} color="white" />
-            <Text style={styles.poiButtonText}>City Hall</Text>
+            <Text className="text-white font-semibold ml-2 text-sm">
+              City Hall
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.poiButton, { backgroundColor: "#EF4444" }]}
+            className="bg-accessible-red flex-row items-center px-4 py-3 rounded-full shadow-lg"
             onPress={() => handlePOIPress(pasigPOIs[2])}
           >
             <Ionicons name="medical" size={20} color="white" />
-            <Text style={styles.poiButtonText}>Hospital</Text>
+            <Text className="text-white font-semibold ml-2 text-sm">
+              Hospital
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
 
       {/* Status Bar */}
       {error && (
-        <View style={styles.statusBar}>
+        <View className="absolute bottom-4 left-4 right-4 bg-yellow-100 rounded-lg p-3 flex-row items-center">
           <Ionicons name="information-circle" size={16} color="#F59E0B" />
-          <Text style={styles.statusText}>{error}</Text>
+          <Text className="ml-2 text-yellow-800 text-sm flex-1">{error}</Text>
         </View>
       )}
     </View>
   );
 }
 
+// Keep StyleSheet only for MapView - NativeWind doesn't work with react-native-maps
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "white",
-  },
-  centerContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "white",
-  },
-  loadingText: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#111827",
-    marginTop: 16,
-  },
-  subText: {
-    fontSize: 14,
-    color: "#6B7280",
-    marginTop: 8,
-  },
-  searchContainer: {
-    position: "absolute",
-    top: 50,
-    left: 16,
-    right: 16,
-    zIndex: 1,
-  },
-  searchBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "white",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  searchInput: {
-    flex: 1,
-    marginLeft: 12,
-    fontSize: 16,
-    color: "#111827",
-  },
-  searchButton: {
-    padding: 4,
-  },
   map: {
-    flex: 1,
-  },
-  controlsContainer: {
-    position: "absolute",
-    bottom: 100,
-    right: 16,
-  },
-  locationButton: {
-    backgroundColor: "white",
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  poiButtons: {
-    flexDirection: "column",
-    gap: 12,
-  },
-  poiButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 25,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  poiButtonText: {
-    color: "white",
-    fontWeight: "600",
-    marginLeft: 8,
-    fontSize: 14,
-  },
-  statusBar: {
-    position: "absolute",
-    bottom: 16,
-    left: 16,
-    right: 16,
-    backgroundColor: "#FEF3C7",
-    borderRadius: 8,
-    padding: 12,
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  statusText: {
-    marginLeft: 8,
-    color: "#92400E",
-    fontSize: 14,
     flex: 1,
   },
 });
