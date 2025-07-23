@@ -1,4 +1,4 @@
-// App.tsx - Updated with User Profile Flow
+// App.tsx - Updated with ReportScreen
 import "./global.css";
 import React, { useEffect, useState } from "react";
 import { NavigationContainer } from "@react-navigation/native";
@@ -12,11 +12,12 @@ import { View, Text } from "react-native";
 import HomeScreen from "./src/screens/HomeScreen";
 import NavigationScreen from "./src/screens/NavigationScreen";
 import UserProfileScreen from "./src/screens/UserProfileScreen";
+import ReportScreen from "./src/screens/ReportScreen"; // NEW: Import ReportScreen
 
 // Store
 import { useUserProfile } from "./src/stores/userProfileStore";
 
-// Temporary placeholder for Report screen
+// Temporary placeholder for future screens
 const PlaceholderScreen = ({ title }: { title: string }) => (
   <View className="flex-1 justify-center items-center bg-white">
     <Ionicons name="construct" size={48} color="#3B82F6" />
@@ -50,111 +51,78 @@ const MainTabNavigator = () => (
 
         return <Ionicons name={iconName} size={size} color={color} />;
       },
-      // Accessibility-focused tab bar
-      tabBarActiveTintColor: "#3B82F6", // accessible-blue
-      tabBarInactiveTintColor: "#6B7280", // accessible-gray
-      tabBarLabelStyle: {
-        fontSize: 14,
-        fontWeight: "600",
-        marginBottom: 4,
-      },
+      tabBarActiveTintColor: "#3B82F6",
+      tabBarInactiveTintColor: "#6B7280",
       tabBarStyle: {
-        height: 68, // Large touch area for PWD users
-        paddingBottom: 12,
-        paddingTop: 8,
-        borderTopWidth: 1,
+        backgroundColor: "white",
         borderTopColor: "#E5E7EB",
+        borderTopWidth: 1,
+        height: 60,
+        paddingBottom: 8,
+        paddingTop: 8,
       },
-      headerStyle: {
-        backgroundColor: "#3B82F6",
+      tabBarLabelStyle: {
+        fontSize: 12,
+        fontWeight: "600",
       },
-      headerTintColor: "#FFFFFF",
-      headerTitleStyle: {
-        fontSize: 20,
-        fontWeight: "bold",
-      },
+      headerShown: false,
     })}
   >
-    <Tab.Screen
-      name="Home"
-      component={HomeScreen}
-      options={{ title: "WAISPATH" }}
-    />
-    <Tab.Screen
-      name="Navigate"
-      component={NavigationScreen}
-      options={{ title: "Find Route" }}
-    />
-    <Tab.Screen
-      name="Report"
-      children={() => <PlaceholderScreen title="Report Feature" />}
-      options={{ title: "Report Issue" }}
-    />
-    <Tab.Screen
-      name="Profile"
-      component={UserProfileScreen}
-      options={{ title: "My Profile" }}
-    />
+    <Tab.Screen name="Home" component={HomeScreen} />
+    <Tab.Screen name="Navigate" component={NavigationScreen} />
+    <Tab.Screen name="Report" component={ReportScreen} />
+    <Tab.Screen name="Profile" component={UserProfileScreen} />
   </Tab.Navigator>
 );
 
-// Loading screen component
-const LoadingScreen = () => (
-  <View className="flex-1 justify-center items-center bg-accessible-blue">
-    <Ionicons name="accessibility" size={64} color="white" />
-    <Text className="text-2xl font-bold text-white mt-4">WAISPATH</Text>
-    <Text className="text-base text-blue-200 mt-2">
-      Loading your accessibility profile...
-    </Text>
-  </View>
-);
-
+// App entry point with profile-aware navigation
 export default function App() {
-  const { profile, isFirstTime } = useUserProfile();
-  const [isLoading, setIsLoading] = useState(true);
+  const { profile, isFirstTime, isLoading, loadProfile } = useUserProfile();
+  const [appReady, setAppReady] = useState(false);
 
-  // Simulate app initialization
   useEffect(() => {
     const initializeApp = async () => {
-      // Simulate loading time for splash screen
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      setIsLoading(false);
+      try {
+        // Load user profile on app start
+        await loadProfile();
+        console.log("📱 App initialized with profile system");
+      } catch (error) {
+        console.warn("⚠️ Profile loading failed:", error);
+      } finally {
+        setAppReady(true);
+      }
     };
 
     initializeApp();
-  }, []);
+  }, [loadProfile]);
 
-  // Show loading screen during initialization
-  if (isLoading) {
+  // Show loading screen while initializing
+  if (!appReady || isLoading) {
     return (
-      <NavigationContainer>
+      <View className="flex-1 justify-center items-center bg-accessible-blue">
+        <Ionicons name="navigate-circle" size={80} color="white" />
+        <Text className="text-2xl font-bold text-white mt-4">WAISPATH</Text>
+        <Text className="text-base text-blue-100 mt-2">
+          Intelligent Accessibility Navigation
+        </Text>
+        <Text className="text-sm text-blue-200 mt-8">Loading...</Text>
         <StatusBar style="light" />
-        <LoadingScreen />
-      </NavigationContainer>
+      </View>
     );
   }
 
-  // Show onboarding if first time user or no profile
-  if (isFirstTime || !profile) {
-    return (
-      <NavigationContainer>
-        <StatusBar style="auto" />
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
-          <Stack.Screen
-            name="UserProfile"
-            component={UserProfileScreen}
-            options={{ title: "Setup Your Profile" }}
-          />
-        </Stack.Navigator>
-      </NavigationContainer>
-    );
-  }
-
-  // Show main app with tabs
   return (
     <NavigationContainer>
       <StatusBar style="auto" />
-      <MainTabNavigator />
+      {isFirstTime ? (
+        // First-time users see onboarding
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="Onboarding" component={UserProfileScreen} />
+        </Stack.Navigator>
+      ) : (
+        // Existing users go directly to main app
+        <MainTabNavigator />
+      )}
     </NavigationContainer>
   );
 }
