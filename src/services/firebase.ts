@@ -1,5 +1,5 @@
-// src/services/firebase.ts - ENHANCED WITH REAL OBSTACLE REPORTING
-// Firebase Storage + Firestore with Photo Upload & Filipino Feedback
+// src/services/firebase.ts - BASE64 PHOTO STORAGE (FREE!)
+// Firestore-only solution with compressed Base64 images
 
 import {
   UserMobilityProfile,
@@ -8,6 +8,7 @@ import {
   UserLocation,
 } from "../types";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getFirebaseConfig } from "../config/firebaseConfig";
 
 interface FirebaseService {
   profile: {
@@ -21,7 +22,7 @@ interface FirebaseService {
       type: ObstacleType;
       severity: "low" | "medium" | "high" | "blocking";
       description: string;
-      photoUri?: string;
+      photoBase64?: string; // Changed from photoUri to photoBase64
       timePattern?:
         | "permanent"
         | "morning"
@@ -161,17 +162,9 @@ class SimpleFirebaseService implements FirebaseService {
 
       const { initializeApp, getApps } = await import("firebase/app");
       const { getFirestore } = await import("firebase/firestore");
-      const { getStorage } = await import("firebase/storage");
       const { getAuth, signInAnonymously } = await import("firebase/auth");
 
-      const firebaseConfig = {
-        apiKey: "AIzaSyBAvNvI8osH2ghfaDLCz3awsI8tYA6R-0Y",
-        authDomain: "waispath-24ae4.firebaseapp.com",
-        projectId: "waispath-24ae4",
-        storageBucket: "waispath-24ae4.firebasestorage.app",
-        messagingSenderId: "1038593331835",
-        appId: "1:1038593331835:android:20af68536f5a5f848908de",
-      };
+      const firebaseConfig = getFirebaseConfig();
 
       if (getApps().length === 0) {
         this.app = initializeApp(firebaseConfig);
@@ -185,11 +178,7 @@ class SimpleFirebaseService implements FirebaseService {
       this.db = getFirestore(this.app);
       console.log("🔥 Firestore initialized");
 
-      // Initialize Storage
-      this.storage = getStorage(this.app);
-      console.log("🔥 Firebase Storage initialized");
-
-      // Initialize Auth
+      // Initialize Auth (simple, no persistence needed)
       this.auth = getAuth(this.app);
       console.log("🔥 Auth initialized");
 
@@ -216,41 +205,35 @@ class SimpleFirebaseService implements FirebaseService {
   }
 
   /**
-   * Upload photo to Firebase Storage with compression info
-   * Returns the download URL for Firestore storage
+   * Convert image URI to Base64 string for Firestore storage
+   * This replaces Firebase Storage for cost-free photo storage
    */
-  private async uploadPhoto(
-    photoUri: string,
-    obstacleId: string
-  ): Promise<string> {
-    await this.ensureInitialized();
-
-    const { ref, uploadBytes, getDownloadURL } = await import(
-      "firebase/storage"
-    );
-
+  private async convertImageToBase64(imageUri: string): Promise<string> {
     try {
-      console.log("📤 Uploading photo to Firebase Storage...");
+      console.log("📸 Converting image to Base64 for Firestore storage...");
 
-      // Read the compressed photo file
-      const response = await fetch(photoUri);
+      const response = await fetch(imageUri);
       const blob = await response.blob();
 
-      // Create storage reference
-      const photoRef = ref(this.storage, `obstacles/${obstacleId}/photo.jpg`);
-
-      // Upload the file
-      const snapshot = await uploadBytes(photoRef, blob);
-      console.log("📤 Photo uploaded successfully");
-
-      // Get download URL
-      const downloadURL = await getDownloadURL(snapshot.ref);
-      console.log("🔗 Photo URL generated:", downloadURL);
-
-      return downloadURL;
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64String = reader.result as string;
+          // Remove data:image/jpeg;base64, prefix to save space
+          const base64Data = base64String.split(",")[1];
+          console.log(
+            `📸 Base64 conversion complete: ${(
+              base64Data.length / 1024
+            ).toFixed(1)}KB`
+          );
+          resolve(base64Data);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
     } catch (error: any) {
-      console.error("📤 Photo upload failed:", error);
-      throw new Error(`Hindi ma-upload ang larawan: ${error.message}`);
+      console.error("📸 Base64 conversion failed:", error);
+      throw new Error(`Hindi ma-convert ang larawan: ${error.message}`);
     }
   }
 
@@ -262,11 +245,22 @@ class SimpleFirebaseService implements FirebaseService {
         "firebase/firestore"
       );
 
-      const profileData = {
-        ...profile,
+      // Clean profile data - remove undefined values that cause Firestore errors
+      const cleanProfile = {
+        id: profile.id || `profile_${Date.now()}`,
+        type: profile.type || "none",
+        maxRampSlope: profile.maxRampSlope || 5,
+        minPathWidth: profile.minPathWidth || 90,
+        avoidStairs:
+          profile.avoidStairs !== undefined ? profile.avoidStairs : true,
+        avoidCrowds:
+          profile.avoidCrowds !== undefined ? profile.avoidCrowds : false,
+        preferShade:
+          profile.preferShade !== undefined ? profile.preferShade : true,
+        maxWalkingDistance: profile.maxWalkingDistance || 500,
         userId: this.currentUser?.uid || "anonymous",
-        lastUpdated: serverTimestamp(),
         createdAt: profile.createdAt || serverTimestamp(),
+        lastUpdated: serverTimestamp(),
       };
 
       const profileRef = doc(
@@ -274,9 +268,9 @@ class SimpleFirebaseService implements FirebaseService {
         "userProfiles",
         this.currentUser?.uid || "anonymous"
       );
-      await setDoc(profileRef, profileData, { merge: true });
 
-      console.log("🔥 Profile saved to Firebase");
+      await setDoc(profileRef, cleanProfile, { merge: true });
+      console.log("🔥 Profile saved to Firebase (cleaned data)");
     },
 
     getProfile: async (): Promise<UserMobilityProfile | null> => {
@@ -340,7 +334,7 @@ class SimpleFirebaseService implements FirebaseService {
       type: ObstacleType;
       severity: "low" | "medium" | "high" | "blocking";
       description: string;
-      photoUri?: string;
+      photoBase64?: string;
       timePattern?:
         | "permanent"
         | "morning"
@@ -355,57 +349,48 @@ class SimpleFirebaseService implements FirebaseService {
       );
 
       try {
-        console.log("🚧 Reporting obstacle to Firebase...");
+        console.log(
+          "🚧 Reporting obstacle to Firestore (with Base64 photo)..."
+        );
 
-        // Generate obstacle ID first
+        // Generate obstacle ID
         const obstacleId = `obstacle_${Date.now()}_${Math.random()
           .toString(36)
           .substr(2, 9)}`;
 
-        // Upload photo if provided
-        let photoUrl: string | undefined;
-        if (obstacleData.photoUri) {
-          try {
-            photoUrl = await this.uploadPhoto(
-              obstacleData.photoUri,
-              obstacleId
-            );
-            console.log("📸 Photo uploaded for obstacle");
-          } catch (photoError: any) {
-            console.warn(
-              "📸 Photo upload failed, continuing without photo:",
-              photoError.message
-            );
-            // Continue without photo - obstacle report is still valuable
-          }
-        }
-
-        // Create obstacle document
+        // Create clean obstacle document (no undefined values)
         const obstacleDocument = {
           id: obstacleId,
-          location: obstacleData.location,
+          location: {
+            latitude: obstacleData.location.latitude,
+            longitude: obstacleData.location.longitude,
+            accuracy: obstacleData.location.accuracy || null,
+          },
           type: obstacleData.type,
           severity: obstacleData.severity,
-          description: obstacleData.description,
-          photoUrl: photoUrl || null,
+          description: obstacleData.description || "No description provided",
+          photoBase64: obstacleData.photoBase64 || null, // Base64 string or null
           timePattern: obstacleData.timePattern || "permanent",
           reportedBy: this.currentUser?.uid || "anonymous",
           reportedAt: serverTimestamp(),
           verified: false,
           upvotes: 0,
           downvotes: 0,
-          status: "pending", // pending, verified, resolved, false_report
+          status: "pending",
 
-          // Additional metadata for community features
+          // Additional metadata
           barangay: this.getBarangayFromCoordinates(obstacleData.location),
           deviceType: await this.getUserDeviceType(),
         };
 
         // Save to Firestore
         const obstaclesRef = collection(this.db, "obstacles");
-        await addDoc(obstaclesRef, obstacleDocument);
+        const docRef = await addDoc(obstaclesRef, obstacleDocument);
 
-        console.log("✅ Obstacle reported successfully:", obstacleId);
+        console.log(
+          "✅ Obstacle reported successfully to Firestore:",
+          docRef.id
+        );
         return obstacleId;
       } catch (error: any) {
         console.error("🚧 Obstacle reporting failed:", error);

@@ -273,7 +273,7 @@ const ReportScreen: React.FC = () => {
         type: selectedObstacle,
         severity: selectedSeverity,
         description: description.trim() || "No additional description provided",
-        photoUri: capturedPhoto?.uri,
+        photoBase64: capturedPhoto?.base64, // Use Base64 instead of URI
         timePattern: selectedTimePattern,
       };
 

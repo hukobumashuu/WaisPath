@@ -15,6 +15,7 @@ export interface CameraPermissions {
 
 export interface CompressedPhoto {
   uri: string;
+  base64: string; // Add Base64 string for Firestore storage
   originalSize: number;
   compressedSize: number;
   compressionRatio: number;
@@ -97,11 +98,11 @@ class CameraService {
 
   /**
    * Compress photo with Filipino progress feedback
-   * Optimized for free Firebase storage limits
+   * Optimized for Base64 Firestore storage (completely free!)
    */
   async compressPhoto(photoUri: string): Promise<CompressedPhoto | null> {
     try {
-      console.log("🗜️ Starting photo compression...");
+      console.log("🗜️ Starting photo compression for Base64 storage...");
 
       // Get original file info
       const originalFileInfo = await FileSystem.getInfoAsync(photoUri);
@@ -120,6 +121,7 @@ class CameraService {
         {
           compress: this.config.compressionQuality,
           format: ImageManipulator.SaveFormat.JPEG,
+          base64: true, // Generate Base64 for Firestore storage
         }
       );
 
@@ -134,15 +136,19 @@ class CameraService {
 
       const compressionRatio =
         originalSize > 0 ? compressedSize / originalSize : 1;
+      const base64Size = compressedImage.base64
+        ? compressedImage.base64.length * 0.75
+        : compressedSize; // Base64 is ~33% larger
 
       console.log(
-        `📸 Photo compressed: ${(originalSize / 1024).toFixed(1)}KB → ${(
-          compressedSize / 1024
-        ).toFixed(1)}KB (${(compressionRatio * 100).toFixed(1)}%)`
+        `📸 Photo compressed for Base64: ${(originalSize / 1024).toFixed(
+          1
+        )}KB → ${(base64Size / 1024).toFixed(1)}KB Base64`
       );
 
       return {
         uri: compressedImage.uri,
+        base64: compressedImage.base64 || "", // Base64 string for Firestore
         originalSize,
         compressedSize,
         compressionRatio,
