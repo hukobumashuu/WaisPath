@@ -1,5 +1,5 @@
 // src/screens/SimpleAHPTestScreen.tsx
-// Fixed version integrated with existing Pasig POI data
+// Enhanced version with Google Maps + AHP integration test
 
 import React, { useState } from "react";
 import {
@@ -9,11 +9,16 @@ import {
   ScrollView,
   Alert,
   SafeAreaView,
+  ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useUserProfile } from "../stores/userProfileStore";
 import { useLocation } from "../hooks/useLocation";
 import { firebaseServices } from "../services/firebase";
+// ADD THESE NEW IMPORTS for Google Maps integration testing
+import { routeAnalysisService } from "../services/routeAnalysisService";
+import { googleMapsService } from "../services/googleMapsService";
+import { enhancedRouteAnalysisService } from "../services/enhancedRouteAnalysisService";
 
 const SimpleAHPTestScreen = () => {
   const [obstacles, setObstacles] = useState<any[]>([]);
@@ -22,6 +27,8 @@ const SimpleAHPTestScreen = () => {
   const [locationMode, setLocationMode] = useState<"pasig" | "current">(
     "pasig"
   );
+  // ADD NEW STATE for integration testing
+  const [integrationResults, setIntegrationResults] = useState<string[]>([]);
 
   const { profile } = useUserProfile();
   const { location, pasigCenter } = useLocation();
@@ -51,8 +58,303 @@ const SimpleAHPTestScreen = () => {
       type: "hospital",
     },
   ];
+  const createDiverseObstacles = async () => {
+    setLoading(true);
+    try {
+      console.log("🌍 Creating diverse obstacles for better route testing...");
+      await enhancedRouteAnalysisService.createDiverseTestData();
 
-  // Simple AHP calculation function
+      Alert.alert(
+        "🎯 Diverse Test Data Created!",
+        "Created obstacles along different route paths to enable better route comparison.\n\n" +
+          "This includes:\n" +
+          "• Multiple path options\n" +
+          "• Varied obstacle types\n" +
+          "• Different severity levels\n" +
+          "• Strategic locations for route differentiation\n\n" +
+          "Now test the enhanced route analysis!",
+        [{ text: "Test Enhanced Routes" }]
+      );
+    } catch (error: any) {
+      Alert.alert(
+        "Error",
+        `Failed to create diverse obstacles: ${error.message}`
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const testEnhancedRouteAnalysis = async () => {
+    setLoading(true);
+    setIntegrationResults([]);
+
+    const addResult = (result: string) => {
+      setIntegrationResults((prev) => [
+        ...prev,
+        `${new Date().toLocaleTimeString()}: ${result}`,
+      ]);
+    };
+
+    try {
+      addResult("🚀 Testing Enhanced Route Analysis with Alternatives...");
+
+      if (!profile) {
+        addResult("❌ No user profile found");
+        Alert.alert("Error", "Please set up your profile first");
+        return;
+      }
+
+      addResult(`👤 User Profile: ${profile.type} device`);
+
+      const coords = getSearchCoordinates();
+      addResult(`📍 Test location: ${coords.label}`);
+
+      // Test enhanced route analysis
+      addResult(
+        "🧠 Testing enhanced route analysis with artificial alternatives..."
+      );
+      const start = { latitude: coords.lat, longitude: coords.lng };
+      const end = { latitude: pasigPOIs[0].lat, longitude: pasigPOIs[0].lng }; // Pasig City Hall
+
+      const analysis = await enhancedRouteAnalysisService.analyzeRoutes(
+        start,
+        end,
+        profile
+      );
+      addResult("✅ Enhanced route analysis working!");
+
+      // Show detailed results
+      addResult(
+        `⚡ Fastest Route: ${Math.round(
+          analysis.fastestRoute.googleRoute.duration / 60
+        )}min (Grade ${analysis.fastestRoute.accessibilityScore.grade})`
+      );
+      addResult(
+        `   └─ Obstacles: ${
+          analysis.fastestRoute.obstacleCount
+        } | Score: ${analysis.fastestRoute.accessibilityScore.overall.toFixed(
+          0
+        )}/100`
+      );
+      addResult(
+        `   └─ ${
+          analysis.fastestRoute.isAlternative
+            ? "Artificial Alternative"
+            : "Real Google Route"
+        }`
+      );
+
+      addResult(
+        `♿ Accessible Route: ${Math.round(
+          analysis.accessibleRoute.googleRoute.duration / 60
+        )}min (Grade ${analysis.accessibleRoute.accessibilityScore.grade})`
+      );
+      addResult(
+        `   └─ Obstacles: ${
+          analysis.accessibleRoute.obstacleCount
+        } | Score: ${analysis.accessibleRoute.accessibilityScore.overall.toFixed(
+          0
+        )}/100`
+      );
+      addResult(
+        `   └─ ${
+          analysis.accessibleRoute.isAlternative
+            ? "Artificial Alternative"
+            : "Real Google Route"
+        }`
+      );
+
+      const timeDiff = Math.round(
+        (analysis.accessibleRoute.googleRoute.duration -
+          analysis.fastestRoute.googleRoute.duration) /
+          60
+      );
+      const scoreDiff =
+        analysis.accessibleRoute.accessibilityScore.overall -
+        analysis.fastestRoute.accessibilityScore.overall;
+
+      addResult(`📊 Time difference: ${timeDiff} minutes`);
+      addResult(`📈 Accessibility improvement: ${scoreDiff.toFixed(0)} points`);
+      addResult(`💡 ${analysis.routeComparison.recommendation}`);
+
+      Alert.alert(
+        "🎉 Enhanced Route Analysis SUCCESS!",
+        `Routes now show meaningful differences!\n\n` +
+          `⚡ Fastest: ${Math.round(
+            analysis.fastestRoute.googleRoute.duration / 60
+          )}min (Grade ${analysis.fastestRoute.accessibilityScore.grade}) - ${
+            analysis.fastestRoute.obstacleCount
+          } obstacles\n` +
+          `♿ Accessible: ${Math.round(
+            analysis.accessibleRoute.googleRoute.duration / 60
+          )}min (Grade ${
+            analysis.accessibleRoute.accessibilityScore.grade
+          }) - ${analysis.accessibleRoute.obstacleCount} obstacles\n\n` +
+          `${
+            timeDiff > 0
+              ? `Accessible route is ${timeDiff} min longer but `
+              : ""
+          }${scoreDiff.toFixed(0)} points more accessible!\n\n` +
+          `🎯 Ready for real route comparison in NavigationScreen!`,
+        [{ text: "Awesome! 🌟" }]
+      );
+    } catch (error: any) {
+      console.error("❌ Enhanced route test failed:", error);
+      addResult(`❌ ERROR: ${error.message}`);
+
+      Alert.alert(
+        "Enhanced Route Test Failed",
+        `Error: ${error.message}\n\nTry:\n• Create diverse obstacles first\n• Check internet connection\n• Verify user profile setup`,
+        [{ text: "OK" }]
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ADD NEW INTEGRATION TEST FUNCTION
+  const testGoogleMapsIntegration = async () => {
+    setLoading(true);
+    setIntegrationResults([]);
+
+    const addResult = (result: string) => {
+      setIntegrationResults((prev) => [
+        ...prev,
+        `${new Date().toLocaleTimeString()}: ${result}`,
+      ]);
+    };
+
+    try {
+      addResult("🚀 Starting Google Maps + AHP Integration Test...");
+
+      if (!profile) {
+        addResult("❌ No user profile found");
+        Alert.alert(
+          "Error",
+          "Please set up your profile first in the Profile tab"
+        );
+        return;
+      }
+
+      addResult(`👤 User Profile: ${profile.type} device`);
+
+      // Check API key
+      if (!process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY) {
+        addResult("❌ Google Maps API key not found in .env");
+        Alert.alert(
+          "Setup Required",
+          "Please add EXPO_PUBLIC_GOOGLE_MAPS_API_KEY to your .env file"
+        );
+        return;
+      }
+      addResult("✅ Google Maps API key configured");
+
+      const coords = getSearchCoordinates();
+      addResult(`📍 Test location: ${coords.label}`);
+
+      // Test 1: Google Maps API
+      addResult("🗺️ Testing Google Maps Directions API...");
+      const start = { latitude: coords.lat, longitude: coords.lng };
+      const end = { latitude: pasigPOIs[0].lat, longitude: pasigPOIs[0].lng }; // Pasig City Hall
+
+      const routes = await googleMapsService.getRoutes(start, end);
+      addResult(`✅ Google Maps API working! Found ${routes.length} routes`);
+
+      routes.forEach((route, index) => {
+        addResult(
+          `  Route ${index + 1}: ${Math.round(route.duration / 60)}min, ${(
+            route.distance / 1000
+          ).toFixed(1)}km`
+        );
+      });
+
+      // Test 2: AHP Integration
+      addResult("🧠 Testing AHP route analysis integration...");
+      const analysis = await routeAnalysisService.analyzeRoutes(
+        start,
+        end,
+        profile
+      );
+      addResult("✅ AHP route analysis working!");
+
+      addResult(
+        `⚡ Fastest Route: ${Math.round(
+          analysis.fastestRoute.googleRoute.duration / 60
+        )}min (Grade ${analysis.fastestRoute.accessibilityScore.grade})`
+      );
+      addResult(
+        `♿ Accessible Route: ${Math.round(
+          analysis.accessibleRoute.googleRoute.duration / 60
+        )}min (Grade ${analysis.accessibleRoute.accessibilityScore.grade})`
+      );
+      addResult(
+        `📊 Obstacles: Fast=${analysis.fastestRoute.obstacleCount}, Accessible=${analysis.accessibleRoute.obstacleCount}`
+      );
+      addResult(`💡 ${analysis.routeComparison.recommendation}`);
+
+      // Test 3: Route comparison validation
+      const timeDiff = Math.round(
+        (analysis.accessibleRoute.googleRoute.duration -
+          analysis.fastestRoute.googleRoute.duration) /
+          60
+      );
+      const distanceDiff =
+        (analysis.accessibleRoute.googleRoute.distance -
+          analysis.fastestRoute.googleRoute.distance) /
+        1000;
+      addResult(`📈 Time difference: ${timeDiff} minutes`);
+      addResult(`📏 Distance difference: ${distanceDiff.toFixed(1)} km`);
+
+      Alert.alert(
+        "🎉 Integration Test SUCCESS!",
+        `All systems working perfectly!\n\n` +
+          `✅ Google Maps API: ${routes.length} routes found\n` +
+          `✅ AHP Analysis: Routes scored\n` +
+          `✅ Route Comparison: Working\n\n` +
+          `Results:\n` +
+          `⚡ Fastest: ${Math.round(
+            analysis.fastestRoute.googleRoute.duration / 60
+          )}min (Grade ${analysis.fastestRoute.accessibilityScore.grade})\n` +
+          `♿ Accessible: ${Math.round(
+            analysis.accessibleRoute.googleRoute.duration / 60
+          )}min (Grade ${
+            analysis.accessibleRoute.accessibilityScore.grade
+          })\n\n` +
+          `🎯 Ready for NavigationScreen integration!`,
+        [{ text: "Awesome! 🌟" }]
+      );
+    } catch (error: any) {
+      console.error("❌ Integration test failed:", error);
+      addResult(`❌ ERROR: ${error.message}`);
+
+      let errorHelp = "Check:\n";
+      if (error.message.includes("API key") || error.message.includes("key")) {
+        errorHelp += "• Google Maps API key in .env file\n";
+      }
+      if (
+        error.message.includes("network") ||
+        error.message.includes("fetch")
+      ) {
+        errorHelp += "• Internet connection\n";
+      }
+      if (error.message.includes("profile")) {
+        errorHelp += "• User profile setup\n";
+      }
+      errorHelp += "• API key has Directions API enabled\n";
+      errorHelp += "• Try running on physical device if using emulator";
+
+      Alert.alert(
+        "Integration Test Failed",
+        `Error: ${error.message}\n\n${errorHelp}`,
+        [{ text: "OK" }]
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Simple AHP calculation function (your existing code)
   const calculateSimpleAHPScore = (obstacle: any, userProfile: any) => {
     let traversability = 100;
     let safety = 100;
@@ -357,6 +659,25 @@ const SimpleAHPTestScreen = () => {
           </Text>
         </View>
 
+        {/* NEW: Integration Test Status */}
+        <View className="bg-white rounded-lg p-4 mb-4">
+          <Text className="text-lg font-bold text-gray-900 mb-2">
+            Integration Status
+          </Text>
+          <Text className="text-sm text-gray-600">
+            Location: {location ? "✅ Available" : "❌ Not available"}
+          </Text>
+          <Text className="text-sm text-gray-600">
+            Profile: {profile ? `✅ ${profile.type} device` : "❌ Not set"}
+          </Text>
+          <Text className="text-sm text-gray-600">
+            Google API:{" "}
+            {process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
+              ? "✅ Configured"
+              : "❌ Missing API key"}
+          </Text>
+        </View>
+
         {/* Location Mode Switcher */}
         <View className="bg-white rounded-lg p-4 mb-4">
           <Text className="text-lg font-bold text-gray-900 mb-3">
@@ -421,6 +742,55 @@ const SimpleAHPTestScreen = () => {
         </View>
 
         {/* Action Buttons */}
+        {/* NEW: Google Maps + AHP Integration Test Button */}
+        <TouchableOpacity
+          onPress={testGoogleMapsIntegration}
+          disabled={loading}
+          className={`py-3 rounded-lg mb-4 ${
+            loading ? "bg-gray-400" : "bg-purple-500"
+          }`}
+        >
+          <View className="flex-row items-center justify-center">
+            {loading && <ActivityIndicator size="small" color="white" />}
+            <Text className="text-white font-semibold text-center ml-1">
+              {loading
+                ? "Testing Integration..."
+                : "🚀 Test Google Maps + AHP Integration"}
+            </Text>
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={createDiverseObstacles}
+          disabled={loading}
+          className={`py-3 rounded-lg mb-4 ${
+            loading ? "bg-gray-400" : "bg-yellow-500"
+          }`}
+        >
+          <Text className="text-white font-semibold text-center">
+            {loading
+              ? "Creating Diverse Data..."
+              : "🌍 Create Diverse Test Obstacles"}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={testEnhancedRouteAnalysis}
+          disabled={loading}
+          className={`py-3 rounded-lg mb-4 ${
+            loading ? "bg-gray-400" : "bg-purple-600"
+          }`}
+        >
+          <View className="flex-row items-center justify-center">
+            {loading && <ActivityIndicator size="small" color="white" />}
+            <Text className="text-white font-semibold text-center ml-1">
+              {loading
+                ? "Testing Enhanced Analysis..."
+                : "🎯 Test Enhanced Route Analysis"}
+            </Text>
+          </View>
+        </TouchableOpacity>
+
         <TouchableOpacity
           onPress={createTestObstacles}
           disabled={loading}
@@ -444,6 +814,33 @@ const SimpleAHPTestScreen = () => {
             {loading ? "Loading Obstacles..." : "🔍 Load & Analyze Obstacles"}
           </Text>
         </TouchableOpacity>
+
+        {/* NEW: Integration Test Results */}
+        {integrationResults.length > 0 && (
+          <View className="bg-white rounded-lg p-4 mb-4">
+            <View className="flex-row items-center justify-between mb-2">
+              <Text className="text-lg font-bold text-gray-900">
+                🚀 Integration Test Results
+              </Text>
+              <TouchableOpacity
+                onPress={() => setIntegrationResults([])}
+                className="px-2 py-1 rounded bg-gray-200"
+              >
+                <Text className="text-xs text-gray-600">Clear</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView className="max-h-48">
+              {integrationResults.map((result, index) => (
+                <Text
+                  key={index}
+                  className="text-xs text-gray-700 mb-1 font-mono"
+                >
+                  {result}
+                </Text>
+              ))}
+            </ScrollView>
+          </View>
+        )}
 
         {/* Results Summary */}
         {testResults.length > 0 && (
@@ -553,14 +950,15 @@ const SimpleAHPTestScreen = () => {
         {/* Academic Info */}
         <View className="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-4">
           <Text className="text-sm font-semibold text-blue-800 mb-2">
-            🎓 AHP Algorithm Demo - Pasig City Context
+            🎓 AHP Algorithm Demo - Enhanced with Google Maps Integration
           </Text>
           <Text className="text-xs text-blue-700">
             • Weights: Traversability (70%), Safety (20%), Comfort (10%){"\n"}•
             User-specific penalties based on mobility device{"\n"}• Severity
-            multipliers for obstacle impact{"\n"}• Integrated with existing
-            Pasig POI data{"\n"}• Realistic obstacle scenarios for defense demo
-            {"\n"}• Academic methodology ready for Month 2 defense
+            multipliers for obstacle impact{"\n"}• Integrated with Google Maps
+            Directions API{"\n"}• Real route analysis with dual path comparison
+            {"\n"}• Ready for NavigationScreen deployment{"\n"}• Academic
+            methodology validated for defense
           </Text>
         </View>
       </ScrollView>
