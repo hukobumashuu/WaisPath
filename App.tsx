@@ -16,6 +16,7 @@ import ReportScreen from "./src/screens/ReportScreen"; // NEW: Import ReportScre
 
 // Store
 import { useUserProfile } from "./src/stores/userProfileStore";
+import SimpleAHPTestScreen from "./src/screens/SimpleAHPTestScreen";
 
 // Temporary placeholder for future screens
 const PlaceholderScreen = ({ title }: { title: string }) => (
@@ -72,6 +73,15 @@ const MainTabNavigator = () => (
     <Tab.Screen name="Navigate" component={NavigationScreen} />
     <Tab.Screen name="Report" component={ReportScreen} />
     <Tab.Screen name="Profile" component={UserProfileScreen} />
+    <Tab.Screen
+      name="AHP Test"
+      component={SimpleAHPTestScreen}
+      options={{
+        tabBarIcon: ({ color, size }) => (
+          <Ionicons name="analytics" size={size} color={color} />
+        ),
+      }}
+    />
   </Tab.Navigator>
 );
 

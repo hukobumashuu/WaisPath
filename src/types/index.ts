@@ -1,4 +1,4 @@
-// src/types/index.ts - Updated with User Profile features
+// src/types/index.ts - COMPLETELY FIXED - All exports added
 // WAISPATH Core Types - Philippine Context
 
 export interface UserLocation {
@@ -17,6 +17,10 @@ export interface AccessibilityObstacle {
   reportedAt: Date;
   verified: boolean;
   timePattern?: "permanent" | "morning" | "afternoon" | "evening" | "weekend";
+  upvotes?: number;
+  downvotes?: number;
+  photoBase64?: string;
+  status?: "pending" | "verified" | "resolved" | "false_report";
 }
 
 // Philippine street reality obstacle types
@@ -31,8 +35,8 @@ export type ObstacleType =
   | "stairs_no_ramp" // Accessibility barrier
   | "narrow_passage" // Less than wheelchair width
   | "broken_pavement" // Dangerous surface
-  | "open_manhole" // Safety hazard
-  | "other";
+  | "steep_slope" // Too steep for wheelchairs
+  | "other"; // Other obstacles
 
 // Enhanced User Mobility Profile for Option B implementation
 export interface UserMobilityProfile {
@@ -59,6 +63,8 @@ export interface AccessibilityScore {
   safety: number; // 0-100: How safe from traffic/hazards?
   comfort: number; // 0-100: Shade, smooth surface, etc.
   overall: number; // Weighted AHP score
+  grade: "A" | "B" | "C" | "D" | "F"; // Easy to understand grade
+  userSpecificAdjustment: number; // Additional penalty/bonus for user type
 }
 
 export interface RouteSegment {
@@ -176,4 +182,70 @@ export interface ObstacleReport {
   status: "pending" | "verified" | "resolved" | "false_report";
   upvotes: number;
   downvotes: number;
+}
+
+// NEW AHP-specific interfaces that extend your existing types
+export interface CommunityObstacle extends AccessibilityObstacle {
+  // Uses your existing AccessibilityObstacle as base
+  // Adds any additional fields if needed
+}
+
+export interface SidewalkData {
+  obstacles: CommunityObstacle[]; // From existing Firebase system
+  estimatedWidth: number; // Meters (default: 1.5m)
+  surfaceCondition: "smooth" | "rough" | "broken";
+  slope: number; // Degrees (default: 0)
+  lighting: "good" | "poor" | "none";
+  shadeLevel: "covered" | "partial" | "none";
+  trafficLevel: "high" | "medium" | "low";
+  hasRamp: boolean; // Accessibility feature
+  hasHandrails: boolean; // Additional support
+}
+
+export interface AHPCriteria {
+  traversability: number; // 0.7 - Can PWD physically pass through?
+  safety: number; // 0.2 - Safe from traffic/hazards?
+  comfort: number; // 0.1 - Shade, smooth surface, comfort factors?
+}
+
+// Enhanced obstacle with AHP analysis
+export interface EnhancedObstacleReport extends CommunityObstacle {
+  accessibilityImpact: AccessibilityScore;
+  userSpecificRating: number; // 1-5 stars for this user type
+  affectedUserTypes: string[]; // Which PWD types are most affected
+  priorityLevel: "critical" | "high" | "medium" | "low";
+  estimatedDetourTime: number; // Additional minutes needed to avoid
+}
+
+export interface RouteAccessibilityAnalysis {
+  routeId: string;
+  segments: RouteSegmentScore[];
+  overallAccessibilityScore: AccessibilityScore;
+  userProfile: UserMobilityProfile;
+  totalDistance: number;
+  estimatedDuration: number;
+  obstacleCount: number;
+  warnings: AccessibilityWarning[];
+  recommendations: string[];
+  analyzedAt: Date;
+}
+
+export interface RouteSegmentScore {
+  segmentIndex: number;
+  startLocation: { latitude: number; longitude: number };
+  endLocation: { latitude: number; longitude: number };
+  distance: number; // meters
+  obstacles: CommunityObstacle[];
+  accessibilityScore: AccessibilityScore;
+  estimatedSidewalkData: SidewalkData;
+  confidence: number; // 0-1, how confident we are in this assessment
+}
+
+export interface AccessibilityWarning {
+  type: "blocking" | "difficult" | "detour_needed" | "time_sensitive";
+  severity: "low" | "medium" | "high" | "critical";
+  message: string;
+  location: { latitude: number; longitude: number };
+  affectedUserTypes: string[];
+  suggestedAction: string;
 }
