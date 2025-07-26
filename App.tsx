@@ -1,4 +1,4 @@
-// App.tsx - Updated with ReportScreen
+// App.tsx - Updated with SidewalkTestScreen
 import "./global.css";
 import React, { useEffect, useState } from "react";
 import { NavigationContainer } from "@react-navigation/native";
@@ -12,11 +12,14 @@ import { View, Text } from "react-native";
 import HomeScreen from "./src/screens/HomeScreen";
 import NavigationScreen from "./src/screens/NavigationScreen";
 import UserProfileScreen from "./src/screens/UserProfileScreen";
-import ReportScreen from "./src/screens/ReportScreen"; // NEW: Import ReportScreen
+import ReportScreen from "./src/screens/ReportScreen";
+import SimpleAHPTestScreen from "./src/screens/SimpleAHPTestScreen";
+
+// NEW: Import SidewalkTestScreen
+import SidewalkTestScreen from "./src/screens/SidewalkTestScreen";
 
 // Store
 import { useUserProfile } from "./src/stores/userProfileStore";
-import SimpleAHPTestScreen from "./src/screens/SimpleAHPTestScreen";
 
 // Temporary placeholder for future screens
 const PlaceholderScreen = ({ title }: { title: string }) => (
@@ -46,8 +49,14 @@ const MainTabNavigator = () => (
           iconName = focused ? "navigate-circle" : "navigate-circle-outline";
         } else if (route.name === "Report") {
           iconName = focused ? "alert-circle" : "alert-circle-outline";
-        } else {
+        } else if (route.name === "Profile") {
           iconName = focused ? "person" : "person-outline";
+        } else if (route.name === "AHP Test") {
+          iconName = focused ? "analytics" : "analytics-outline";
+        } else if (route.name === "Sidewalk Test") {
+          iconName = focused ? "walk" : "walk-outline";
+        } else {
+          iconName = focused ? "home" : "home-outline";
         }
 
         return <Ionicons name={iconName} size={size} color={color} />;
@@ -80,6 +89,17 @@ const MainTabNavigator = () => (
         tabBarIcon: ({ color, size }) => (
           <Ionicons name="analytics" size={size} color={color} />
         ),
+      }}
+    />
+    {/* NEW: Add SidewalkTestScreen */}
+    <Tab.Screen
+      name="Sidewalk Test"
+      component={SidewalkTestScreen}
+      options={{
+        tabBarIcon: ({ color, size }) => (
+          <Ionicons name="walk" size={size} color={color} />
+        ),
+        tabBarLabel: "Sidewalk",
       }}
     />
   </Tab.Navigator>

@@ -1,5 +1,6 @@
 // src/screens/NavigationScreen.tsx
-// Enhanced with obstacle markers and info bubbles
+// FIXED: Working map + sidewalk integration
+// Keep all existing map code, only update the route analysis service
 
 import React, { useState, useRef } from "react";
 import {
@@ -18,10 +19,14 @@ import MapViewDirections from "react-native-maps-directions";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocation } from "../hooks/useLocation";
 import { useUserProfile } from "../stores/userProfileStore";
+
+// UPDATED IMPORTS: Use both services for compatibility
 import {
   routeAnalysisService,
   DualRouteComparison,
 } from "../services/routeAnalysisService";
+import { sidewalkRouteAnalysisService } from "../services/sidewalkRouteAnalysisService";
+
 import { firebaseServices } from "../services/firebase";
 import { UserLocation, AccessibilityObstacle, ObstacleType } from "../types";
 
@@ -162,8 +167,15 @@ export default function NavigationScreen() {
 
       Alert.alert(
         "Destination Found!",
-        `Found ${firstResult.name}. Tap "Get AHP Route" to analyze accessibility.`,
-        [{ text: "OK" }]
+        `Found ${firstResult.name}. Choose your route analysis method:`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "🧠 Original AHP", onPress: () => getAHPRoute(firstResult) },
+          {
+            text: "🚶‍♂️ Sidewalk Analysis",
+            onPress: () => getSidewalkRoute(firstResult),
+          },
+        ]
       );
     } else {
       Alert.alert(
@@ -174,6 +186,7 @@ export default function NavigationScreen() {
     }
   };
 
+  // ORIGINAL AHP Route Analysis (keep for compatibility)
   const getAHPRoute = async (poi: any) => {
     if (!location) {
       Alert.alert("Location Error", "Current location not available.");
@@ -191,7 +204,7 @@ export default function NavigationScreen() {
     setIsAnalyzing(true);
 
     try {
-      console.log("🚀 Getting AHP route analysis...");
+      console.log("🚀 Getting original AHP route analysis...");
 
       const destination = { latitude: poi.lat, longitude: poi.lng };
       const analysis = await routeAnalysisService.analyzeRoutes(
@@ -205,7 +218,7 @@ export default function NavigationScreen() {
 
       // Show route comparison
       Alert.alert(
-        `🎉 Routes to ${poi.name}`,
+        `🧠 Original AHP Routes to ${poi.name}`,
         `⚡ Fastest: ${Math.round(
           analysis.fastestRoute.googleRoute.duration / 60
         )}min (Grade ${analysis.fastestRoute.accessibilityScore.grade})\n` +
@@ -227,8 +240,131 @@ export default function NavigationScreen() {
         ]
       );
     } catch (error: any) {
-      console.error("❌ Route analysis failed:", error);
+      console.error("❌ Original AHP route analysis failed:", error);
       Alert.alert("Route Error", `Could not analyze route: ${error.message}`);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // NEW: Sidewalk Route Analysis
+  const getSidewalkRoute = async (poi: any) => {
+    if (!location) {
+      Alert.alert("Location Error", "Current location not available.");
+      return;
+    }
+
+    if (!profile) {
+      Alert.alert(
+        "Profile Required",
+        "Please set up your accessibility profile first for personalized routes."
+      );
+      return;
+    }
+
+    setIsAnalyzing(true);
+
+    try {
+      console.log("🚶‍♂️ Getting revolutionary sidewalk route analysis...");
+
+      const destination = { latitude: poi.lat, longitude: poi.lng };
+      const analysis = await sidewalkRouteAnalysisService.analyzeSidewalkRoutes(
+        location,
+        destination,
+        profile
+      );
+
+      // Convert sidewalk analysis to display in existing UI
+      const convertedAnalysis: DualRouteComparison = {
+        fastestRoute: {
+          googleRoute: {
+            id: "standard_route",
+            polyline: "",
+            distance: analysis.standardRoute.totalDistance,
+            duration: analysis.standardRoute.totalTime,
+            steps: [],
+            bounds: { northeast: destination, southwest: location },
+            warnings: [],
+            summary: "Standard Route",
+          },
+          accessibilityScore: analysis.standardRoute.overallScore,
+          obstacleCount: analysis.standardRoute.segments[0].obstacles.length,
+          userWarnings: [],
+          recommendation: "acceptable",
+        },
+        accessibleRoute: {
+          googleRoute: {
+            id: "optimized_route",
+            polyline: "",
+            distance: analysis.optimizedRoute.totalDistance,
+            duration: analysis.optimizedRoute.totalTime,
+            steps: [],
+            bounds: { northeast: destination, southwest: location },
+            warnings: [],
+            summary: "Optimized Sidewalk Route",
+          },
+          accessibilityScore: analysis.optimizedRoute.overallScore,
+          obstacleCount: analysis.optimizedRoute.segments[0].obstacles.length,
+          userWarnings: [],
+          recommendation: "excellent",
+        },
+        routeComparison: {
+          timeDifference: analysis.comparison.timeDifference,
+          distanceDifference:
+            analysis.optimizedRoute.totalDistance -
+            analysis.standardRoute.totalDistance,
+          accessibilityImprovement:
+            analysis.comparison.accessibilityImprovement,
+          recommendation: analysis.comparison.recommendation,
+        },
+      };
+
+      setRouteAnalysis(convertedAnalysis);
+      setSelectedDestination(destination);
+
+      // Show enhanced sidewalk route comparison
+      Alert.alert(
+        `🚶‍♂️ Revolutionary Sidewalk Routes to ${poi.name}`,
+        `📍 Standard Route: ${Math.round(
+          analysis.standardRoute.totalTime / 60
+        )}min (Grade ${analysis.standardRoute.overallScore.grade}) - ${
+          analysis.standardRoute.segments[0].obstacles.length
+        } obstacles\n\n` +
+          `🌟 Optimized Sidewalk Route: ${Math.round(
+            analysis.optimizedRoute.totalTime / 60
+          )}min (Grade ${analysis.optimizedRoute.overallScore.grade}) - ${
+            analysis.optimizedRoute.segments[0].obstacles.length
+          } obstacles\n` +
+          `${
+            analysis.optimizedRoute.crossingPoints.length > 0
+              ? `• ${analysis.optimizedRoute.crossingPoints.length} strategic crossings\n`
+              : ""
+          }` +
+          `${
+            analysis.comparison.accessibilityImprovement > 0
+              ? `• +${analysis.comparison.accessibilityImprovement.toFixed(
+                  0
+                )} accessibility points\n`
+              : ""
+          }\n` +
+          `💡 ${analysis.comparison.recommendation}`,
+        [
+          {
+            text: "Use Standard",
+            onPress: () => setSelectedRouteType("fastest"), // Map to existing state
+          },
+          {
+            text: "Use Optimized",
+            onPress: () => setSelectedRouteType("accessible"), // Map to existing state
+          },
+        ]
+      );
+    } catch (error: any) {
+      console.error("❌ Sidewalk route analysis failed:", error);
+      Alert.alert(
+        "Sidewalk Route Error",
+        `Could not analyze sidewalk route: ${error.message}`
+      );
     } finally {
       setIsAnalyzing(false);
     }
@@ -247,12 +383,16 @@ export default function NavigationScreen() {
       );
     }
 
-    // Enhanced with AHP route analysis
-    Alert.alert(poi.name, "Get accessible route with AHP analysis?", [
+    // Enhanced with both route analysis options
+    Alert.alert(poi.name, "Choose your route analysis method:", [
       { text: "Cancel", style: "cancel" },
       {
-        text: "🧠 Analyze Route",
+        text: "🧠 Original AHP",
         onPress: () => getAHPRoute(poi),
+      },
+      {
+        text: "🚶‍♂️ Sidewalk Analysis",
+        onPress: () => getSidewalkRoute(poi),
       },
     ]);
   };
@@ -339,6 +479,19 @@ export default function NavigationScreen() {
     return relevantTypes[profile.type]?.includes(obstacle.type) || false;
   };
 
+  // NEW: Quick sidewalk test function
+  const createSidewalkTestData = async () => {
+    try {
+      await sidewalkRouteAnalysisService.createSidewalkTestData();
+      Alert.alert(
+        "🎯 Test Data Created!",
+        "Sidewalk test obstacles created on different sides of C. Raymundo Avenue!\n\nNow search for 'City Hall' and try the Sidewalk Analysis option."
+      );
+    } catch (error: any) {
+      Alert.alert("Error", `Failed to create test data: ${error.message}`);
+    }
+  };
+
   if (loading) {
     return (
       <View className="flex-1 justify-center items-center bg-white">
@@ -374,6 +527,16 @@ export default function NavigationScreen() {
           )}
         </View>
       </View>
+
+      {/* NEW: Sidewalk Test Button */}
+      <TouchableOpacity
+        onPress={createSidewalkTestData}
+        className="absolute top-32 left-4 bg-yellow-500 px-3 py-2 rounded-lg shadow-lg z-10"
+      >
+        <Text className="text-white font-bold text-xs">
+          Create Sidewalk Test
+        </Text>
+      </TouchableOpacity>
 
       {/* Obstacle Info Button */}
       <TouchableOpacity
@@ -490,7 +653,7 @@ export default function NavigationScreen() {
             key={poi.id}
             coordinate={{ latitude: poi.lat, longitude: poi.lng }}
             title={poi.name}
-            description="Tap for accessible route"
+            description="Tap for route analysis"
             onPress={() => handlePOIPress(poi)}
             pinColor={
               poi.type === "hospital"
@@ -502,7 +665,7 @@ export default function NavigationScreen() {
           />
         ))}
 
-        {/* AHP Route Display */}
+        {/* Route Display (works with both analysis types) */}
         {routeAnalysis && location && selectedDestination && (
           <MapViewDirections
             origin={{
@@ -542,7 +705,9 @@ export default function NavigationScreen() {
         <View className="absolute bottom-16 left-4 right-4 bg-white rounded-xl p-4 shadow-lg z-10">
           <View className="flex-row items-center justify-between mb-2">
             <Text className="text-lg font-bold text-gray-900">
-              🧠 AHP Route Active
+              {selectedRouteType === "fastest"
+                ? "📍 Standard Route"
+                : "🌟 Optimized Route"}
             </Text>
             <TouchableOpacity
               onPress={() => setRouteAnalysis(null)}
@@ -555,21 +720,29 @@ export default function NavigationScreen() {
           <View className="flex-row items-center justify-between">
             <View className="flex-1">
               <Text className="text-sm text-gray-600">
-                Route:{" "}
-                {selectedRouteType === "fastest"
-                  ? "Fastest"
-                  : "Most Accessible"}
-              </Text>
-              <Text className="text-xs text-gray-500">
                 Grade{" "}
                 {selectedRouteType === "fastest"
                   ? routeAnalysis.fastestRoute.accessibilityScore.grade
                   : routeAnalysis.accessibleRoute.accessibilityScore.grade}{" "}
-                •
+                •{" "}
                 {selectedRouteType === "fastest"
                   ? routeAnalysis.fastestRoute.obstacleCount
                   : routeAnalysis.accessibleRoute.obstacleCount}{" "}
                 obstacles
+              </Text>
+              <Text className="text-xs text-gray-500">
+                {Math.round(
+                  (selectedRouteType === "fastest"
+                    ? routeAnalysis.fastestRoute.googleRoute.duration
+                    : routeAnalysis.accessibleRoute.googleRoute.duration) / 60
+                )}
+                min •
+                {(
+                  (selectedRouteType === "fastest"
+                    ? routeAnalysis.fastestRoute.googleRoute.distance
+                    : routeAnalysis.accessibleRoute.googleRoute.distance) / 1000
+                ).toFixed(1)}
+                km
               </Text>
             </View>
 
@@ -595,7 +768,7 @@ export default function NavigationScreen() {
           <View className="flex-row items-center">
             <ActivityIndicator size="small" color="white" />
             <Text className="text-white font-semibold ml-2">
-              Analyzing route with AHP algorithm...
+              Analyzing route with advanced algorithms...
             </Text>
           </View>
         </View>
