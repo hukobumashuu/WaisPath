@@ -1,5 +1,5 @@
 // src/screens/NavigationScreen.tsx
-// FIXED: Working map + sidewalk integration
+// FIXED: Working map + sidewalk integration with street-following routes
 // Keep all existing map code, only update the route analysis service
 
 import React, { useState, useRef } from "react";
@@ -14,7 +14,12 @@ import {
   Modal,
   ScrollView,
 } from "react-native";
-import MapView, { Marker, PROVIDER_GOOGLE, Callout } from "react-native-maps";
+import MapView, {
+  Marker,
+  PROVIDER_GOOGLE,
+  Callout,
+  Polyline,
+} from "react-native-maps";
 import MapViewDirections from "react-native-maps-directions";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocation } from "../hooks/useLocation";
@@ -49,6 +54,13 @@ export default function NavigationScreen() {
     useState<AccessibilityObstacle | null>(null);
   const [showObstacleModal, setShowObstacleModal] = useState(false);
   const mapRef = useRef<MapView>(null);
+
+  // NEW: State for actual route coordinates
+  const [routeCoordinates, setRouteCoordinates] = useState<UserLocation[]>([]);
+  const [sidewalkAnalysis, setSidewalkAnalysis] = useState<any>(null);
+  const [analysisMode, setAnalysisMode] = useState<"original" | "sidewalk">(
+    "sidewalk"
+  );
 
   // Sample POIs in Pasig (keep your existing ones)
   const pasigPOIs = [
@@ -165,18 +177,8 @@ export default function NavigationScreen() {
         );
       }
 
-      Alert.alert(
-        "Destination Found!",
-        `Found ${firstResult.name}. Choose your route analysis method:`,
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "🧠 Original AHP", onPress: () => getAHPRoute(firstResult) },
-          {
-            text: "🚶‍♂️ Sidewalk Analysis",
-            onPress: () => getSidewalkRoute(firstResult),
-          },
-        ]
-      );
+      // NEW: Auto-trigger sidewalk analysis (the revolutionary feature)
+      getSidewalkRoute(firstResult);
     } else {
       Alert.alert(
         "No Results",
@@ -202,6 +204,7 @@ export default function NavigationScreen() {
     }
 
     setIsAnalyzing(true);
+    setAnalysisMode("original");
 
     try {
       console.log("🚀 Getting original AHP route analysis...");
@@ -214,6 +217,7 @@ export default function NavigationScreen() {
       );
 
       setRouteAnalysis(analysis);
+      setSidewalkAnalysis(null); // Clear sidewalk analysis
       setSelectedDestination(destination);
 
       // Show route comparison
@@ -263,6 +267,7 @@ export default function NavigationScreen() {
     }
 
     setIsAnalyzing(true);
+    setAnalysisMode("sidewalk");
 
     try {
       console.log("🚶‍♂️ Getting revolutionary sidewalk route analysis...");
@@ -274,100 +279,197 @@ export default function NavigationScreen() {
         profile
       );
 
-      // Convert sidewalk analysis to display in existing UI
-      const convertedAnalysis: DualRouteComparison = {
-        fastestRoute: {
-          googleRoute: {
-            id: "standard_route",
-            polyline: "",
-            distance: analysis.standardRoute.totalDistance,
-            duration: analysis.standardRoute.totalTime,
-            steps: [],
-            bounds: { northeast: destination, southwest: location },
-            warnings: [],
-            summary: "Standard Route",
-          },
-          accessibilityScore: analysis.standardRoute.overallScore,
-          obstacleCount: analysis.standardRoute.segments[0].obstacles.length,
-          userWarnings: [],
-          recommendation: "acceptable",
-        },
-        accessibleRoute: {
-          googleRoute: {
-            id: "optimized_route",
-            polyline: "",
-            distance: analysis.optimizedRoute.totalDistance,
-            duration: analysis.optimizedRoute.totalTime,
-            steps: [],
-            bounds: { northeast: destination, southwest: location },
-            warnings: [],
-            summary: "Optimized Sidewalk Route",
-          },
-          accessibilityScore: analysis.optimizedRoute.overallScore,
-          obstacleCount: analysis.optimizedRoute.segments[0].obstacles.length,
-          userWarnings: [],
-          recommendation: "excellent",
-        },
-        routeComparison: {
-          timeDifference: analysis.comparison.timeDifference,
-          distanceDifference:
-            analysis.optimizedRoute.totalDistance -
-            analysis.standardRoute.totalDistance,
-          accessibilityImprovement:
-            analysis.comparison.accessibilityImprovement,
-          recommendation: analysis.comparison.recommendation,
-        },
-      };
-
-      setRouteAnalysis(convertedAnalysis);
+      setSidewalkAnalysis(analysis);
+      setRouteAnalysis(null); // Clear original analysis
       setSelectedDestination(destination);
 
-      // Show enhanced sidewalk route comparison
+      // Show sidewalk comparison
       Alert.alert(
-        `🚶‍♂️ Revolutionary Sidewalk Routes to ${poi.name}`,
-        `📍 Standard Route: ${Math.round(
-          analysis.standardRoute.totalTime / 60
-        )}min (Grade ${analysis.standardRoute.overallScore.grade}) - ${
-          analysis.standardRoute.segments[0].obstacles.length
-        } obstacles\n\n` +
-          `🌟 Optimized Sidewalk Route: ${Math.round(
-            analysis.optimizedRoute.totalTime / 60
-          )}min (Grade ${analysis.optimizedRoute.overallScore.grade}) - ${
-            analysis.optimizedRoute.segments[0].obstacles.length
-          } obstacles\n` +
-          `${
-            analysis.optimizedRoute.crossingPoints.length > 0
-              ? `• ${analysis.optimizedRoute.crossingPoints.length} strategic crossings\n`
-              : ""
-          }` +
-          `${
-            analysis.comparison.accessibilityImprovement > 0
-              ? `• +${analysis.comparison.accessibilityImprovement.toFixed(
-                  0
-                )} accessibility points\n`
-              : ""
-          }\n` +
-          `💡 ${analysis.comparison.recommendation}`,
+        `🌟 Sidewalk-Aware Routes to ${poi.name}`,
+        `📍 Standard Route: ${analysis.standardRoute.segments[0].obstacles.length} obstacles (Grade ${analysis.standardRoute.overallScore.grade})\n` +
+          `🌟 Optimized Route: ${analysis.optimizedRoute.segments[0].obstacles.length} obstacles (Grade ${analysis.optimizedRoute.overallScore.grade})\n\n` +
+          `✅ ${analysis.comparison.obstacleReduction} obstacles avoided\n` +
+          `⏱️ ${Math.round(analysis.comparison.timeDifference)}s extra time\n` +
+          `🚦 ${analysis.comparison.crossingCount} strategic crossing(s)\n\n` +
+          `${analysis.comparison.recommendation}`,
         [
           {
             text: "Use Standard",
-            onPress: () => setSelectedRouteType("fastest"), // Map to existing state
+            onPress: () => setSelectedRouteType("fastest"),
           },
           {
             text: "Use Optimized",
-            onPress: () => setSelectedRouteType("accessible"), // Map to existing state
+            onPress: () => setSelectedRouteType("accessible"),
           },
         ]
       );
     } catch (error: any) {
       console.error("❌ Sidewalk route analysis failed:", error);
-      Alert.alert(
-        "Sidewalk Route Error",
-        `Could not analyze sidewalk route: ${error.message}`
-      );
+      Alert.alert("Route Error", `Could not analyze route: ${error.message}`);
     } finally {
       setIsAnalyzing(false);
     }
+  };
+
+  // NEW: Helper functions for street-following sidewalk offsets
+  const toRadians = (degrees: number): number => degrees * (Math.PI / 180);
+  const toDegrees = (radians: number): number => radians * (180 / Math.PI);
+
+  const calculateBearing = (
+    point1: UserLocation,
+    point2: UserLocation
+  ): number => {
+    const lat1 = toRadians(point1.latitude);
+    const lat2 = toRadians(point2.latitude);
+    const deltaLng = toRadians(point2.longitude - point1.longitude);
+
+    const y = Math.sin(deltaLng) * Math.cos(lat2);
+    const x =
+      Math.cos(lat1) * Math.sin(lat2) -
+      Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLng);
+
+    const bearing = Math.atan2(y, x);
+    return (toDegrees(bearing) + 360) % 360;
+  };
+
+  const calculatePerpendicularOffset = (
+    point: UserLocation,
+    bearing: number,
+    distance: number,
+    side: "left" | "right"
+  ): UserLocation => {
+    const offsetBearing =
+      side === "left" ? (bearing + 90) % 360 : (bearing - 90 + 360) % 360;
+    const bearingRad = toRadians(offsetBearing);
+
+    const deltaLat = distance * Math.cos(bearingRad);
+    const deltaLng = distance * Math.sin(bearingRad);
+
+    return {
+      latitude: point.latitude + deltaLat,
+      longitude: point.longitude + deltaLng,
+    };
+  };
+
+  const createSidewalkOffsetsFromRoute = (
+    routeCoords: UserLocation[],
+    offsetDistance: number = 0.00008
+  ) => {
+    if (routeCoords.length < 2) {
+      // Fallback to straight line if no route data
+      return {
+        leftSidewalk: createLeftSidewalkOffset(location!, selectedDestination!),
+        rightSidewalk: createRightSidewalkOffset(
+          location!,
+          selectedDestination!
+        ),
+      };
+    }
+
+    const leftSidewalk: UserLocation[] = [];
+    const rightSidewalk: UserLocation[] = [];
+
+    for (let i = 0; i < routeCoords.length - 1; i++) {
+      const current = routeCoords[i];
+      const next = routeCoords[i + 1];
+
+      // Calculate bearing between consecutive points
+      const bearing = calculateBearing(current, next);
+
+      // Calculate perpendicular offset
+      const leftOffset = calculatePerpendicularOffset(
+        current,
+        bearing,
+        offsetDistance,
+        "left"
+      );
+      const rightOffset = calculatePerpendicularOffset(
+        current,
+        bearing,
+        offsetDistance,
+        "right"
+      );
+
+      leftSidewalk.push(leftOffset);
+      rightSidewalk.push(rightOffset);
+    }
+
+    // Add final point
+    if (routeCoords.length > 1) {
+      const lastIndex = routeCoords.length - 1;
+      const secondLast = routeCoords[lastIndex - 1];
+      const last = routeCoords[lastIndex];
+      const bearing = calculateBearing(secondLast, last);
+
+      leftSidewalk.push(
+        calculatePerpendicularOffset(last, bearing, offsetDistance, "left")
+      );
+      rightSidewalk.push(
+        calculatePerpendicularOffset(last, bearing, offsetDistance, "right")
+      );
+    }
+
+    return { leftSidewalk, rightSidewalk };
+  };
+
+  // FALLBACK: Simple straight-line offsets (for when route coordinates aren't available)
+  const createLeftSidewalkOffset = (
+    origin: UserLocation,
+    destination: UserLocation
+  ) => {
+    const offset = 0.0001; // ~11 meters
+    const deltaLat = destination.latitude - origin.latitude;
+    const deltaLng = destination.longitude - origin.longitude;
+
+    // Perpendicular offset for left sidewalk
+    const offsetLat = deltaLng * offset;
+    const offsetLng = -deltaLat * offset;
+
+    return [
+      {
+        latitude: origin.latitude + offsetLat,
+        longitude: origin.longitude + offsetLng,
+      },
+      {
+        latitude: destination.latitude + offsetLat,
+        longitude: destination.longitude + offsetLng,
+      },
+    ];
+  };
+
+  const createRightSidewalkOffset = (
+    origin: UserLocation,
+    destination: UserLocation
+  ) => {
+    const offset = 0.0001; // ~11 meters
+    const deltaLat = destination.latitude - origin.latitude;
+    const deltaLng = destination.longitude - origin.longitude;
+
+    // Perpendicular offset for right sidewalk
+    const offsetLat = -deltaLng * offset;
+    const offsetLng = deltaLat * offset;
+
+    return [
+      {
+        latitude: origin.latitude + offsetLat,
+        longitude: origin.longitude + offsetLng,
+      },
+      {
+        latitude: destination.latitude + offsetLat,
+        longitude: destination.longitude + offsetLng,
+      },
+    ];
+  };
+
+  const getCrossingPoint = (
+    origin: UserLocation,
+    destination: UserLocation
+  ) => {
+    // Midpoint for crossing marker
+    return {
+      latitude: (origin.latitude + destination.latitude) / 2,
+      longitude: (origin.longitude + destination.longitude) / 2,
+    };
   };
 
   const handlePOIPress = async (poi: any) => {
@@ -665,100 +767,277 @@ export default function NavigationScreen() {
           />
         ))}
 
-        {/* Route Display (works with both analysis types) */}
-        {routeAnalysis && location && selectedDestination && (
-          <MapViewDirections
-            origin={{
-              latitude: location.latitude,
-              longitude: location.longitude,
-            }}
-            destination={{
-              latitude: selectedDestination.latitude,
-              longitude: selectedDestination.longitude,
-            }}
-            apikey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || ""}
-            strokeWidth={6}
-            strokeColor={
-              selectedRouteType === "fastest" ? "#3B82F6" : "#10B981"
-            }
-            optimizeWaypoints={false}
-            mode="WALKING"
-            onStart={(params) => {
-              console.log(
-                `Started routing between "${params.origin}" and "${params.destination}"`
-              );
-            }}
-            onReady={(result) => {
-              console.log(
-                `Route ready: ${result.distance} km, ${result.duration} min`
-              );
-            }}
-            onError={(errorMessage) => {
-              console.error("MapViewDirections error:", errorMessage);
-            }}
-          />
+        {/* FIXED: Route Display with street-following sidewalks */}
+        {location && selectedDestination && (
+          <>
+            {/* Base Google route - capture coordinates */}
+            <MapViewDirections
+              origin={{
+                latitude: location.latitude,
+                longitude: location.longitude,
+              }}
+              destination={{
+                latitude: selectedDestination.latitude,
+                longitude: selectedDestination.longitude,
+              }}
+              apikey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || ""}
+              strokeWidth={2}
+              strokeColor="#9CA3AF"
+              mode="WALKING"
+              onStart={(params) => {
+                console.log(
+                  `Started routing between "${params.origin}" and "${params.destination}"`
+                );
+              }}
+              onReady={(result) => {
+                console.log(
+                  `Route ready: ${result.distance} km, ${result.duration} min`
+                );
+
+                // CAPTURE the actual route coordinates
+                if (result.coordinates && result.coordinates.length > 0) {
+                  setRouteCoordinates(result.coordinates);
+                  console.log(
+                    `📍 Captured ${result.coordinates.length} route points`
+                  );
+                } else {
+                  console.warn(
+                    "⚠️ No route coordinates available, using fallback"
+                  );
+                  setRouteCoordinates([]);
+                }
+              }}
+              onError={(errorMessage) => {
+                console.error("MapViewDirections error:", errorMessage);
+                setRouteCoordinates([]); // Clear coordinates on error
+              }}
+            />
+
+            {/* NEW: Sidewalk Visualization using actual route path */}
+            {sidewalkAnalysis &&
+              analysisMode === "sidewalk" &&
+              (() => {
+                const sidewalks =
+                  createSidewalkOffsetsFromRoute(routeCoordinates);
+
+                return (
+                  <>
+                    {/* Left Sidewalk (Standard Route) */}
+                    <Polyline
+                      coordinates={sidewalks.leftSidewalk}
+                      strokeColor={
+                        selectedRouteType === "fastest" ? "#3B82F6" : "#60A5FA"
+                      }
+                      strokeWidth={selectedRouteType === "fastest" ? 6 : 4}
+                      lineDashPattern={
+                        selectedRouteType === "fastest" ? undefined : [10, 5]
+                      }
+                    />
+
+                    {/* Right Sidewalk (Optimized Route) */}
+                    <Polyline
+                      coordinates={sidewalks.rightSidewalk}
+                      strokeColor={
+                        selectedRouteType === "accessible"
+                          ? "#10B981"
+                          : "#34D399"
+                      }
+                      strokeWidth={selectedRouteType === "accessible" ? 6 : 4}
+                      lineDashPattern={
+                        selectedRouteType === "accessible" ? undefined : [10, 5]
+                      }
+                    />
+
+                    {/* Strategic Crossing Marker */}
+                    {selectedRouteType === "accessible" &&
+                      sidewalkAnalysis.comparison.crossingCount > 0 && (
+                        <Marker
+                          coordinate={getCrossingPoint(
+                            location,
+                            selectedDestination
+                          )}
+                        >
+                          <View className="bg-green-500 w-10 h-10 rounded-full items-center justify-center border-3 border-white shadow-lg">
+                            <Ionicons
+                              name="swap-horizontal"
+                              size={20}
+                              color="white"
+                            />
+                          </View>
+                        </Marker>
+                      )}
+                  </>
+                );
+              })()}
+
+            {/* Original AHP Route Display (fallback) */}
+            {routeAnalysis && analysisMode === "original" && (
+              <MapViewDirections
+                origin={{
+                  latitude: location.latitude,
+                  longitude: location.longitude,
+                }}
+                destination={{
+                  latitude: selectedDestination.latitude,
+                  longitude: selectedDestination.longitude,
+                }}
+                apikey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || ""}
+                strokeWidth={6}
+                strokeColor={
+                  selectedRouteType === "fastest" ? "#3B82F6" : "#10B981"
+                }
+                optimizeWaypoints={false}
+                mode="WALKING"
+              />
+            )}
+          </>
         )}
       </MapView>
 
       {/* Route Status Display */}
-      {routeAnalysis && (
+      {(routeAnalysis || sidewalkAnalysis) && (
         <View className="absolute bottom-16 left-4 right-4 bg-white rounded-xl p-4 shadow-lg z-10">
           <View className="flex-row items-center justify-between mb-2">
             <Text className="text-lg font-bold text-gray-900">
-              {selectedRouteType === "fastest"
-                ? "📍 Standard Route"
-                : "🌟 Optimized Route"}
+              {analysisMode === "sidewalk"
+                ? selectedRouteType === "fastest"
+                  ? "📍 Standard Sidewalk"
+                  : "🌟 Optimized Sidewalk"
+                : selectedRouteType === "fastest"
+                ? "⚡ Fastest Route"
+                : "♿ Accessible Route"}
             </Text>
             <TouchableOpacity
-              onPress={() => setRouteAnalysis(null)}
+              onPress={() => {
+                setRouteAnalysis(null);
+                setSidewalkAnalysis(null);
+              }}
               className="w-8 h-8 items-center justify-center"
             >
               <Ionicons name="close" size={20} color="#6B7280" />
             </TouchableOpacity>
           </View>
 
-          <View className="flex-row items-center justify-between">
-            <View className="flex-1">
-              <Text className="text-sm text-gray-600">
-                Grade{" "}
-                {selectedRouteType === "fastest"
-                  ? routeAnalysis.fastestRoute.accessibilityScore.grade
-                  : routeAnalysis.accessibleRoute.accessibilityScore.grade}{" "}
-                •{" "}
-                {selectedRouteType === "fastest"
-                  ? routeAnalysis.fastestRoute.obstacleCount
-                  : routeAnalysis.accessibleRoute.obstacleCount}{" "}
-                obstacles
-              </Text>
-              <Text className="text-xs text-gray-500">
-                {Math.round(
-                  (selectedRouteType === "fastest"
-                    ? routeAnalysis.fastestRoute.googleRoute.duration
-                    : routeAnalysis.accessibleRoute.googleRoute.duration) / 60
-                )}
-                min •
-                {(
-                  (selectedRouteType === "fastest"
-                    ? routeAnalysis.fastestRoute.googleRoute.distance
-                    : routeAnalysis.accessibleRoute.googleRoute.distance) / 1000
-                ).toFixed(1)}
-                km
-              </Text>
-            </View>
+          {/* Sidewalk Analysis Display */}
+          {sidewalkAnalysis && analysisMode === "sidewalk" && (
+            <View>
+              <View className="flex-row items-center justify-between mb-2">
+                <View className="flex-1">
+                  <Text className="text-sm text-gray-600">
+                    Grade{" "}
+                    {selectedRouteType === "fastest"
+                      ? sidewalkAnalysis.standardRoute.overallScore.grade
+                      : sidewalkAnalysis.optimizedRoute.overallScore.grade}{" "}
+                    •{" "}
+                    {selectedRouteType === "fastest"
+                      ? sidewalkAnalysis.standardRoute.segments[0].obstacles
+                          .length
+                      : sidewalkAnalysis.optimizedRoute.segments[0].obstacles
+                          .length}{" "}
+                    obstacles
+                    {selectedRouteType === "accessible" &&
+                      sidewalkAnalysis.comparison.crossingCount > 0 &&
+                      ` • ${sidewalkAnalysis.comparison.crossingCount} crossing(s)`}
+                  </Text>
+                  <Text className="text-xs text-gray-500">
+                    {Math.round(
+                      (selectedRouteType === "fastest"
+                        ? sidewalkAnalysis.standardRoute.totalTime
+                        : sidewalkAnalysis.optimizedRoute.totalTime) / 60
+                    )}
+                    min •
+                    {(
+                      (selectedRouteType === "fastest"
+                        ? sidewalkAnalysis.standardRoute.totalDistance
+                        : sidewalkAnalysis.optimizedRoute.totalDistance) / 1000
+                    ).toFixed(1)}
+                    km
+                  </Text>
+                </View>
 
-            <TouchableOpacity
-              onPress={() =>
-                setSelectedRouteType(
-                  selectedRouteType === "fastest" ? "accessible" : "fastest"
-                )
-              }
-              className="bg-blue-500 px-3 py-2 rounded-lg"
-            >
-              <Text className="text-white text-sm font-semibold">
-                Switch Route
-              </Text>
-            </TouchableOpacity>
-          </View>
+                <TouchableOpacity
+                  onPress={() =>
+                    setSelectedRouteType(
+                      selectedRouteType === "fastest" ? "accessible" : "fastest"
+                    )
+                  }
+                  className={`px-3 py-2 rounded-lg ${
+                    selectedRouteType === "accessible"
+                      ? "bg-green-500"
+                      : "bg-blue-500"
+                  }`}
+                >
+                  <Text className="text-white text-sm font-semibold">
+                    {selectedRouteType === "fastest"
+                      ? "Try Optimized"
+                      : "Try Standard"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* NEW: Sidewalk Intelligence Summary */}
+              {selectedRouteType === "accessible" &&
+                sidewalkAnalysis.comparison.obstacleReduction > 0 && (
+                  <View className="bg-green-50 p-3 rounded-lg mt-2">
+                    <Text className="text-green-800 text-sm font-semibold">
+                      🌟 Sidewalk Intelligence Active
+                    </Text>
+                    <Text className="text-green-700 text-xs mt-1">
+                      Avoids {sidewalkAnalysis.comparison.obstacleReduction}{" "}
+                      obstacles through strategic crossing
+                    </Text>
+                  </View>
+                )}
+            </View>
+          )}
+
+          {/* Original AHP Analysis Display (keep existing) */}
+          {routeAnalysis && analysisMode === "original" && (
+            <View className="flex-row items-center justify-between">
+              <View className="flex-1">
+                <Text className="text-sm text-gray-600">
+                  Grade{" "}
+                  {selectedRouteType === "fastest"
+                    ? routeAnalysis.fastestRoute.accessibilityScore.grade
+                    : routeAnalysis.accessibleRoute.accessibilityScore
+                        .grade}{" "}
+                  •{" "}
+                  {selectedRouteType === "fastest"
+                    ? routeAnalysis.fastestRoute.obstacleCount
+                    : routeAnalysis.accessibleRoute.obstacleCount}{" "}
+                  obstacles
+                </Text>
+                <Text className="text-xs text-gray-500">
+                  {Math.round(
+                    (selectedRouteType === "fastest"
+                      ? routeAnalysis.fastestRoute.googleRoute.duration
+                      : routeAnalysis.accessibleRoute.googleRoute.duration) / 60
+                  )}
+                  min •
+                  {(
+                    (selectedRouteType === "fastest"
+                      ? routeAnalysis.fastestRoute.googleRoute.distance
+                      : routeAnalysis.accessibleRoute.googleRoute.distance) /
+                    1000
+                  ).toFixed(1)}
+                  km
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                onPress={() =>
+                  setSelectedRouteType(
+                    selectedRouteType === "fastest" ? "accessible" : "fastest"
+                  )
+                }
+                className="bg-blue-500 px-3 py-2 rounded-lg"
+              >
+                <Text className="text-white text-sm font-semibold">
+                  Switch Route
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       )}
 
@@ -768,7 +1047,9 @@ export default function NavigationScreen() {
           <View className="flex-row items-center">
             <ActivityIndicator size="small" color="white" />
             <Text className="text-white font-semibold ml-2">
-              Analyzing route with advanced algorithms...
+              {analysisMode === "sidewalk"
+                ? "Analyzing sidewalk routes with revolutionary intelligence..."
+                : "Analyzing route with advanced algorithms..."}
             </Text>
           </View>
         </View>
