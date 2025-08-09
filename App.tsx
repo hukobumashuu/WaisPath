@@ -7,6 +7,7 @@ import { createStackNavigator } from "@react-navigation/stack";
 import { Ionicons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
 import { View, Text } from "react-native";
+import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 
 // WAISPATH Screens
 import HomeScreen from "./src/screens/HomeScreen";
@@ -36,9 +37,12 @@ const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
 // Main tab navigator for authenticated users
-const MainTabNavigator = () => (
-  <Tab.Navigator
-    screenOptions={({ route }) => ({
+const MainTabNavigator = () => {
+  const insets = useSafeAreaInsets();
+  
+  return (
+    <Tab.Navigator
+      screenOptions={({ route }) => ({
       tabBarIcon: ({ focused, color, size }) => {
         let iconName: keyof typeof Ionicons.glyphMap;
 
@@ -67,9 +71,13 @@ const MainTabNavigator = () => (
         backgroundColor: "white",
         borderTopColor: "#E5E7EB",
         borderTopWidth: 1,
-        height: 60,
-        paddingBottom: 8,
+        height: 60 + insets.bottom,
+        paddingBottom: Math.max(insets.bottom, 8),
         paddingTop: 8,
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
       },
       tabBarLabelStyle: {
         fontSize: 12,
@@ -91,7 +99,6 @@ const MainTabNavigator = () => (
         ),
       }}
     />
-    {/* NEW: Add SidewalkTestScreen */}
     <Tab.Screen
       name="Sidewalk Test"
       component={SidewalkTestScreen}
@@ -103,7 +110,8 @@ const MainTabNavigator = () => (
       }}
     />
   </Tab.Navigator>
-);
+  );
+};
 
 // App entry point with profile-aware navigation
 export default function App() {
@@ -129,30 +137,34 @@ export default function App() {
   // Show loading screen while initializing
   if (!appReady || isLoading) {
     return (
-      <View className="flex-1 justify-center items-center bg-accessible-blue">
-        <Ionicons name="navigate-circle" size={80} color="white" />
-        <Text className="text-2xl font-bold text-white mt-4">WAISPATH</Text>
-        <Text className="text-base text-blue-100 mt-2">
-          Intelligent Accessibility Navigation
-        </Text>
-        <Text className="text-sm text-blue-200 mt-8">Loading...</Text>
-        <StatusBar style="light" />
-      </View>
+      <SafeAreaProvider>
+        <View className="flex-1 justify-center items-center bg-accessible-blue">
+          <Ionicons name="navigate-circle" size={80} color="white" />
+          <Text className="text-2xl font-bold text-white mt-4">WAISPATH</Text>
+          <Text className="text-base text-blue-100 mt-2">
+            Intelligent Accessibility Navigation
+          </Text>
+          <Text className="text-sm text-blue-200 mt-8">Loading...</Text>
+          <StatusBar style="light" />
+        </View>
+      </SafeAreaProvider>
     );
   }
 
   return (
-    <NavigationContainer>
-      <StatusBar style="auto" />
-      {isFirstTime ? (
-        // First-time users see onboarding
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="Onboarding" component={UserProfileScreen} />
-        </Stack.Navigator>
-      ) : (
-        // Existing users go directly to main app
-        <MainTabNavigator />
-      )}
-    </NavigationContainer>
+    <SafeAreaProvider>
+      <NavigationContainer>
+        <StatusBar style="auto" />
+        {isFirstTime ? (
+          // First-time users see onboarding
+          <Stack.Navigator screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="Onboarding" component={UserProfileScreen} />
+          </Stack.Navigator>
+        ) : (
+          // Existing users go directly to main app
+          <MainTabNavigator />
+        )}
+      </NavigationContainer>
+    </SafeAreaProvider>
   );
 }

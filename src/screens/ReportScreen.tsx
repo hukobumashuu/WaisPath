@@ -15,6 +15,7 @@ import {
   Vibration,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   firebaseServices,
   checkFirebaseHealth,
@@ -141,6 +142,7 @@ const TIME_PATTERNS = [
 const ReportScreen: React.FC = () => {
   const { location, getCurrentLocation } = useLocation();
   const { profile } = useUserProfile();
+  const insets = useSafeAreaInsets();
 
   // Camera and photo state
   const [showCamera, setShowCamera] = useState(false);
@@ -352,7 +354,10 @@ const ReportScreen: React.FC = () => {
 
   return (
     <SafeAreaView className="flex-1 bg-gray-50">
-      <ScrollView className="flex-1 p-4">
+      <ScrollView
+        className="flex-1 p-4"
+        contentContainerStyle={{ paddingBottom: insets.bottom + 60 + 16 }}
+      >
         {/* Header with Progress */}
         <View className="mb-6">
           <View className="flex-row justify-between items-center mb-2">
@@ -689,6 +694,8 @@ const ReportScreen: React.FC = () => {
                   : "bg-gray-400"
               }`}
               style={{ minHeight: 64 }} // PWD accessibility
+              accessibilityRole="button"
+              accessibilityLabel="Submit obstacle report"
             >
               {isSubmitting ? (
                 <Ionicons name="hourglass" size={24} color="white" />

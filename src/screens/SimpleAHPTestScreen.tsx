@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useUserProfile } from "../stores/userProfileStore";
 import { useLocation } from "../hooks/useLocation";
 import { firebaseServices } from "../services/firebase";
@@ -21,6 +22,7 @@ import { googleMapsService } from "../services/googleMapsService";
 import { enhancedRouteAnalysisService } from "../services/enhancedRouteAnalysisService";
 
 const SimpleAHPTestScreen = () => {
+  const insets = useSafeAreaInsets();
   const [obstacles, setObstacles] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [testResults, setTestResults] = useState<any[]>([]);
@@ -649,7 +651,10 @@ const SimpleAHPTestScreen = () => {
 
   return (
     <SafeAreaView className="flex-1 bg-gray-50">
-      <ScrollView className="flex-1 p-4">
+      <ScrollView 
+        className="flex-1 p-4"
+        contentContainerStyle={{ paddingBottom: insets.bottom + 60 + 16 }}
+      >
         <View className="mb-6">
           <Text className="text-3xl font-bold text-gray-900 mb-2">
             AHP Algorithm Test

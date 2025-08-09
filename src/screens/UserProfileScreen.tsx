@@ -2,6 +2,7 @@
 import React, { useState } from "react";
 import { View, Text, TouchableOpacity, ScrollView, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   useUserProfile,
   createProfileWithDefaults,
@@ -18,6 +19,7 @@ export default function UserProfileScreen({
   onComplete,
 }: ProfileSetupProps) {
   const { setProfile, completeOnboarding } = useUserProfile();
+  const insets = useSafeAreaInsets();
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedDevice, setSelectedDevice] = useState<
     UserMobilityProfile["type"] | null
@@ -389,6 +391,9 @@ export default function UserProfileScreen({
       <TouchableOpacity
         className="bg-accessible-green p-4 rounded-xl mt-6"
         onPress={handleComplete}
+        style={{ minHeight: 48 }}
+        accessibilityRole="button"
+        accessibilityLabel="Complete profile setup"
       >
         <Text className="text-center text-white font-semibold text-lg">
           Complete Setup
@@ -399,7 +404,13 @@ export default function UserProfileScreen({
 
   return (
     <View className="flex-1 bg-gray-50">
-      <View className="flex-1 px-6 pt-12">
+      <View 
+        className="flex-1 px-6" 
+        style={{ 
+          paddingTop: Math.max(insets.top, 12) + 12,
+          paddingBottom: Math.max(insets.bottom, 12) + 12
+        }}
+      >
         {currentStep === 1 ? renderStep1() : renderStep2()}
       </View>
     </View>

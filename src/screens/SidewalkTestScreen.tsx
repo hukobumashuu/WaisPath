@@ -12,11 +12,13 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useUserProfile } from "../stores/userProfileStore";
 import { useLocation } from "../hooks/useLocation";
 import { sidewalkRouteAnalysisService } from "../services/sidewalkRouteAnalysisService";
 
 const SidewalkTestScreen = () => {
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(false);
   const [testResults, setTestResults] = useState<string[]>([]);
   const { profile } = useUserProfile();
@@ -179,7 +181,10 @@ const SidewalkTestScreen = () => {
   return (
     <SafeAreaView className="flex-1 bg-white">
       {/* Header */}
-      <View className="bg-accessible-blue px-6 py-4">
+      <View 
+        className="bg-accessible-blue px-6" 
+        style={{ paddingTop: Math.max(insets.top, 12) + 16, paddingBottom: 16 }}
+      >
         <Text className="text-2xl font-bold text-white">
           🚶‍♂️ Sidewalk Route Analysis Test
         </Text>
@@ -199,7 +204,10 @@ const SidewalkTestScreen = () => {
       </View>
 
       {/* Action Buttons */}
-      <View className="px-6 py-4 space-y-3">
+      <View 
+        className="px-6 py-4 space-y-3"
+        style={{ paddingBottom: insets.bottom + 60 + 16 }}
+      >
         <TouchableOpacity
           onPress={createSidewalkTestData}
           disabled={loading}

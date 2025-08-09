@@ -3,6 +3,7 @@ import React from "react";
 import { View, Text, TouchableOpacity, ScrollView } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useUserProfile } from "../stores/userProfileStore";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 interface HomeScreenProps {
   navigation: any;
@@ -10,6 +11,7 @@ interface HomeScreenProps {
 
 export default function HomeScreen({ navigation }: HomeScreenProps) {
   const { profile } = useUserProfile();
+  const insets = useSafeAreaInsets();
 
   // Get personalized greeting and insights based on user's mobility device
   const getPersonalizedContent = () => {
@@ -80,9 +82,18 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
   const personalizedContent = getPersonalizedContent();
 
   return (
-    <ScrollView className="flex-1 bg-white">
+    <ScrollView 
+      className="flex-1 bg-white" 
+      contentContainerStyle={{ paddingBottom: insets.bottom + 60 + 16 }}
+    >
       {/* Personalized Hero Section */}
-      <View className="bg-accessible-blue px-6 py-8 mb-6">
+      <View 
+        className="bg-accessible-blue px-6 mb-6" 
+        style={{ 
+          paddingTop: Math.max(insets.top, 12) + 20,
+          paddingBottom: 32
+        }}
+      >
         <View className="flex-row items-center mb-4">
           <Text className="text-4xl mr-3">{personalizedContent.icon}</Text>
           <View className="flex-1">

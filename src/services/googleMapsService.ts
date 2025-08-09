@@ -41,6 +41,7 @@ class GoogleMapsService {
 
   /**
    * Get multiple route alternatives between two points using fetch (React Native compatible)
+   * Enhanced to force different routes using waypoints when Google only returns one route
    */
   async getRoutes(
     start: UserLocation,
@@ -71,20 +72,20 @@ class GoogleMapsService {
 
       console.log("🌐 Making request to Google Directions API...");
 
-      // Use fetch instead of axios (React Native compatible)
-      const response = await fetch(url, {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-      });
+      // First attempt: Get routes with alternatives
+      let data = await this.fetchDirections(url);
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      // If Google only returns one route, force different routes using waypoints
+      if (alternatives && data.routes && data.routes.length === 1) {
+        console.log(
+          "📍 Google returned only 1 route, forcing alternatives with waypoints..."
+        );
+
+        const additionalRoutes = await this.forceAlternativeRoutes(start, end);
+        data.routes = [...data.routes, ...additionalRoutes];
+
+        console.log(`🔀 Enhanced to ${data.routes.length} total routes`);
       }
-
-      const data = await response.json();
 
       if (data.status !== "OK") {
         let errorMessage = `Google Directions API error: ${data.status}`;
@@ -177,6 +178,124 @@ class GoogleMapsService {
       warnings: googleRoute.warnings || [],
       summary: googleRoute.summary || "Route via local roads",
     };
+  }
+
+  /**
+   * Helper method to fetch directions from Google API
+   */
+  private async fetchDirections(url: string) {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    return await response.json();
+  }
+
+  /**
+   * Force alternative routes using strategic waypoints
+   */
+  private async forceAlternativeRoutes(
+    start: UserLocation,
+    end: UserLocation
+  ): Promise<any[]> {
+    const alternativeRoutes: any[] = [];
+
+    try {
+      // Calculate offset waypoints to force different paths
+      const waypoints = this.calculateStrategicWaypoints(start, end);
+
+      // Try each waypoint to get alternative routes
+      for (const waypoint of waypoints) {
+        try {
+          const waypointUrl = this.buildWaypointUrl(start, end, waypoint);
+          const waypointData = await this.fetchDirections(waypointUrl);
+
+          if (
+            waypointData.status === "OK" &&
+            waypointData.routes &&
+            waypointData.routes.length > 0
+          ) {
+            // Modify the route to indicate it's via waypoint
+            const route = waypointData.routes[0];
+            route.summary = route.summary + " (Alternative Path)";
+            route.via_waypoint = true;
+
+            alternativeRoutes.push(route);
+            console.log(
+              `✅ Created alternative route via waypoint: ${route.summary}`
+            );
+          }
+        } catch (error) {
+          console.log(`⚠️ Waypoint route failed, trying next waypoint...`);
+          continue;
+        }
+      }
+    } catch (error) {
+      console.log("⚠️ Could not create alternative routes:", error);
+    }
+
+    return alternativeRoutes;
+  }
+
+  /**
+   * Calculate strategic waypoints to create different routes
+   */
+  private calculateStrategicWaypoints(start: UserLocation, end: UserLocation) {
+    const midLat = (start.latitude + end.latitude) / 2;
+    const midLng = (start.longitude + end.longitude) / 2;
+
+    // Create offset distances for different waypoints (in degrees)
+    const offsetDistance = 0.003; // ~300 meters
+
+    return [
+      // North offset - for routes that go north then east/west
+      {
+        latitude: midLat + offsetDistance,
+        longitude: midLng,
+        description: "Northern Route",
+      },
+      // South offset - for routes that go south then east/west
+      {
+        latitude: midLat - offsetDistance,
+        longitude: midLng,
+        description: "Southern Route",
+      },
+      // East offset - for routes that go east then north/south
+      {
+        latitude: midLat,
+        longitude: midLng + offsetDistance,
+        description: "Eastern Route",
+      },
+    ];
+  }
+
+  /**
+   * Build URL with waypoint
+   */
+  private buildWaypointUrl(
+    start: UserLocation,
+    end: UserLocation,
+    waypoint: any
+  ): string {
+    const baseUrl = "https://maps.googleapis.com/maps/api/directions/json";
+    const params = new URLSearchParams({
+      origin: `${start.latitude},${start.longitude}`,
+      destination: `${end.latitude},${end.longitude}`,
+      waypoints: `${waypoint.latitude},${waypoint.longitude}`,
+      mode: "walking",
+      key: this.apiKey,
+      region: "PH",
+    });
+
+    return `${baseUrl}?${params.toString()}`;
   }
 
   /**
