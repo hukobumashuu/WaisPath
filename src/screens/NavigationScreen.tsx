@@ -33,7 +33,9 @@ import {
 import { sidewalkRouteAnalysisService } from "../services/sidewalkRouteAnalysisService";
 import { googleMapsService } from "../services/googleMapsService";
 import { firebaseServices } from "../services/firebase";
-import { UserLocation, AccessibilityObstacle, ObstacleType } from "../types";
+import { routeFeedbackService } from "../services/routeFeedbackService";
+import { UserLocation, AccessibilityObstacle, ObstacleType, RouteJourney } from "../types";
+import RouteFeedbackModal from "../components/RouteFeedbackModal";
 
 const decodePolyline = (encoded: string): UserLocation[] => {
   const points: UserLocation[] = [];
@@ -106,6 +108,12 @@ export default function NavigationScreen() {
 
   // Map loading state for low-end devices
   const [mapLoaded, setMapLoaded] = useState(false);
+
+  // Journey tracking and feedback state
+  const [activeJourney, setActiveJourney] = useState<RouteJourney | null>(null);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [completedJourney, setCompletedJourney] = useState<RouteJourney | null>(null);
+  const [isNavigating, setIsNavigating] = useState(false);
   const [mapError, setMapError] = useState(false);
   const [mapRetryCount, setMapRetryCount] = useState(0);
 
@@ -173,6 +181,110 @@ export default function NavigationScreen() {
       return () => clearTimeout(retryTimeout);
     }
   }, [mapRetryCount]);
+
+  // Initialize journey tracking system
+  React.useEffect(() => {
+    const initializeFeedbackSystem = async () => {
+      if (profile?.id) {
+        // Load any active journey on app startup
+        const existingJourney = await routeFeedbackService.loadActiveJourney(profile.id);
+        if (existingJourney) {
+          setActiveJourney(existingJourney);
+          setIsNavigating(true);
+        }
+      }
+
+      // Register callback for journey completion
+      const handleJourneyCompleted = (journey: RouteJourney) => {
+        setCompletedJourney(journey);
+        setActiveJourney(null);
+        setIsNavigating(false);
+        setShowFeedbackModal(true);
+      };
+
+      routeFeedbackService.onJourneyCompleted(handleJourneyCompleted);
+
+      // Return cleanup function
+      return () => {
+        routeFeedbackService.removeJourneyCompletedCallback(handleJourneyCompleted);
+      };
+    };
+
+    initializeFeedbackSystem();
+  }, [profile?.id]);
+
+  // Track user location for journey completion detection
+  React.useEffect(() => {
+    if (activeJourney && location && isNavigating) {
+      routeFeedbackService.updateLocation(location);
+    }
+  }, [activeJourney, location, isNavigating]);
+
+  // Start navigation and journey tracking
+  const startNavigation = async () => {
+    if (!routeAnalysis || !location || !selectedDestination || !profile) {
+      Alert.alert("Navigation Error", "Missing route information or location.");
+      return;
+    }
+
+    try {
+      const currentRoute = selectedRouteType === "fastest" 
+        ? routeAnalysis.fastestRoute 
+        : routeAnalysis.accessibleRoute;
+
+      const journeyId = await routeFeedbackService.startJourney(
+        profile.id,
+        currentRoute.googleRoute.id,
+        selectedRouteType,
+        location,
+        selectedDestination,
+        Math.round(currentRoute.googleRoute.duration / 60),
+        currentRoute.accessibilityScore
+      );
+
+      const journey = routeFeedbackService.getActiveJourney();
+      setActiveJourney(journey);
+      setIsNavigating(true);
+
+      Alert.alert(
+        "Navigation Started",
+        `Journey tracking started! We'll ask for feedback when you reach your destination.`,
+        [{ text: "OK" }]
+      );
+
+      console.log(`🎯 Navigation started for journey: ${journeyId}`);
+
+    } catch (error) {
+      console.error("Failed to start navigation:", error);
+      Alert.alert("Error", "Failed to start navigation tracking.");
+    }
+  };
+
+  // Stop navigation manually
+  const stopNavigation = async () => {
+    if (!activeJourney) return;
+
+    try {
+      const completed = await routeFeedbackService.completeJourney();
+      if (completed) {
+        // The journey completion callback will handle UI updates
+        console.log("🏁 Journey completed manually");
+      }
+    } catch (error) {
+      console.error("Failed to stop navigation:", error);
+    }
+  };
+
+  // Handle feedback submission completion
+  const handleFeedbackSubmitted = () => {
+    setShowFeedbackModal(false);
+    setCompletedJourney(null);
+    Alert.alert(
+      "Thank you!",
+      "Your feedback has been submitted and will help improve route recommendations.",
+      [{ text: "OK" }]
+    );
+  };
 
   // KEEP your existing functions
   const loadNearbyObstacles = async () => {
@@ -995,9 +1107,36 @@ export default function NavigationScreen() {
                             </Text>
                           </View>
                         )}
-                      <Text className="text-2xl font-bold text-blue-600">
-                        {routeAnalysis.fastestRoute.accessibilityScore.grade}
-                      </Text>
+                      <View className="flex-row items-center">
+                        <Text className="text-2xl font-bold text-blue-600">
+                          {routeAnalysis.fastestRoute.accessibilityScore.grade}
+                        </Text>
+                        {routeAnalysis.fastestRoute.accessibilityScore.confidence && (
+                          <View className="ml-2 flex-row items-center">
+                            <View
+                              className={`px-1.5 py-0.5 rounded-full ${
+                                routeAnalysis.fastestRoute.accessibilityScore.confidence.overall >= 80
+                                  ? "bg-green-100"
+                                  : routeAnalysis.fastestRoute.accessibilityScore.confidence.overall >= 60
+                                  ? "bg-yellow-100"
+                                  : "bg-red-100"
+                              }`}
+                            >
+                              <Text
+                                className={`text-xs font-bold ${
+                                  routeAnalysis.fastestRoute.accessibilityScore.confidence.overall >= 80
+                                    ? "text-green-800"
+                                    : routeAnalysis.fastestRoute.accessibilityScore.confidence.overall >= 60
+                                    ? "text-yellow-800"
+                                    : "text-red-800"
+                                }`}
+                              >
+                                {routeAnalysis.fastestRoute.accessibilityScore.confidence.overall}%
+                              </Text>
+                            </View>
+                          </View>
+                        )}
+                      </View>
                     </View>
                   </View>
 
@@ -1033,6 +1172,37 @@ export default function NavigationScreen() {
                       {routeAnalysis.fastestRoute.recommendation.toUpperCase()}
                     </Text>
                   </View>
+
+                  {/* Confidence Information */}
+                  {routeAnalysis.fastestRoute.accessibilityScore.confidence && (
+                    <View className="mb-2 p-2 bg-gray-50 rounded-lg">
+                      <View className="flex-row items-center justify-between mb-1">
+                        <Text className="text-xs font-semibold text-gray-700">
+                          Data Confidence
+                        </Text>
+                        <Text className={`text-xs font-bold ${
+                          routeAnalysis.fastestRoute.accessibilityScore.confidence.verificationStatus === "verified"
+                            ? "text-green-600"
+                            : routeAnalysis.fastestRoute.accessibilityScore.confidence.verificationStatus === "estimated"
+                            ? "text-yellow-600"
+                            : "text-red-600"
+                        }`}>
+                          {routeAnalysis.fastestRoute.accessibilityScore.confidence.verificationStatus.toUpperCase()}
+                        </Text>
+                      </View>
+                      <View className="flex-row justify-between">
+                        <Text className="text-xs text-gray-600">
+                          {routeAnalysis.fastestRoute.accessibilityScore.confidence.lastVerified
+                            ? `Verified ${Math.floor((Date.now() - new Date(routeAnalysis.fastestRoute.accessibilityScore.confidence.lastVerified).getTime()) / (1000 * 60 * 60 * 24))} days ago`
+                            : `Data age: ${routeAnalysis.fastestRoute.accessibilityScore.confidence.confidenceFactors.obstacleAge} days`
+                          }
+                        </Text>
+                        <Text className="text-xs text-gray-600">
+                          {routeAnalysis.fastestRoute.accessibilityScore.confidence.communityValidation} community reports
+                        </Text>
+                      </View>
+                    </View>
+                  )}
 
                   {routeAnalysis.fastestRoute.userWarnings.length > 0 && (
                     <View className="mt-2 p-2 bg-yellow-100 rounded-lg">
@@ -1083,9 +1253,36 @@ export default function NavigationScreen() {
                             </Text>
                           </View>
                         )}
-                      <Text className="text-2xl font-bold text-green-600">
-                        {routeAnalysis.accessibleRoute.accessibilityScore.grade}
-                      </Text>
+                      <View className="flex-row items-center">
+                        <Text className="text-2xl font-bold text-green-600">
+                          {routeAnalysis.accessibleRoute.accessibilityScore.grade}
+                        </Text>
+                        {routeAnalysis.accessibleRoute.accessibilityScore.confidence && (
+                          <View className="ml-2 flex-row items-center">
+                            <View
+                              className={`px-1.5 py-0.5 rounded-full ${
+                                routeAnalysis.accessibleRoute.accessibilityScore.confidence.overall >= 80
+                                  ? "bg-green-100"
+                                  : routeAnalysis.accessibleRoute.accessibilityScore.confidence.overall >= 60
+                                  ? "bg-yellow-100"
+                                  : "bg-red-100"
+                              }`}
+                            >
+                              <Text
+                                className={`text-xs font-bold ${
+                                  routeAnalysis.accessibleRoute.accessibilityScore.confidence.overall >= 80
+                                    ? "text-green-800"
+                                    : routeAnalysis.accessibleRoute.accessibilityScore.confidence.overall >= 60
+                                    ? "text-yellow-800"
+                                    : "text-red-800"
+                                }`}
+                              >
+                                {routeAnalysis.accessibleRoute.accessibilityScore.confidence.overall}%
+                              </Text>
+                            </View>
+                          </View>
+                        )}
+                      </View>
                     </View>
                   </View>
 
@@ -1122,6 +1319,37 @@ export default function NavigationScreen() {
                       {routeAnalysis.accessibleRoute.recommendation.toUpperCase()}
                     </Text>
                   </View>
+
+                  {/* Confidence Information */}
+                  {routeAnalysis.accessibleRoute.accessibilityScore.confidence && (
+                    <View className="mb-2 p-2 bg-gray-50 rounded-lg">
+                      <View className="flex-row items-center justify-between mb-1">
+                        <Text className="text-xs font-semibold text-gray-700">
+                          Data Confidence
+                        </Text>
+                        <Text className={`text-xs font-bold ${
+                          routeAnalysis.accessibleRoute.accessibilityScore.confidence.verificationStatus === "verified"
+                            ? "text-green-600"
+                            : routeAnalysis.accessibleRoute.accessibilityScore.confidence.verificationStatus === "estimated"
+                            ? "text-yellow-600"
+                            : "text-red-600"
+                        }`}>
+                          {routeAnalysis.accessibleRoute.accessibilityScore.confidence.verificationStatus.toUpperCase()}
+                        </Text>
+                      </View>
+                      <View className="flex-row justify-between">
+                        <Text className="text-xs text-gray-600">
+                          {routeAnalysis.accessibleRoute.accessibilityScore.confidence.lastVerified
+                            ? `Verified ${Math.floor((Date.now() - new Date(routeAnalysis.accessibleRoute.accessibilityScore.confidence.lastVerified).getTime()) / (1000 * 60 * 60 * 24))} days ago`
+                            : `Data age: ${routeAnalysis.accessibleRoute.accessibilityScore.confidence.confidenceFactors.obstacleAge} days`
+                          }
+                        </Text>
+                        <Text className="text-xs text-gray-600">
+                          {routeAnalysis.accessibleRoute.accessibilityScore.confidence.communityValidation} community reports
+                        </Text>
+                      </View>
+                    </View>
+                  )}
 
                   {routeAnalysis.accessibleRoute.userWarnings.length === 0 ? (
                     <View className="mt-2 p-2 bg-green-100 rounded-lg">
@@ -1449,13 +1677,18 @@ export default function NavigationScreen() {
           {/* Quick Actions */}
           <View className="flex-row mt-3 space-x-2">
             <TouchableOpacity
-              className="flex-1 bg-gray-100 py-2 px-3 rounded-lg mr-2"
+              onPress={isNavigating ? stopNavigation : startNavigation}
+              className={`flex-1 py-2 px-3 rounded-lg mr-2 ${
+                isNavigating 
+                  ? "bg-red-500" 
+                  : "bg-green-500"
+              }`}
               accessibilityRole="button"
-              accessibilityLabel="Start navigation with selected route"
+              accessibilityLabel={isNavigating ? "Stop navigation and complete journey" : "Start navigation with selected route"}
               style={{ minHeight: 44 }}
             >
-              <Text className="text-center text-sm font-semibold text-gray-700">
-                🚶‍♂️ Start Navigation
+              <Text className="text-center text-sm font-semibold text-white">
+                {isNavigating ? "🏁 Complete Journey" : "🚶‍♂️ Start Navigation"}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -1616,6 +1849,15 @@ export default function NavigationScreen() {
           </Text>
         </View>
       )}
+
+      {/* Route Feedback Modal */}
+      <RouteFeedbackModal
+        visible={showFeedbackModal}
+        journey={completedJourney}
+        userProfile={profile}
+        onClose={() => setShowFeedbackModal(false)}
+        onSubmitted={handleFeedbackSubmitted}
+      />
     </View>
   );
 }

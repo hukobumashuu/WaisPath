@@ -65,6 +65,96 @@ export interface AccessibilityScore {
   overall: number; // Weighted AHP score
   grade: "A" | "B" | "C" | "D" | "F"; // Easy to understand grade
   userSpecificAdjustment: number; // Additional penalty/bonus for user type
+  confidence?: RouteConfidence; // Data quality and reliability metrics
+}
+
+export interface RouteConfidence {
+  overall: number; // 0-100: Overall confidence percentage
+  dataFreshness: "high" | "medium" | "low"; // Based on obstacle report age
+  communityValidation: number; // Number of users who validated this data
+  verificationStatus: "verified" | "estimated" | "unverified";
+  lastVerified: Date | null; // When this route data was last confirmed
+  confidenceFactors: {
+    obstacleAge: number; // Average age of obstacle reports in days
+    validationCount: number; // Total upvotes/downvotes for obstacles
+    verifiedObstacles: number; // Number of verified vs unverified obstacles
+    routePopularity: number; // How often this route is used/reported
+  };
+}
+
+export interface RouteFeedback {
+  id: string;
+  routeId: string; // Identifier for the route taken
+  userId: string;
+  userProfile: UserMobilityProfile;
+  completedAt: Date;
+  
+  // Core accessibility ratings (1-5 scale)
+  traversabilityRating: number; // How easily user could navigate
+  safetyRating: number; // How safe user felt from traffic/hazards
+  comfortRating: number; // Overall comfort level
+  
+  // Additional feedback
+  overallExperience: "excellent" | "good" | "acceptable" | "difficult" | "impossible";
+  wouldRecommend: boolean;
+  comments?: string;
+  
+  // Route-specific data
+  routeStartLocation: UserLocation;
+  routeEndLocation: UserLocation;
+  actualDuration: number; // minutes taken
+  estimatedDuration: number; // minutes predicted
+  routeType: "fastest" | "accessible";
+  
+  // Obstacles encountered
+  obstaclesEncountered: EncounteredObstacle[];
+  newObstaclesReported: AccessibilityObstacle[];
+  
+  // Verification data
+  confidenceContribution: number; // How much this feedback should boost confidence
+  deviceSpecificInsights: DeviceSpecificFeedback;
+}
+
+export interface EncounteredObstacle {
+  obstacleId: string;
+  actualSeverity: "low" | "medium" | "high" | "blocking";
+  reportedSeverity: "low" | "medium" | "high" | "blocking";
+  userImpact: "no_impact" | "minor_delay" | "major_detour" | "route_blocked";
+  accuracyRating: number; // 1-5: how accurate was the original report
+  stillPresent: boolean;
+}
+
+export interface DeviceSpecificFeedback {
+  deviceType: "wheelchair" | "walker" | "cane" | "crutches" | "none";
+  specificChallenges: string[]; // Device-specific issues encountered
+  adaptationsUsed: string[]; // How user adapted to obstacles  
+  recommendedImprovements: string[]; // Suggestions for this device type
+}
+
+export interface RouteJourney {
+  id: string;
+  userId: string;
+  startedAt: Date;
+  completedAt?: Date;
+  status: "active" | "completed" | "abandoned";
+  
+  // Route data
+  selectedRoute: {
+    routeId: string;
+    routeType: "fastest" | "accessible";
+    estimatedDuration: number;
+    accessibilityScore: AccessibilityScore;
+  };
+  
+  // Journey tracking
+  startLocation: UserLocation;
+  destinationLocation: UserLocation;
+  currentLocation?: UserLocation;
+  
+  // Completion detection
+  distanceFromDestination: number; // meters
+  completionTriggered: boolean;
+  feedbackSubmitted: boolean;
 }
 
 export interface RouteSegment {

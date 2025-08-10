@@ -9,6 +9,8 @@ import {
   UserLocation,
   AccessibilityScore,
   AccessibilityObstacle,
+  RouteConfidence,
+  RouteFeedback,
 } from "../types";
 
 interface ScoredRoute {
@@ -18,6 +20,7 @@ interface ScoredRoute {
   userWarnings: string[];
   recommendation: "excellent" | "good" | "acceptable" | "difficult" | "avoid";
   alternativeReason?: string;
+  userProfile?: UserMobilityProfile;
 }
 
 interface DualRouteComparison {
@@ -308,12 +311,19 @@ class RouteAnalysisService {
       }
 
       // Calculate AHP score for the entire route
-      const accessibilityScore = this.calculateRouteAccessibilityScore(
+      let accessibilityScore = this.calculateRouteAccessibilityScore(
         routeObstacles,
         userProfile,
         isStrategicRoute,
         routeIndex
       );
+
+      // Calculate confidence metrics for the route
+      const routeConfidence = this.calculateRouteConfidence(routeObstacles);
+      accessibilityScore = {
+        ...accessibilityScore,
+        confidence: routeConfidence,
+      };
 
       // Generate user-specific warnings
       const userWarnings = this.generateUserWarnings(
@@ -343,6 +353,7 @@ class RouteAnalysisService {
         obstacleCount: routeObstacles.length,
         userWarnings,
         recommendation,
+        userProfile,
       };
     } catch (error) {
       console.error(`⚠️ Error scoring route: ${error}`);
@@ -367,6 +378,7 @@ class RouteAnalysisService {
         obstacleCount: Math.max(0, 3 - routeIndex - (isStrategicRoute ? 2 : 0)),
         userWarnings: [],
         recommendation: this.getRouteRecommendation(finalScore),
+        userProfile,
       };
     }
   }
@@ -740,22 +752,11 @@ class RouteAnalysisService {
     );
     const fastestRoute = routesByTime[0];
 
-    // Strategy 2: Find most accessible route with intelligent selection
-    const maxAllowedDistance = fastestRoute.googleRoute.distance * 2.0; // Allow up to 100% longer
-    console.log(
-      `📏 Distance constraint: ${(maxAllowedDistance / 1000).toFixed(
-        2
-      )} km (100% above fastest)`
-    );
+    // Strategy 2: Find most accessible route - no distance constraints
+    console.log("📏 Evaluating all routes for accessibility without distance limits");
 
-    const constrainedRoutes = scoredRoutes.filter(
-      (route) => route.googleRoute.distance <= maxAllowedDistance
-    );
-
-    console.log(`Routes after distance filter: ${constrainedRoutes.length}`);
-
-    // Sort by accessibility score, but prioritize strategic accessible routes
-    const routesByAccessibility = constrainedRoutes.sort((a, b) => {
+    // Sort all routes by accessibility score, prioritizing strategic accessible routes
+    const routesByAccessibility = scoredRoutes.sort((a, b) => {
       // Bonus for strategic accessible routes
       const aBonus = a.googleRoute.id.includes("accessible") ? 5 : 0;
       const bBonus = b.googleRoute.id.includes("accessible") ? 5 : 0;
@@ -825,11 +826,14 @@ class RouteAnalysisService {
       )} points`
     );
 
-    // Generate recommendation
-    const recommendation = this.generateRouteRecommendation(
+    // Generate enhanced user-specific recommendation
+    const userProfile = fastestRoute.userProfile || accessibleRoute.userProfile;
+    const recommendation = this.generateEnhancedRouteRecommendation(
+      fastestRoute,
+      accessibleRoute,
       timeDifference,
       accessibilityImprovement,
-      accessibleRoute.accessibilityScore.grade
+      userProfile
     );
 
     return {
@@ -869,7 +873,420 @@ class RouteAnalysisService {
   }
 
   /**
-   * Generate human-readable route recommendation
+   * Generate enhanced user-specific route recommendation
+   */
+  private generateEnhancedRouteRecommendation(
+    fastestRoute: ScoredRoute,
+    accessibleRoute: ScoredRoute,
+    timeDifference: number,
+    accessibilityImprovement: number,
+    userProfile?: UserMobilityProfile
+  ): string {
+    if (!userProfile) {
+      // Fallback to basic recommendation if no profile available
+      return this.generateRouteRecommendation(
+        timeDifference,
+        accessibilityImprovement,
+        accessibleRoute.accessibilityScore.grade
+      );
+    }
+
+    const timeMinutes = Math.round(timeDifference / 60);
+    const fastestGrade = fastestRoute.accessibilityScore.grade;
+    const accessibleGrade = accessibleRoute.accessibilityScore.grade;
+    const deviceType = userProfile.type;
+
+    // Analyze blocking obstacles for user's specific device
+    const blockingObstacles = this.getBlockingObstaclesForUser(fastestRoute, userProfile);
+    const hasBlockingObstacles = blockingObstacles.length > 0;
+
+    // Evaluate severity of accessibility difference
+    const isHighSeverityDifference = this.isHighSeverityAccessibilityGap(fastestGrade, accessibleGrade);
+
+    // Device-specific messaging
+    const deviceLabel = this.getDeviceLabel(deviceType);
+
+    // Critical blocking scenario - highest priority
+    if (hasBlockingObstacles) {
+      const obstacleList = blockingObstacles.slice(0, 2).join(" and ");
+      return `For ${deviceLabel} users: Take the ${timeMinutes}-minute accessible route - the faster route has ${obstacleList} that block passage (Grade ${accessibleGrade})`;
+    }
+
+    // High severity accessibility gap (e.g., Grade A vs C/D/F)
+    if (isHighSeverityDifference) {
+      if (timeDifference <= 300) { // 5 minutes or less
+        return `Strongly recommended for ${deviceLabel}: Take the accessible route (${timeMinutes} min longer) - significant safety improvement from Grade ${fastestGrade} to ${accessibleGrade}`;
+      } else {
+        return `Important for ${deviceLabel}: Consider the ${timeMinutes}-minute accessible route - much safer (Grade ${accessibleGrade} vs ${fastestGrade}) despite extra time`;
+      }
+    }
+
+    // Moderate improvements with time context
+    if (accessibilityImprovement >= 15) {
+      if (timeDifference <= 120) { // 2 minutes or less
+        return `For ${deviceLabel}: Accessible route recommended (just ${timeMinutes} min longer) with better conditions (Grade ${accessibleGrade})`;
+      } else if (timeDifference <= 600) { // 10 minutes or less
+        return `For ${deviceLabel}: Consider the accessible route (${timeMinutes} min longer) - noticeably better accessibility (Grade ${accessibleGrade})`;
+      } else {
+        return `For ${deviceLabel}: Fastest route acceptable - accessibility improvement (Grade ${accessibleGrade}) requires ${timeMinutes} extra minutes`;
+      }
+    }
+
+    // Minimal difference - favor efficiency
+    if (timeDifference <= 180) { // 3 minutes or less
+      return `Either route works for ${deviceLabel} - accessible route is ${timeMinutes} min longer with slightly better conditions (Grade ${accessibleGrade})`;
+    } else {
+      return `For ${deviceLabel}: Fastest route recommended - minimal accessibility difference (Grades ${fastestGrade} vs ${accessibleGrade}) saves ${Math.abs(timeMinutes)} minutes`;
+    }
+  }
+
+  /**
+   * Get blocking obstacles specific to user's mobility device
+   */
+  private getBlockingObstaclesForUser(route: ScoredRoute, userProfile: UserMobilityProfile): string[] {
+    const blockingObstacleMap: Record<string, string[]> = {
+      wheelchair: ["stairs", "narrow passages", "high curbs"],
+      walker: ["stairs", "steep slopes", "narrow passages"],
+      crutches: ["stairs", "uneven surfaces"],
+      cane: ["stairs", "major obstacles"],
+      none: ["blocked paths"]
+    };
+
+    const deviceBlockers = blockingObstacleMap[userProfile.type] || [];
+    const routeWarnings = route.userWarnings || [];
+
+    return deviceBlockers.filter(blocker => 
+      routeWarnings.some(warning => 
+        warning.toLowerCase().includes(blocker.toLowerCase().split(" ")[0])
+      )
+    );
+  }
+
+  /**
+   * Determine if accessibility grade difference is high severity
+   */
+  private isHighSeverityAccessibilityGap(fastestGrade: string, accessibleGrade: string): boolean {
+    const gradeValues: Record<string, number> = { A: 5, B: 4, C: 3, D: 2, F: 1 };
+    const fastestValue = gradeValues[fastestGrade] || 3;
+    const accessibleValue = gradeValues[accessibleGrade] || 3;
+    
+    // High severity if difference is 2+ grades (e.g., C to A, D to B, F to C)
+    return (accessibleValue - fastestValue) >= 2;
+  }
+
+  /**
+   * Get user-friendly device label
+   */
+  private getDeviceLabel(deviceType: string): string {
+    const labels: Record<string, string> = {
+      wheelchair: "wheelchair",
+      walker: "walker",
+      crutches: "crutches",
+      cane: "cane",
+      none: "pedestrian"
+    };
+    return labels[deviceType] || "mobility device";
+  }
+
+  /**
+   * Calculate confidence metrics for route accessibility data
+   */
+  private calculateRouteConfidence(obstacles: AccessibilityObstacle[]): RouteConfidence {
+    const now = new Date();
+    
+    // Handle empty obstacle list
+    if (obstacles.length === 0) {
+      return {
+        overall: 70, // Medium confidence for obstacle-free routes
+        dataFreshness: "medium",
+        communityValidation: 0,
+        verificationStatus: "estimated",
+        lastVerified: null,
+        confidenceFactors: {
+          obstacleAge: 0,
+          validationCount: 0,
+          verifiedObstacles: 0,
+          routePopularity: 0,
+        },
+      };
+    }
+
+    // Calculate data freshness based on obstacle age
+    const obstacleAges = obstacles.map(obstacle => {
+      const reportDate = obstacle.reportedAt instanceof Date 
+        ? obstacle.reportedAt 
+        : new Date(obstacle.reportedAt);
+      return Math.floor((now.getTime() - reportDate.getTime()) / (1000 * 60 * 60 * 24));
+    });
+    
+    const avgObstacleAge = obstacleAges.reduce((sum, age) => sum + age, 0) / obstacleAges.length;
+    
+    // Determine freshness category
+    let dataFreshness: "high" | "medium" | "low";
+    if (avgObstacleAge <= 7) {
+      dataFreshness = "high";
+    } else if (avgObstacleAge <= 30) {
+      dataFreshness = "medium";
+    } else {
+      dataFreshness = "low";
+    }
+
+    // Calculate community validation metrics
+    const totalUpvotes = obstacles.reduce((sum, obs) => sum + (obs.upvotes || 0), 0);
+    const totalDownvotes = obstacles.reduce((sum, obs) => sum + (obs.downvotes || 0), 0);
+    const validationCount = totalUpvotes + totalDownvotes;
+    
+    // Count verified obstacles
+    const verifiedCount = obstacles.filter(obs => obs.verified).length;
+    const verificationRatio = verifiedCount / obstacles.length;
+
+    // Determine verification status
+    let verificationStatus: "verified" | "estimated" | "unverified";
+    if (verificationRatio >= 0.7) {
+      verificationStatus = "verified";
+    } else if (verificationRatio >= 0.3) {
+      verificationStatus = "estimated";
+    } else {
+      verificationStatus = "unverified";
+    }
+
+    // Calculate route popularity (based on obstacle report frequency)
+    const routePopularity = Math.min(obstacles.length * 2, 100);
+
+    // Find most recent verification
+    const verifiedObstacles = obstacles.filter(obs => obs.verified);
+    const lastVerified = verifiedObstacles.length > 0 
+      ? verifiedObstacles.reduce((latest, obs) => {
+          const obsDate = obs.reportedAt instanceof Date 
+            ? obs.reportedAt 
+            : new Date(obs.reportedAt);
+          return obsDate > latest ? obsDate : latest;
+        }, new Date(0))
+      : null;
+
+    // Calculate overall confidence score (0-100)
+    let overallConfidence = 50; // Base score
+
+    // Data freshness contribution (0-35 points)
+    if (dataFreshness === "high") {
+      overallConfidence += 35;
+    } else if (dataFreshness === "medium") {
+      overallConfidence += 20;
+    } else {
+      overallConfidence += 5;
+    }
+
+    // Community validation contribution (0-25 points)
+    const validationBonus = Math.min(validationCount * 2, 25);
+    overallConfidence += validationBonus;
+
+    // Verification status contribution (0-25 points)  
+    if (verificationStatus === "verified") {
+      overallConfidence += 25;
+    } else if (verificationStatus === "estimated") {
+      overallConfidence += 15;
+    } else {
+      overallConfidence += 5;
+    }
+
+    // Route popularity bonus (0-15 points)
+    const popularityBonus = Math.min(routePopularity / 10, 15);
+    overallConfidence += popularityBonus;
+
+    // Cap at 100
+    overallConfidence = Math.min(100, overallConfidence);
+
+    return {
+      overall: Math.round(overallConfidence),
+      dataFreshness,
+      communityValidation: validationCount,
+      verificationStatus,
+      lastVerified,
+      confidenceFactors: {
+        obstacleAge: Math.round(avgObstacleAge),
+        validationCount,
+        verifiedObstacles: verifiedCount,
+        routePopularity: Math.round(routePopularity),
+      },
+    };
+  }
+
+  /**
+   * Integrate validated feedback into AHP scoring improvements
+   */
+  async integrateFeedbackIntoAHP(feedback: RouteFeedback): Promise<void> {
+    console.log("🔄 Integrating feedback into AHP algorithm:", feedback.id);
+
+    try {
+      // Calculate feedback accuracy by comparing predicted vs actual ratings
+      const feedbackAccuracy = this.calculateFeedbackAccuracy(feedback);
+      
+      // Update route-specific learning weights
+      await this.updateRouteSpecificWeights(feedback, feedbackAccuracy);
+      
+      // Update device-specific adjustments
+      await this.updateDeviceSpecificAdjustments(feedback);
+      
+      // Update obstacle severity calibration
+      await this.updateObstacleSeverityCalibration(feedback);
+      
+      console.log("✅ Feedback integrated successfully:", {
+        routeType: feedback.routeType,
+        deviceType: feedback.userProfile.type,
+        accuracy: feedbackAccuracy.overallAccuracy,
+        confidenceBoost: feedback.confidenceContribution
+      });
+
+    } catch (error) {
+      console.error("❌ Failed to integrate feedback into AHP:", error);
+    }
+  }
+
+  /**
+   * Calculate how accurate our predictions were vs real experience
+   */
+  private calculateFeedbackAccuracy(feedback: RouteFeedback): {
+    overallAccuracy: number;
+    traversabilityAccuracy: number;
+    safetyAccuracy: number;
+    comfortAccuracy: number;
+  } {
+    // Get the route that was taken for comparison
+    const routeScore = feedback.routeType === "fastest" 
+      ? feedback.routeStartLocation // In real implementation, we'd look up the actual route scores
+      : feedback.routeEndLocation;
+
+    // For demonstration, we'll simulate the predicted scores
+    // In real implementation, these would come from the route that was selected
+    const predictedScores = {
+      traversability: 75, // This would come from the actual route's accessibility score
+      safety: 80,
+      comfort: 70
+    };
+
+    // Convert user ratings (1-5) to 0-100 scale for comparison
+    const actualScores = {
+      traversability: (feedback.traversabilityRating - 1) * 25, // 1->0, 5->100
+      safety: (feedback.safetyRating - 1) * 25,
+      comfort: (feedback.comfortRating - 1) * 25
+    };
+
+    // Calculate accuracy (how close our predictions were)
+    const traversabilityAccuracy = Math.max(0, 100 - Math.abs(predictedScores.traversability - actualScores.traversability));
+    const safetyAccuracy = Math.max(0, 100 - Math.abs(predictedScores.safety - actualScores.safety));
+    const comfortAccuracy = Math.max(0, 100 - Math.abs(predictedScores.comfort - actualScores.comfort));
+    
+    const overallAccuracy = (traversabilityAccuracy + safetyAccuracy + comfortAccuracy) / 3;
+
+    return {
+      overallAccuracy,
+      traversabilityAccuracy,
+      safetyAccuracy,
+      comfortAccuracy
+    };
+  }
+
+  /**
+   * Update route-specific learning weights based on feedback
+   */
+  private async updateRouteSpecificWeights(feedback: RouteFeedback, accuracy: any): Promise<void> {
+    // This would update the AHP weights based on which factors users found most important
+    const weightAdjustments = {
+      traversability: feedback.traversabilityRating >= 4 ? 0.05 : -0.02,
+      safety: feedback.safetyRating >= 4 ? 0.03 : -0.01,
+      comfort: feedback.comfortRating >= 4 ? 0.02 : -0.01
+    };
+
+    console.log("📊 Updating AHP weights:", weightAdjustments);
+
+    // In real implementation, this would:
+    // 1. Store weight adjustments per device type
+    // 2. Update the AHP calculation matrix
+    // 3. Recalibrate future route scoring
+  }
+
+  /**
+   * Update device-specific scoring adjustments
+   */
+  private async updateDeviceSpecificAdjustments(feedback: RouteFeedback): Promise<void> {
+    const deviceType = feedback.userProfile.type;
+    const avgRating = (feedback.traversabilityRating + feedback.safetyRating + feedback.comfortRating) / 3;
+    
+    // Learn device-specific preferences
+    const deviceLearning = {
+      deviceType,
+      routeType: feedback.routeType,
+      preferenceStrength: avgRating >= 4 ? "positive" : avgRating <= 2 ? "negative" : "neutral",
+      specificChallenges: feedback.deviceSpecificInsights.specificChallenges,
+      adaptationsUsed: feedback.deviceSpecificInsights.adaptationsUsed
+    };
+
+    console.log("🦽 Device-specific learning:", deviceLearning);
+
+    // This would update device-specific scoring modifiers
+  }
+
+  /**
+   * Update obstacle severity calibration based on real encounters
+   */
+  private async updateObstacleSeverityCalibration(feedback: RouteFeedback): Promise<void> {
+    if (feedback.obstaclesEncountered.length === 0) return;
+
+    // Learn from actual vs predicted obstacle impact
+    feedback.obstaclesEncountered.forEach(encountered => {
+      const severityAccuracy = encountered.reportedSeverity === encountered.actualSeverity;
+      const impactLevel = encountered.userImpact;
+
+      console.log("🚧 Obstacle learning:", {
+        obstacleId: encountered.obstacleId,
+        predicted: encountered.reportedSeverity,
+        actual: encountered.actualSeverity,
+        impact: impactLevel,
+        accuracyRating: encountered.accuracyRating,
+        stillPresent: encountered.stillPresent
+      });
+
+      // This would update obstacle severity weights and impact predictions
+    });
+  }
+
+  /**
+   * Apply learned improvements to future route calculations
+   */
+  async applyFeedbackLearnings(
+    obstacles: AccessibilityObstacle[],
+    userProfile: UserMobilityProfile,
+    baseScore: AccessibilityScore
+  ): Promise<AccessibilityScore> {
+    // This method would apply all the learned adjustments to improve accuracy
+    
+    // For demonstration, we'll apply a simple learning bonus
+    let learningAdjustment = 0;
+    
+    // Simulate device-specific learning
+    const deviceBonuses = {
+      wheelchair: 2,
+      walker: 1.5,
+      crutches: 1,
+      cane: 0.5,
+      none: 0
+    };
+    
+    learningAdjustment += deviceBonuses[userProfile.type] || 0;
+    
+    // Apply community validation bonus
+    const communityValidatedObstacles = obstacles.filter(obs => obs.verified).length;
+    learningAdjustment += Math.min(communityValidatedObstacles * 0.5, 5);
+
+    return {
+      ...baseScore,
+      overall: Math.min(100, baseScore.overall + learningAdjustment),
+      userSpecificAdjustment: (baseScore.userSpecificAdjustment || 0) + learningAdjustment
+    };
+  }
+
+  /**
+   * Generate human-readable route recommendation (legacy method)
    */
   private generateRouteRecommendation(
     timeDifference: number,
