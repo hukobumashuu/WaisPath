@@ -1,5 +1,5 @@
-// src/services/firebase.ts - BASE64 PHOTO STORAGE (FREE!)
-// Firestore-only solution with compressed Base64 images
+// src/services/firebase.ts - ENHANCED WITH VALIDATION METHODS
+// Complete Firebase service with atomic operations and validation analytics
 
 import {
   UserMobilityProfile,
@@ -9,6 +9,14 @@ import {
 } from "../types";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getFirebaseConfig } from "../config/firebaseConfig";
+
+interface ValidationEvent {
+  action: "confirmed" | "disputed" | "skipped";
+  timestamp: string;
+  location?: UserLocation | null;
+  method: "proximity_prompt" | "manual" | "admin";
+  userHash?: string; // For privacy
+}
 
 interface FirebaseService {
   profile: {
@@ -22,7 +30,7 @@ interface FirebaseService {
       type: ObstacleType;
       severity: "low" | "medium" | "high" | "blocking";
       description: string;
-      photoBase64?: string; // Changed from photoUri to photoBase64
+      photoBase64?: string;
       timePattern?:
         | "permanent"
         | "morning"
@@ -39,10 +47,19 @@ interface FirebaseService {
       obstacleId: string,
       verification: "upvote" | "downvote"
     ) => Promise<void>;
+    // NEW: Validation analytics methods
+    recordPromptEvent: (
+      obstacleId: string,
+      eventData: ValidationEvent
+    ) => Promise<void>;
+    updateObstacleConfidence: (
+      obstacleId: string,
+      newConfidence: number
+    ) => Promise<void>;
   };
 }
 
-// Enhanced Mock Firebase service (for development/testing)
+// Enhanced Mock Firebase service with validation support
 class MockFirebaseService implements FirebaseService {
   private mockObstacles: AccessibilityObstacle[] = [
     {
@@ -55,6 +72,9 @@ class MockFirebaseService implements FirebaseService {
       reportedAt: new Date("2025-07-20"),
       verified: true,
       timePattern: "morning",
+      upvotes: 3,
+      downvotes: 0,
+      status: "verified",
     },
     {
       id: "mock_2",
@@ -65,6 +85,9 @@ class MockFirebaseService implements FirebaseService {
       reportedBy: "mock_user_2",
       reportedAt: new Date("2025-07-19"),
       verified: true,
+      upvotes: 5,
+      downvotes: 1,
+      status: "verified",
     },
   ];
 
@@ -102,7 +125,7 @@ class MockFirebaseService implements FirebaseService {
       const id = `obstacle_${Date.now()}`;
       console.log("🔥 Mock: Obstacle reported to cloud simulation:", id);
 
-      // Add to mock data
+      // Add to mock data with validation fields
       const newObstacle: AccessibilityObstacle = {
         id,
         location: obstacleData.location,
@@ -113,6 +136,10 @@ class MockFirebaseService implements FirebaseService {
         reportedAt: new Date(),
         verified: false,
         timePattern: obstacleData.timePattern,
+        upvotes: 0,
+        downvotes: 0,
+        status: "pending",
+        reportsCount: 1, // NEW: Track total reports
       };
       this.mockObstacles.push(newObstacle);
 
@@ -135,105 +162,86 @@ class MockFirebaseService implements FirebaseService {
     ): Promise<void> => {
       await new Promise((resolve) => setTimeout(resolve, 300));
       console.log(`🔥 Mock: ${verification} for obstacle ${obstacleId}`);
+
+      // Simulate atomic increment
+      const obstacle = this.mockObstacles.find((o) => o.id === obstacleId);
+      if (obstacle) {
+        if (verification === "upvote") {
+          obstacle.upvotes = (obstacle.upvotes || 0) + 1;
+        } else {
+          obstacle.downvotes = (obstacle.downvotes || 0) + 1;
+        }
+        obstacle.reportsCount = (obstacle.reportsCount || 1) + 1;
+      }
+    },
+
+    // NEW: Mock validation analytics
+    recordPromptEvent: async (
+      obstacleId: string,
+      eventData: ValidationEvent
+    ): Promise<void> => {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      console.log(
+        `🔥 Mock: Recorded prompt event for ${obstacleId}:`,
+        eventData.action
+      );
+    },
+
+    updateObstacleConfidence: async (
+      obstacleId: string,
+      newConfidence: number
+    ): Promise<void> => {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      console.log(
+        `🔥 Mock: Updated confidence for ${obstacleId}: ${newConfidence}`
+      );
     },
   };
 }
 
-// Real Firebase service with PHOTO STORAGE + OBSTACLE REPORTING
+// ENHANCED Real Firebase service with atomic operations
 class SimpleFirebaseService implements FirebaseService {
-  private initialized = false;
-  private app: any = null;
-  private db: any = null;
-  private storage: any = null;
-  private auth: any = null;
   private currentUser: any = null;
+  private initialized = false;
+  private db: any = null;
 
-  constructor() {
-    console.log("🔥 SimpleFirebaseService created (not yet initialized)");
-  }
-
-  private async initializeFirebase() {
-    if (this.initialized) {
-      return;
-    }
+  async ensureInitialized(): Promise<void> {
+    if (this.initialized) return;
 
     try {
-      console.log("🔥 Starting Firebase initialization...");
-
-      const { initializeApp, getApps } = await import("firebase/app");
-      const { getFirestore } = await import("firebase/firestore");
+      const { initializeApp } = await import("firebase/app");
+      const { getFirestore, connectFirestoreEmulator } = await import(
+        "firebase/firestore"
+      );
       const { getAuth, signInAnonymously } = await import("firebase/auth");
 
-      const firebaseConfig = getFirebaseConfig();
+      const config = getFirebaseConfig();
+      const app = initializeApp(config);
 
-      if (getApps().length === 0) {
-        this.app = initializeApp(firebaseConfig);
-        console.log("🔥 Firebase app initialized");
-      } else {
-        this.app = getApps()[0];
-        console.log("🔥 Using existing Firebase app");
+      this.db = getFirestore(app);
+      const auth = getAuth(app);
+
+      // Connect to emulator in development
+      if (__DEV__) {
+        try {
+          connectFirestoreEmulator(this.db, "localhost", 8080);
+          console.log("🔥 Connected to Firestore emulator");
+        } catch (error: any) {
+          if (error.code !== "firestore/emulator-config-failed") {
+            console.warn("Firestore emulator connection failed:", error);
+          }
+        }
       }
 
-      // Initialize Firestore
-      this.db = getFirestore(this.app);
-      console.log("🔥 Firestore initialized");
-
-      // Initialize Auth (simple, no persistence needed)
-      this.auth = getAuth(this.app);
-      console.log("🔥 Auth initialized");
-
-      // Try anonymous sign in
-      console.log("🔐 Attempting anonymous authentication...");
-      const userCredential = await signInAnonymously(this.auth);
+      // Anonymous authentication
+      const userCredential = await signInAnonymously(auth);
       this.currentUser = userCredential.user;
-      console.log("🔥 Anonymous authentication successful");
 
       this.initialized = true;
-      console.log("🔥 Firebase fully initialized and ready");
+      console.log("🔥 Firebase initialized successfully");
     } catch (error: any) {
-      console.log("🔥 Firebase initialization failed:", error.message);
-      console.log("🔥 Error code:", error.code);
-      console.log("🔥 Full error:", error);
-      throw error;
-    }
-  }
-
-  private async ensureInitialized() {
-    if (!this.initialized) {
-      await this.initializeFirebase();
-    }
-  }
-
-  /**
-   * Convert image URI to Base64 string for Firestore storage
-   * This replaces Firebase Storage for cost-free photo storage
-   */
-  private async convertImageToBase64(imageUri: string): Promise<string> {
-    try {
-      console.log("📸 Converting image to Base64 for Firestore storage...");
-
-      const response = await fetch(imageUri);
-      const blob = await response.blob();
-
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const base64String = reader.result as string;
-          // Remove data:image/jpeg;base64, prefix to save space
-          const base64Data = base64String.split(",")[1];
-          console.log(
-            `📸 Base64 conversion complete: ${(
-              base64Data.length / 1024
-            ).toFixed(1)}KB`
-          );
-          resolve(base64Data);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-    } catch (error: any) {
-      console.error("📸 Base64 conversion failed:", error);
-      throw new Error(`Hindi ma-convert ang larawan: ${error.message}`);
+      console.error("🔥 Firebase initialization failed:", error);
+      throw new Error(`Firebase setup failed: ${error.message}`);
     }
   }
 
@@ -241,36 +249,21 @@ class SimpleFirebaseService implements FirebaseService {
     saveProfile: async (profile: UserMobilityProfile): Promise<void> => {
       await this.ensureInitialized();
 
-      const { doc, setDoc, serverTimestamp } = await import(
-        "firebase/firestore"
-      );
+      const { doc, setDoc } = await import("firebase/firestore");
 
-      // Clean profile data - remove undefined values that cause Firestore errors
-      const cleanProfile = {
-        id: profile.id || `profile_${Date.now()}`,
-        type: profile.type || "none",
-        maxRampSlope: profile.maxRampSlope || 5,
-        minPathWidth: profile.minPathWidth || 90,
-        avoidStairs:
-          profile.avoidStairs !== undefined ? profile.avoidStairs : true,
-        avoidCrowds:
-          profile.avoidCrowds !== undefined ? profile.avoidCrowds : false,
-        preferShade:
-          profile.preferShade !== undefined ? profile.preferShade : true,
-        maxWalkingDistance: profile.maxWalkingDistance || 500,
-        userId: this.currentUser?.uid || "anonymous",
-        createdAt: profile.createdAt || serverTimestamp(),
-        lastUpdated: serverTimestamp(),
-      };
+      try {
+        const profileDoc = doc(this.db, "profiles", this.currentUser.uid);
+        await setDoc(profileDoc, {
+          ...profile,
+          userId: this.currentUser.uid,
+          lastUpdated: new Date(),
+        });
 
-      const profileRef = doc(
-        this.db,
-        "userProfiles",
-        this.currentUser?.uid || "anonymous"
-      );
-
-      await setDoc(profileRef, cleanProfile, { merge: true });
-      console.log("🔥 Profile saved to Firebase (cleaned data)");
+        console.log("✅ Profile saved to Firestore");
+      } catch (error: any) {
+        console.error("❌ Failed to save profile:", error);
+        throw new Error(`Hindi ma-save ang profile: ${error.message}`);
+      }
     },
 
     getProfile: async (): Promise<UserMobilityProfile | null> => {
@@ -278,53 +271,38 @@ class SimpleFirebaseService implements FirebaseService {
 
       const { doc, getDoc } = await import("firebase/firestore");
 
-      const profileRef = doc(
-        this.db,
-        "userProfiles",
-        this.currentUser?.uid || "anonymous"
-      );
-      const profileSnap = await getDoc(profileRef);
+      try {
+        const profileDoc = doc(this.db, "profiles", this.currentUser.uid);
+        const docSnap = await getDoc(profileDoc);
 
-      if (profileSnap.exists()) {
-        const data = profileSnap.data();
-        console.log("🔥 Profile retrieved from Firebase");
-        return {
-          id: data.id,
-          type: data.type,
-          maxRampSlope: data.maxRampSlope,
-          minPathWidth: data.minPathWidth,
-          avoidStairs: data.avoidStairs,
-          avoidCrowds: data.avoidCrowds,
-          preferShade: data.preferShade,
-          maxWalkingDistance: data.maxWalkingDistance,
-          createdAt: data.createdAt?.toDate(),
-          lastUpdated: data.lastUpdated?.toDate(),
-        };
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          console.log("✅ Profile loaded from Firestore");
+          return data as UserMobilityProfile;
+        } else {
+          console.log("📝 No profile found in Firestore");
+          return null;
+        }
+      } catch (error: any) {
+        console.error("❌ Failed to load profile:", error);
+        throw new Error(`Hindi ma-load ang profile: ${error.message}`);
       }
-
-      console.log("🔥 No profile found in Firebase");
-      return null;
     },
 
     deleteProfile: async (): Promise<void> => {
       await this.ensureInitialized();
 
-      const { doc, setDoc, serverTimestamp } = await import(
-        "firebase/firestore"
-      );
+      const { doc, deleteDoc } = await import("firebase/firestore");
 
-      const profileRef = doc(
-        this.db,
-        "userProfiles",
-        this.currentUser?.uid || "anonymous"
-      );
-      await setDoc(
-        profileRef,
-        { deleted: true, deletedAt: serverTimestamp() },
-        { merge: true }
-      );
+      try {
+        const profileDoc = doc(this.db, "profiles", this.currentUser.uid);
+        await deleteDoc(profileDoc);
 
-      console.log("🔥 Profile deleted from Firebase");
+        console.log("✅ Profile deleted from Firestore");
+      } catch (error: any) {
+        console.error("❌ Failed to delete profile:", error);
+        throw new Error(`Hindi ma-delete ang profile: ${error.message}`);
+      }
     },
   };
 
@@ -369,7 +347,7 @@ class SimpleFirebaseService implements FirebaseService {
           type: obstacleData.type,
           severity: obstacleData.severity,
           description: obstacleData.description || "No description provided",
-          photoBase64: obstacleData.photoBase64 || null, // Base64 string or null
+          photoBase64: obstacleData.photoBase64 || null,
           timePattern: obstacleData.timePattern || "permanent",
           reportedBy: this.currentUser?.uid || "anonymous",
           reportedAt: serverTimestamp(),
@@ -377,23 +355,22 @@ class SimpleFirebaseService implements FirebaseService {
           upvotes: 0,
           downvotes: 0,
           status: "pending",
+          reportsCount: 1, // NEW: Initialize reports count
 
           // Additional metadata
           barangay: this.getBarangayFromCoordinates(obstacleData.location),
           deviceType: await this.getUserDeviceType(),
         };
 
-        // Save to Firestore
-        const obstaclesRef = collection(this.db, "obstacles");
-        const docRef = await addDoc(obstaclesRef, obstacleDocument);
-
-        console.log(
-          "✅ Obstacle reported successfully to Firestore:",
-          docRef.id
+        const docRef = await addDoc(
+          collection(this.db, "obstacles"),
+          obstacleDocument
         );
+
+        console.log("✅ Obstacle reported successfully:", docRef.id);
         return obstacleId;
       } catch (error: any) {
-        console.error("🚧 Obstacle reporting failed:", error);
+        console.error("❌ Failed to report obstacle:", error);
         throw new Error(`Hindi ma-report ang obstacle: ${error.message}`);
       }
     },
@@ -405,78 +382,104 @@ class SimpleFirebaseService implements FirebaseService {
     ): Promise<AccessibilityObstacle[]> => {
       await this.ensureInitialized();
 
-      const { collection, query, where, getDocs, orderBy, limit } =
-        await import("firebase/firestore");
+      const { collection, getDocs, query, where } = await import(
+        "firebase/firestore"
+      );
 
       try {
         console.log(
-          `🔍 Searching for obstacles near ${lat}, ${lng} (${radiusKm}km radius)`
+          `🗺️ Getting obstacles in area: ${lat}, ${lng} (${radiusKm}km radius)`
         );
 
-        // Simple bounding box query (more complex geo queries need GeoFirestore)
-        const latDelta = radiusKm / 111; // Rough conversion: 1 degree ≈ 111km
-        const lngDelta = radiusKm / (111 * Math.cos((lat * Math.PI) / 180));
+        // Simple bounding box query (for basic implementation)
+        const latRange = radiusKm / 111; // Rough conversion
+        const lngRange = radiusKm / (111 * Math.cos((lat * Math.PI) / 180));
 
-        const obstaclesRef = collection(this.db, "obstacles");
-        const q = query(
-          obstaclesRef,
-          where("location.latitude", ">=", lat - latDelta),
-          where("location.latitude", "<=", lat + latDelta),
-          orderBy("reportedAt", "desc"),
-          limit(50) // Limit for performance
+        const obstaclesQuery = query(
+          collection(this.db, "obstacles"),
+          where("location.latitude", ">=", lat - latRange),
+          where("location.latitude", "<=", lat + latRange)
         );
 
-        const querySnapshot = await getDocs(q);
+        const querySnapshot = await getDocs(obstaclesQuery);
         const obstacles: AccessibilityObstacle[] = [];
 
         querySnapshot.forEach((doc) => {
           const data = doc.data();
 
-          // Additional longitude filtering (since Firestore can only order by one field)
+          // Filter by longitude and convert Firestore timestamp
           const lngDiff = Math.abs(data.location.longitude - lng);
-          if (lngDiff <= lngDelta) {
+          if (lngDiff <= lngRange) {
             obstacles.push({
-              id: data.id,
+              id: data.id || doc.id,
               location: data.location,
               type: data.type,
               severity: data.severity,
               description: data.description,
               reportedBy: data.reportedBy,
               reportedAt: data.reportedAt?.toDate() || new Date(),
-              verified: data.verified || false,
+              verified: data.verified,
               timePattern: data.timePattern,
+              upvotes: data.upvotes || 0,
+              downvotes: data.downvotes || 0,
+              status: data.status || "pending",
+              reportsCount: data.reportsCount || 1,
+              photoBase64: data.photoBase64,
             });
           }
         });
 
-        console.log(`🔍 Found ${obstacles.length} obstacles in area`);
+        console.log(`✅ Found ${obstacles.length} obstacles in area`);
         return obstacles;
       } catch (error: any) {
-        console.error("🔍 Failed to fetch obstacles:", error);
-        throw new Error(`Hindi makuha ang mga obstacle: ${error.message}`);
+        console.error("❌ Failed to get obstacles:", error);
+        throw new Error(`Hindi makuha ang mga obstacles: ${error.message}`);
       }
     },
 
+    // ENHANCED: Atomic increment with proper error handling
     verifyObstacle: async (
       obstacleId: string,
       verification: "upvote" | "downvote"
     ): Promise<void> => {
       await this.ensureInitialized();
 
-      const { doc, updateDoc, increment, arrayUnion } = await import(
-        "firebase/firestore"
-      );
+      const {
+        collection,
+        query,
+        where,
+        getDocs,
+        doc,
+        updateDoc,
+        increment,
+        arrayUnion,
+        serverTimestamp,
+      } = await import("firebase/firestore");
 
       try {
-        console.log(`👍 ${verification} obstacle ${obstacleId}`);
+        console.log(`🗳️ Recording ${verification} for obstacle ${obstacleId}`);
 
-        const obstacleRef = doc(this.db, "obstacles", obstacleId);
+        // Find the obstacle document
+        const obstaclesQuery = query(
+          collection(this.db, "obstacles"),
+          where("id", "==", obstacleId)
+        );
+
+        const querySnapshot = await getDocs(obstaclesQuery);
+
+        if (querySnapshot.empty) {
+          throw new Error(`Obstacle ${obstacleId} not found`);
+        }
+
+        const obstacleDoc = querySnapshot.docs[0];
         const userId = this.currentUser?.uid || "anonymous";
 
-        await updateDoc(obstacleRef, {
+        // ATOMIC INCREMENT: Update counts atomically to prevent race conditions
+        await updateDoc(obstacleDoc.ref, {
           [verification === "upvote" ? "upvotes" : "downvotes"]: increment(1),
           [`${verification}dBy`]: arrayUnion(userId),
-          lastVerifiedAt: new Date(),
+          reportsCount: increment(1), // NEW: Track total engagement
+          lastVerifiedAt: serverTimestamp(),
         });
 
         console.log(`✅ ${verification} recorded for obstacle ${obstacleId}`);
@@ -487,14 +490,90 @@ class SimpleFirebaseService implements FirebaseService {
         );
       }
     },
+
+    // NEW: Record validation prompt events for analytics
+    recordPromptEvent: async (
+      obstacleId: string,
+      eventData: ValidationEvent
+    ): Promise<void> => {
+      await this.ensureInitialized();
+
+      const { collection, addDoc, serverTimestamp } = await import(
+        "firebase/firestore"
+      );
+
+      try {
+        const eventDocument = {
+          obstacleId,
+          userId: this.currentUser?.uid || "anonymous",
+          action: eventData.action,
+          timestamp: serverTimestamp(),
+          location: eventData.location || null,
+          method: eventData.method,
+          userHash: eventData.userHash || null,
+
+          // Additional metadata
+          deviceType: await this.getUserDeviceType(),
+        };
+
+        await addDoc(collection(this.db, "validation_events"), eventDocument);
+
+        console.log(
+          `✅ Validation event recorded: ${obstacleId} - ${eventData.action}`
+        );
+      } catch (error: any) {
+        console.error("❌ Failed to record validation event:", error);
+        // Don't throw - this is analytics, not critical path
+      }
+    },
+
+    // NEW: Update obstacle confidence score
+    updateObstacleConfidence: async (
+      obstacleId: string,
+      newConfidence: number
+    ): Promise<void> => {
+      await this.ensureInitialized();
+
+      const { collection, query, where, getDocs, updateDoc, serverTimestamp } =
+        await import("firebase/firestore");
+
+      try {
+        // Find the obstacle document
+        const obstaclesQuery = query(
+          collection(this.db, "obstacles"),
+          where("id", "==", obstacleId)
+        );
+
+        const querySnapshot = await getDocs(obstaclesQuery);
+
+        if (querySnapshot.empty) {
+          console.warn(
+            `Obstacle ${obstacleId} not found for confidence update`
+          );
+          return;
+        }
+
+        const obstacleDoc = querySnapshot.docs[0];
+
+        await updateDoc(obstacleDoc.ref, {
+          confidenceScore: newConfidence,
+          confidenceUpdatedAt: serverTimestamp(),
+        });
+
+        console.log(
+          `✅ Confidence updated for obstacle ${obstacleId}: ${newConfidence}`
+        );
+      } catch (error: any) {
+        console.error("❌ Failed to update obstacle confidence:", error);
+        // Don't throw - this is background processing
+      }
+    },
   };
 
   /**
    * Helper: Determine barangay from coordinates (basic implementation)
-   * In production, this would use a proper geocoding service
    */
   private getBarangayFromCoordinates(location: UserLocation): string {
-    // Rough mapping for major Pasig areas
     const { latitude, longitude } = location;
 
     if (
@@ -536,16 +615,17 @@ class SimpleFirebaseService implements FirebaseService {
   }
 }
 
-// Service factory
+// Service factory with enhanced features
 function createFirebaseService(): FirebaseService {
-  // Use real Firebase with enhanced obstacle reporting
   const USE_REAL_FIREBASE = true;
 
   if (USE_REAL_FIREBASE) {
-    console.log("🔥 Creating real Firebase service with obstacle reporting");
+    console.log(
+      "🔥 Creating ENHANCED Firebase service with validation analytics"
+    );
     return new SimpleFirebaseService();
   } else {
-    console.log("🔥 Creating mock Firebase service (safe mode)");
+    console.log("🔥 Creating enhanced mock Firebase service");
     return new MockFirebaseService();
   }
 }

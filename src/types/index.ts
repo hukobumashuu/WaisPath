@@ -17,10 +17,22 @@ export interface AccessibilityObstacle {
   reportedAt: Date;
   verified: boolean;
   timePattern?: "permanent" | "morning" | "afternoon" | "evening" | "weekend";
+
+  // ENHANCED: Validation system fields
   upvotes?: number;
   downvotes?: number;
-  photoBase64?: string;
   status?: "pending" | "verified" | "resolved" | "false_report";
+  reportsCount?: number; // NEW: Total engagement count
+
+  // Media and metadata
+  photoBase64?: string;
+
+  // Admin fields (optional)
+  reviewedBy?: string;
+  reviewedAt?: Date;
+  adminNotes?: string;
+  confidenceScore?: number; // NEW: Dynamic confidence scoring
+  lastVerifiedAt?: Date; // NEW: Last validation timestamp
 }
 
 // Philippine street reality obstacle types
@@ -88,28 +100,33 @@ export interface RouteFeedback {
   userId: string;
   userProfile: UserMobilityProfile;
   completedAt: Date;
-  
+
   // Core accessibility ratings (1-5 scale)
   traversabilityRating: number; // How easily user could navigate
   safetyRating: number; // How safe user felt from traffic/hazards
   comfortRating: number; // Overall comfort level
-  
+
   // Additional feedback
-  overallExperience: "excellent" | "good" | "acceptable" | "difficult" | "impossible";
+  overallExperience:
+    | "excellent"
+    | "good"
+    | "acceptable"
+    | "difficult"
+    | "impossible";
   wouldRecommend: boolean;
   comments?: string;
-  
+
   // Route-specific data
   routeStartLocation: UserLocation;
   routeEndLocation: UserLocation;
   actualDuration: number; // minutes taken
   estimatedDuration: number; // minutes predicted
   routeType: "fastest" | "accessible";
-  
+
   // Obstacles encountered
   obstaclesEncountered: EncounteredObstacle[];
   newObstaclesReported: AccessibilityObstacle[];
-  
+
   // Verification data
   confidenceContribution: number; // How much this feedback should boost confidence
   deviceSpecificInsights: DeviceSpecificFeedback;
@@ -127,7 +144,7 @@ export interface EncounteredObstacle {
 export interface DeviceSpecificFeedback {
   deviceType: "wheelchair" | "walker" | "cane" | "crutches" | "none";
   specificChallenges: string[]; // Device-specific issues encountered
-  adaptationsUsed: string[]; // How user adapted to obstacles  
+  adaptationsUsed: string[]; // How user adapted to obstacles
   recommendedImprovements: string[]; // Suggestions for this device type
 }
 
@@ -137,7 +154,7 @@ export interface RouteJourney {
   startedAt: Date;
   completedAt?: Date;
   status: "active" | "completed" | "abandoned";
-  
+
   // Route data
   selectedRoute: {
     routeId: string;
@@ -145,12 +162,12 @@ export interface RouteJourney {
     estimatedDuration: number;
     accessibilityScore: AccessibilityScore;
   };
-  
+
   // Journey tracking
   startLocation: UserLocation;
   destinationLocation: UserLocation;
   currentLocation?: UserLocation;
-  
+
   // Completion detection
   distanceFromDestination: number; // meters
   completionTriggered: boolean;
