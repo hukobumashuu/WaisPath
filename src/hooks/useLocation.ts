@@ -1,3 +1,6 @@
+// src/hooks/useLocation.ts
+// FIXED: Proper error handling and location permissions
+
 import { useState, useEffect } from "react";
 import * as Location from "expo-location";
 import { UserLocation } from "../types";
@@ -25,14 +28,17 @@ export function useLocation() {
   });
 
   // Get user location with Pasig fallback
-  const getCurrentLocation = async () => {
+  const getCurrentLocation = async (): Promise<UserLocation> => {
     try {
       setState((prev) => ({ ...prev, loading: true, error: null }));
+
+      console.log("📍 Requesting location permission...");
 
       // Request permission
       const { status } = await Location.requestForegroundPermissionsAsync();
 
       if (status !== "granted") {
+        console.log("❌ Location permission denied");
         setState((prev) => ({
           ...prev,
           loading: false,
@@ -43,11 +49,19 @@ export function useLocation() {
         return PASIG_CENTER;
       }
 
-      // Get current position
+      console.log(
+        "✅ Location permission granted, getting current position..."
+      );
+
+      // Get current position with longer timeout for Filipino networks
       const position = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced, // Good balance for Filipino mobile networks
-        timeInterval: 10000, // 10 seconds timeout
+        accuracy: Location.Accuracy.Balanced,
+        timeInterval: 15000, // 15 seconds timeout for slow networks
       });
+
+      console.log(
+        `📍 Got location: ${position.coords.latitude}, ${position.coords.longitude}`
+      );
 
       const userLocation: UserLocation = {
         latitude: position.coords.latitude,
@@ -57,30 +71,50 @@ export function useLocation() {
 
       // Check if user is reasonably near Pasig (for development/testing)
       const isInPasigArea = isNearPasig(userLocation);
+      console.log(`🗺️ Is in Pasig area: ${isInPasigArea}`);
 
       const finalLocation = isInPasigArea ? userLocation : PASIG_CENTER;
-      const locationNote = isInPasigArea
-        ? null
-        : "Using Pasig City center for demo";
+
+      // FIXED: Only show demo message if using fallback location
+      const locationNote = !isInPasigArea
+        ? "Using Pasig City center for demo purposes"
+        : null;
 
       setState((prev) => ({
         ...prev,
         loading: false,
         hasPermission: true,
         location: finalLocation,
-        error: locationNote,
+        error: locationNote, // This is just informational, not an error
       }));
 
+      console.log("✅ Location successfully set:", finalLocation);
       return finalLocation;
-    } catch (error) {
-      console.log("Location error:", error);
+    } catch (error: any) {
+      console.log("❌ Location error:", error.message);
+
+      // Provide more specific error messages
+      let errorMessage = "Could not get location. Using Pasig City center.";
+
+      if (
+        error.message?.includes("timeout") ||
+        error.message?.includes("Location request timed out")
+      ) {
+        errorMessage =
+          "Location timeout. Please check GPS signal. Using Pasig City center.";
+      } else if (error.message?.includes("Location provider is disabled")) {
+        errorMessage =
+          "GPS is disabled. Please enable location services. Using Pasig City center.";
+      }
+
       setState((prev) => ({
         ...prev,
         loading: false,
-        error: "Could not get location. Using Pasig City center.",
-        hasPermission: false,
+        error: errorMessage,
+        hasPermission: true, // FIXED: We still have permission, just couldn't get location
         location: PASIG_CENTER,
       }));
+
       return PASIG_CENTER;
     }
   };
@@ -120,6 +154,8 @@ export function useLocation() {
             longitude: position.coords.longitude,
             accuracy: position.coords.accuracy || undefined,
           };
+
+          console.log("📍 Location update:", newLocation);
 
           setState((prev) => ({
             ...prev,

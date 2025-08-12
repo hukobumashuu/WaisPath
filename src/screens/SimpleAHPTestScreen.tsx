@@ -1,5 +1,5 @@
 // src/screens/SimpleAHPTestScreen.tsx
-// Enhanced version with Google Maps + AHP integration test
+// ENHANCED: Now includes test data generation for empty Firestore
 
 import React, { useState } from "react";
 import {
@@ -15,11 +15,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useUserProfile } from "../stores/userProfileStore";
 import { useLocation } from "../hooks/useLocation";
-import { firebaseServices } from "../services/firebase";
-// ADD THESE NEW IMPORTS for Google Maps integration testing
-import { routeAnalysisService } from "../services/routeAnalysisService";
-import { googleMapsService } from "../services/googleMapsService";
-import { enhancedRouteAnalysisService } from "../services/enhancedRouteAnalysisService";
+import { firebaseServices, checkFirebaseHealth } from "../services/firebase";
+import { testDataUtils } from "../utils/generateTestData"; // NEW IMPORT
 
 const SimpleAHPTestScreen = () => {
   const insets = useSafeAreaInsets();
@@ -29,943 +26,579 @@ const SimpleAHPTestScreen = () => {
   const [locationMode, setLocationMode] = useState<"pasig" | "current">(
     "pasig"
   );
-  // ADD NEW STATE for integration testing
-  const [integrationResults, setIntegrationResults] = useState<string[]>([]);
+  const [firebaseStatus, setFirebaseStatus] = useState<string>("checking...");
 
   const { profile } = useUserProfile();
   const { location, pasigCenter } = useLocation();
 
-  // Use your existing Pasig POIs from NavigationScreen
-  const pasigPOIs = [
-    {
-      id: "1",
-      name: "Pasig City Hall",
-      lat: 14.5764,
-      lng: 121.0851,
-      type: "government",
-    },
-    { id: "2", name: "The Podium", lat: 14.5657, lng: 121.0644, type: "mall" },
-    {
-      id: "3",
-      name: "Rizal Medical Center",
-      lat: 14.5739,
-      lng: 121.0892,
-      type: "hospital",
-    },
-    {
-      id: "4",
-      name: "Pasig General Hospital",
-      lat: 14.5858,
-      lng: 121.0907,
-      type: "hospital",
-    },
-  ];
-  const createDiverseObstacles = async () => {
-    setLoading(true);
+  // Check Firebase health on component mount
+  React.useEffect(() => {
+    checkFirebaseHealth().then((health) => {
+      setFirebaseStatus(health.message);
+    });
+  }, []);
+
+  // NEW: Generate test data for empty Firestore
+  const handleGenerateTestData = async () => {
     try {
-      console.log("🌍 Creating diverse obstacles for better route testing...");
-      await enhancedRouteAnalysisService.createDiverseTestData();
+      setLoading(true);
 
       Alert.alert(
-        "🎯 Diverse Test Data Created!",
-        "Created obstacles along different route paths to enable better route comparison.\n\n" +
-          "This includes:\n" +
-          "• Multiple path options\n" +
-          "• Varied obstacle types\n" +
-          "• Different severity levels\n" +
-          "• Strategic locations for route differentiation\n\n" +
-          "Now test the enhanced route analysis!",
-        [{ text: "Test Enhanced Routes" }]
+        "Generate Test Data",
+        "This will create realistic obstacles around Pasig City for testing the validation system. Continue?",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Generate",
+            onPress: async () => {
+              const result = await testDataUtils.generateTestData();
+
+              Alert.alert(
+                result.success ? "Success!" : "Error",
+                result.message,
+                [{ text: "OK" }]
+              );
+
+              // Reload obstacles if successful
+              if (result.success) {
+                await loadObstacles();
+              }
+            },
+          },
+        ]
       );
+    } catch (error: any) {
+      Alert.alert("Error", `Failed to generate test data: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // NEW: Generate validation test scenarios
+  const handleGenerateValidationTests = async () => {
+    try {
+      setLoading(true);
+
+      await testDataUtils.generateValidationTestScenarios();
+
+      Alert.alert(
+        "Validation Test Scenarios Created!",
+        "Created specific obstacles with different validation states:\n\n" +
+          "• Single report (needs validation)\n" +
+          "• Community verified (confirmed)\n" +
+          "• Disputed obstacle (conflicting reports)\n" +
+          "• Recently cleared obstacle\n\n" +
+          "Perfect for testing the validation system!",
+        [{ text: "OK" }]
+      );
+
+      await loadObstacles();
     } catch (error: any) {
       Alert.alert(
         "Error",
-        `Failed to create diverse obstacles: ${error.message}`
+        `Failed to create validation tests: ${error.message}`
       );
     } finally {
       setLoading(false);
     }
   };
 
-  const testEnhancedRouteAnalysis = async () => {
-    setLoading(true);
-    setIntegrationResults([]);
-
-    const addResult = (result: string) => {
-      setIntegrationResults((prev) => [
-        ...prev,
-        `${new Date().toLocaleTimeString()}: ${result}`,
-      ]);
-    };
-
-    try {
-      addResult("🚀 Testing Enhanced Route Analysis with Alternatives...");
-
-      if (!profile) {
-        addResult("❌ No user profile found");
-        Alert.alert("Error", "Please set up your profile first");
-        return;
-      }
-
-      addResult(`👤 User Profile: ${profile.type} device`);
-
-      const coords = getSearchCoordinates();
-      addResult(`📍 Test location: ${coords.label}`);
-
-      // Test enhanced route analysis
-      addResult(
-        "🧠 Testing enhanced route analysis with artificial alternatives..."
-      );
-      const start = { latitude: coords.lat, longitude: coords.lng };
-      const end = { latitude: pasigPOIs[0].lat, longitude: pasigPOIs[0].lng }; // Pasig City Hall
-
-      const analysis = await enhancedRouteAnalysisService.analyzeRoutes(
-        start,
-        end,
-        profile
-      );
-      addResult("✅ Enhanced route analysis working!");
-
-      // Show detailed results
-      addResult(
-        `⚡ Fastest Route: ${Math.round(
-          analysis.fastestRoute.googleRoute.duration / 60
-        )}min (Grade ${analysis.fastestRoute.accessibilityScore.grade})`
-      );
-      addResult(
-        `   └─ Obstacles: ${
-          analysis.fastestRoute.obstacleCount
-        } | Score: ${analysis.fastestRoute.accessibilityScore.overall.toFixed(
-          0
-        )}/100`
-      );
-      addResult(
-        `   └─ ${
-          analysis.fastestRoute.isAlternative
-            ? "Artificial Alternative"
-            : "Real Google Route"
-        }`
-      );
-
-      addResult(
-        `♿ Accessible Route: ${Math.round(
-          analysis.accessibleRoute.googleRoute.duration / 60
-        )}min (Grade ${analysis.accessibleRoute.accessibilityScore.grade})`
-      );
-      addResult(
-        `   └─ Obstacles: ${
-          analysis.accessibleRoute.obstacleCount
-        } | Score: ${analysis.accessibleRoute.accessibilityScore.overall.toFixed(
-          0
-        )}/100`
-      );
-      addResult(
-        `   └─ ${
-          analysis.accessibleRoute.isAlternative
-            ? "Artificial Alternative"
-            : "Real Google Route"
-        }`
-      );
-
-      const timeDiff = Math.round(
-        (analysis.accessibleRoute.googleRoute.duration -
-          analysis.fastestRoute.googleRoute.duration) /
-          60
-      );
-      const scoreDiff =
-        analysis.accessibleRoute.accessibilityScore.overall -
-        analysis.fastestRoute.accessibilityScore.overall;
-
-      addResult(`📊 Time difference: ${timeDiff} minutes`);
-      addResult(`📈 Accessibility improvement: ${scoreDiff.toFixed(0)} points`);
-      addResult(`💡 ${analysis.routeComparison.recommendation}`);
-
-      Alert.alert(
-        "🎉 Enhanced Route Analysis SUCCESS!",
-        `Routes now show meaningful differences!\n\n` +
-          `⚡ Fastest: ${Math.round(
-            analysis.fastestRoute.googleRoute.duration / 60
-          )}min (Grade ${analysis.fastestRoute.accessibilityScore.grade}) - ${
-            analysis.fastestRoute.obstacleCount
-          } obstacles\n` +
-          `♿ Accessible: ${Math.round(
-            analysis.accessibleRoute.googleRoute.duration / 60
-          )}min (Grade ${
-            analysis.accessibleRoute.accessibilityScore.grade
-          }) - ${analysis.accessibleRoute.obstacleCount} obstacles\n\n` +
-          `${
-            timeDiff > 0
-              ? `Accessible route is ${timeDiff} min longer but `
-              : ""
-          }${scoreDiff.toFixed(0)} points more accessible!\n\n` +
-          `🎯 Ready for real route comparison in NavigationScreen!`,
-        [{ text: "Awesome! 🌟" }]
-      );
-    } catch (error: any) {
-      console.error("❌ Enhanced route test failed:", error);
-      addResult(`❌ ERROR: ${error.message}`);
-
-      Alert.alert(
-        "Enhanced Route Test Failed",
-        `Error: ${error.message}\n\nTry:\n• Create diverse obstacles first\n• Check internet connection\n• Verify user profile setup`,
-        [{ text: "OK" }]
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ADD NEW INTEGRATION TEST FUNCTION
-  const testGoogleMapsIntegration = async () => {
-    setLoading(true);
-    setIntegrationResults([]);
-
-    const addResult = (result: string) => {
-      setIntegrationResults((prev) => [
-        ...prev,
-        `${new Date().toLocaleTimeString()}: ${result}`,
-      ]);
-    };
-
-    try {
-      addResult("🚀 Starting Google Maps + AHP Integration Test...");
-
-      if (!profile) {
-        addResult("❌ No user profile found");
-        Alert.alert(
-          "Error",
-          "Please set up your profile first in the Profile tab"
-        );
-        return;
-      }
-
-      addResult(`👤 User Profile: ${profile.type} device`);
-
-      // Check API key
-      if (!process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY) {
-        addResult("❌ Google Maps API key not found in .env");
-        Alert.alert(
-          "Setup Required",
-          "Please add EXPO_PUBLIC_GOOGLE_MAPS_API_KEY to your .env file"
-        );
-        return;
-      }
-      addResult("✅ Google Maps API key configured");
-
-      const coords = getSearchCoordinates();
-      addResult(`📍 Test location: ${coords.label}`);
-
-      // Test 1: Google Maps API
-      addResult("🗺️ Testing Google Maps Directions API...");
-      const start = { latitude: coords.lat, longitude: coords.lng };
-      const end = { latitude: pasigPOIs[0].lat, longitude: pasigPOIs[0].lng }; // Pasig City Hall
-
-      const routes = await googleMapsService.getRoutes(start, end);
-      addResult(`✅ Google Maps API working! Found ${routes.length} routes`);
-
-      routes.forEach((route, index) => {
-        addResult(
-          `  Route ${index + 1}: ${Math.round(route.duration / 60)}min, ${(
-            route.distance / 1000
-          ).toFixed(1)}km`
-        );
-      });
-
-      // Test 2: AHP Integration
-      addResult("🧠 Testing AHP route analysis integration...");
-      const analysis = await routeAnalysisService.analyzeRoutes(
-        start,
-        end,
-        profile
-      );
-      addResult("✅ AHP route analysis working!");
-
-      addResult(
-        `⚡ Fastest Route: ${Math.round(
-          analysis.fastestRoute.googleRoute.duration / 60
-        )}min (Grade ${analysis.fastestRoute.accessibilityScore.grade})`
-      );
-      addResult(
-        `♿ Accessible Route: ${Math.round(
-          analysis.accessibleRoute.googleRoute.duration / 60
-        )}min (Grade ${analysis.accessibleRoute.accessibilityScore.grade})`
-      );
-      addResult(
-        `📊 Obstacles: Fast=${analysis.fastestRoute.obstacleCount}, Accessible=${analysis.accessibleRoute.obstacleCount}`
-      );
-      addResult(`💡 ${analysis.routeComparison.recommendation}`);
-
-      // Test 3: Route comparison validation
-      const timeDiff = Math.round(
-        (analysis.accessibleRoute.googleRoute.duration -
-          analysis.fastestRoute.googleRoute.duration) /
-          60
-      );
-      const distanceDiff =
-        (analysis.accessibleRoute.googleRoute.distance -
-          analysis.fastestRoute.googleRoute.distance) /
-        1000;
-      addResult(`📈 Time difference: ${timeDiff} minutes`);
-      addResult(`📏 Distance difference: ${distanceDiff.toFixed(1)} km`);
-
-      Alert.alert(
-        "🎉 Integration Test SUCCESS!",
-        `All systems working perfectly!\n\n` +
-          `✅ Google Maps API: ${routes.length} routes found\n` +
-          `✅ AHP Analysis: Routes scored\n` +
-          `✅ Route Comparison: Working\n\n` +
-          `Results:\n` +
-          `⚡ Fastest: ${Math.round(
-            analysis.fastestRoute.googleRoute.duration / 60
-          )}min (Grade ${analysis.fastestRoute.accessibilityScore.grade})\n` +
-          `♿ Accessible: ${Math.round(
-            analysis.accessibleRoute.googleRoute.duration / 60
-          )}min (Grade ${
-            analysis.accessibleRoute.accessibilityScore.grade
-          })\n\n` +
-          `🎯 Ready for NavigationScreen integration!`,
-        [{ text: "Awesome! 🌟" }]
-      );
-    } catch (error: any) {
-      console.error("❌ Integration test failed:", error);
-      addResult(`❌ ERROR: ${error.message}`);
-
-      let errorHelp = "Check:\n";
-      if (error.message.includes("API key") || error.message.includes("key")) {
-        errorHelp += "• Google Maps API key in .env file\n";
-      }
-      if (
-        error.message.includes("network") ||
-        error.message.includes("fetch")
-      ) {
-        errorHelp += "• Internet connection\n";
-      }
-      if (error.message.includes("profile")) {
-        errorHelp += "• User profile setup\n";
-      }
-      errorHelp += "• API key has Directions API enabled\n";
-      errorHelp += "• Try running on physical device if using emulator";
-
-      Alert.alert(
-        "Integration Test Failed",
-        `Error: ${error.message}\n\n${errorHelp}`,
-        [{ text: "OK" }]
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Simple AHP calculation function (your existing code)
-  const calculateSimpleAHPScore = (obstacle: any, userProfile: any) => {
-    let traversability = 100;
-    let safety = 100;
-    let comfort = 100;
-
-    // Basic obstacle penalties
-    const obstaclePenalties: Record<string, number> = {
-      vendor_blocking: 15,
-      parked_vehicles: 20,
-      stairs_no_ramp: 50,
-      narrow_passage: 25,
-      broken_pavement: 20,
-      flooding: 30,
-      construction: 35,
-      no_sidewalk: 40,
-      other: 10,
-    };
-
-    // Apply basic penalty
-    const basePenalty = obstaclePenalties[obstacle.type] || 10;
-
-    // Severity multiplier
-    const severityMultipliers: Record<string, number> = {
-      low: 0.5,
-      medium: 1.0,
-      high: 1.5,
-      blocking: 2.5,
-    };
-    const severityMultiplier = severityMultipliers[obstacle.severity] || 1.0;
-
-    const penalty = basePenalty * severityMultiplier;
-
-    // Apply to traversability (most affected)
-    traversability -= penalty;
-
-    // Apply smaller penalties to safety and comfort
-    safety -= penalty * 0.3;
-    comfort -= penalty * 0.2;
-
-    // User-specific adjustments
-    if (
-      userProfile?.type === "wheelchair" &&
-      obstacle.type === "stairs_no_ramp"
-    ) {
-      traversability -= 30; // Extra penalty for wheelchair users
-    }
-
-    if (userProfile?.preferShade && obstacle.type === "vendor_blocking") {
-      comfort += 10; // Vendors often provide shade
-    }
-
-    // Calculate weighted overall score (AHP weights)
-    const overall = traversability * 0.7 + safety * 0.2 + comfort * 0.1;
-
-    // Convert to grade
-    let grade = "F";
-    if (overall >= 85) grade = "A";
-    else if (overall >= 70) grade = "B";
-    else if (overall >= 55) grade = "C";
-    else if (overall >= 40) grade = "D";
-
-    return {
-      traversability: Math.max(0, Math.min(100, traversability)),
-      safety: Math.max(0, Math.min(100, safety)),
-      comfort: Math.max(0, Math.min(100, comfort)),
-      overall: Math.max(0, Math.min(100, overall)),
-      grade,
-    };
-  };
-
-  const getSearchCoordinates = () => {
-    if (locationMode === "pasig") {
-      return {
-        lat: pasigCenter.latitude,
-        lng: pasigCenter.longitude,
-        label: "Pasig City Center",
-      };
-    } else {
-      return {
-        lat: location?.latitude || pasigCenter.latitude,
-        lng: location?.longitude || pasigCenter.longitude,
-        label: location
-          ? "Your Current Location"
-          : "Pasig City Center (fallback)",
-      };
-    }
-  };
-
+  // Load obstacles from Firebase
   const loadObstacles = async () => {
-    setLoading(true);
     try {
-      const coords = getSearchCoordinates();
+      setLoading(true);
 
-      console.log(
-        `🔍 Searching for obstacles near ${coords.label}: ${coords.lat}, ${coords.lng}`
-      );
+      const currentLocation =
+        locationMode === "current" && location ? location : pasigCenter;
 
-      // Get obstacles from your existing Firebase service
+      console.log("🗺️ Loading obstacles for testing...");
       const obstacleData = await firebaseServices.obstacle.getObstaclesInArea(
-        coords.lat,
-        coords.lng,
-        5 // 5km radius
+        currentLocation.latitude,
+        currentLocation.longitude,
+        10 // 10km radius
       );
 
       setObstacles(obstacleData);
 
-      // Calculate AHP scores for each obstacle
-      if (profile) {
-        const results = obstacleData.map((obstacle) => {
-          const ahpScore = calculateSimpleAHPScore(obstacle, profile);
-          return {
-            obstacle,
-            ahpScore,
-            affectsUser: isObstacleRelevantToUser(obstacle, profile),
-          };
-        });
-
-        // Sort by AHP score (worst first)
-        results.sort((a, b) => a.ahpScore.overall - b.ahpScore.overall);
-        setTestResults(results);
-      }
-
       Alert.alert(
         "Obstacles Loaded",
-        `Found ${obstacleData.length} obstacles near ${coords.label}`,
+        `Found ${obstacleData.length} obstacles in the area.\n\n` +
+          `Location: ${currentLocation.latitude.toFixed(
+            4
+          )}, ${currentLocation.longitude.toFixed(4)}\n` +
+          `Mode: ${
+            locationMode === "current" ? "Your Location" : "Pasig Center"
+          }`,
         [{ text: "OK" }]
       );
-    } catch (error) {
+    } catch (error: any) {
+      Alert.alert("Error", `Failed to load obstacles: ${error.message}`);
       console.error("Failed to load obstacles:", error);
-      Alert.alert("Error", "Hindi nakuha ang obstacles. Subukan ulit.");
     } finally {
       setLoading(false);
     }
   };
 
-  const createTestObstacles = async () => {
-    setLoading(true);
-    try {
-      const coords = getSearchCoordinates();
-
-      console.log(
-        `🧪 Creating test obstacles around ${coords.label}: ${coords.lat}, ${coords.lng}`
+  // Test validation system
+  const testValidationSystem = async () => {
+    if (obstacles.length === 0) {
+      Alert.alert(
+        "No Obstacles",
+        "Load obstacles first to test validation system."
       );
+      return;
+    }
 
-      // Create realistic Pasig obstacles around your existing POIs
-      const testObstacles = [
-        // Near Pasig City Hall
-        {
-          location: {
-            latitude: pasigPOIs[0].lat + 0.001,
-            longitude: pasigPOIs[0].lng,
-          },
-          type: "stairs_no_ramp" as any,
-          severity: "blocking" as any,
-          description: "Pasig City Hall entrance walang wheelchair ramp",
-          timePattern: "permanent" as any,
-        },
-        // Near The Podium
-        {
-          location: {
-            latitude: pasigPOIs[1].lat,
-            longitude: pasigPOIs[1].lng + 0.001,
-          },
-          type: "vendor_blocking" as any,
-          severity: "medium" as any,
-          description: "Food vendors sa tabi ng Podium mall",
-          timePattern: "evening" as any,
-        },
-        // Near Rizal Medical Center
-        {
-          location: {
-            latitude: pasigPOIs[2].lat - 0.001,
-            longitude: pasigPOIs[2].lng,
-          },
-          type: "parked_vehicles" as any,
-          severity: "high" as any,
-          description: "Mga sasakyan nakaharang sa hospital entrance",
-          timePattern: "morning" as any,
-        },
-        // Near Pasig General Hospital
-        {
-          location: {
-            latitude: pasigPOIs[3].lat,
-            longitude: pasigPOIs[3].lng - 0.001,
-          },
-          type: "broken_pavement" as any,
-          severity: "high" as any,
-          description: "Sirang bangketa malapit sa hospital",
-          timePattern: "permanent" as any,
-        },
-        // General Pasig area obstacle
-        {
-          location: {
-            latitude: coords.lat + 0.002,
-            longitude: coords.lng + 0.002,
-          },
-          type: "flooding" as any,
-          severity: "medium" as any,
-          description: "Baha tuwing umuulan sa Pasig area",
-          timePattern: "permanent" as any,
-        },
-      ];
+    try {
+      setLoading(true);
 
-      console.log("🧪 Creating test obstacles for AHP demo...");
+      // Test validation on first obstacle
+      const testObstacle = obstacles[0];
 
-      let successCount = 0;
-      // Add each test obstacle to Firebase
-      for (const obstacleData of testObstacles) {
-        try {
-          await firebaseServices.obstacle.reportObstacle(obstacleData);
-          console.log(`✅ Test obstacle created: ${obstacleData.type}`);
-          successCount++;
-        } catch (error) {
-          console.error(`❌ Failed to create ${obstacleData.type}:`, error);
-        }
-      }
+      console.log("🧪 Testing validation system...");
+
+      // Test upvote
+      await firebaseServices.obstacle.verifyObstacle(testObstacle.id, "upvote");
+      console.log("✅ Upvote test successful");
+
+      // Test downvote
+      await firebaseServices.obstacle.verifyObstacle(
+        testObstacle.id,
+        "downvote"
+      );
+      console.log("✅ Downvote test successful");
 
       Alert.alert(
-        "Test Data Created!",
-        `${successCount} test obstacles added around ${coords.label}. Now tap "Load & Analyze Obstacles" to see AHP scoring in action!`,
+        "Validation Test Complete!",
+        `Successfully tested validation on obstacle: "${testObstacle.description}"\n\n` +
+          "Both upvote and downvote operations completed successfully.\n\n" +
+          "Check the NavigationScreen to see the validation prompts in action!",
         [{ text: "OK" }]
       );
-    } catch (error) {
-      console.error("Failed to create test data:", error);
-      Alert.alert("Error", "Hindi nakagawa ng test data.");
+    } catch (error: any) {
+      Alert.alert("Validation Test Failed", error.message);
+      console.error("Validation test failed:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  const isObstacleRelevantToUser = (
-    obstacle: any,
-    userProfile: any
-  ): boolean => {
-    const affectedTypes: Record<string, string[]> = {
-      stairs_no_ramp: ["wheelchair", "walker"],
-      narrow_passage: ["wheelchair", "walker"],
-      broken_pavement: ["wheelchair", "walker", "cane", "crutches"],
-      flooding: ["wheelchair", "walker", "crutches"],
-      vendor_blocking: ["wheelchair", "walker"],
-      parked_vehicles: ["wheelchair", "walker"],
-      construction: ["wheelchair", "walker", "crutches"],
-      no_sidewalk: ["wheelchair", "walker"],
-    };
-
-    const relevantTypes = affectedTypes[obstacle.type] || [];
-    return relevantTypes.includes(userProfile.type);
-  };
-
-  const getScoreColor = (score: number): string => {
-    if (score >= 85) return "#10B981"; // Green
-    if (score >= 70) return "#84CC16"; // Light green
-    if (score >= 55) return "#F59E0B"; // Yellow
-    if (score >= 40) return "#EF4444"; // Red
-    return "#DC2626"; // Dark red
-  };
-
-  const getObstacleIcon = (type: string) => {
-    const icons: Record<string, keyof typeof Ionicons.glyphMap> = {
-      vendor_blocking: "storefront",
-      parked_vehicles: "car",
-      flooding: "water",
-      broken_pavement: "warning",
-      stairs_no_ramp: "walk",
-      narrow_passage: "resize",
-      construction: "construct",
-      no_sidewalk: "trail-sign",
-      other: "help-circle",
-    };
-    return icons[type] || "alert-circle";
-  };
-
-  const showDetailedBreakdown = (result: any) => {
-    const { obstacle, ahpScore } = result;
+  // Clear all test data
+  const handleClearTestData = () => {
     Alert.alert(
-      "AHP Score Breakdown",
-      `Obstacle: ${obstacle.type}\n` +
-        `Severity: ${obstacle.severity}\n\n` +
-        `AHP Analysis:\n` +
-        `• Traversability (70%): ${ahpScore.traversability.toFixed(0)}/100\n` +
-        `• Safety (20%): ${ahpScore.safety.toFixed(0)}/100\n` +
-        `• Comfort (10%): ${ahpScore.comfort.toFixed(0)}/100\n\n` +
-        `Overall Score: ${ahpScore.overall.toFixed(0)}/100\n` +
-        `Grade: ${ahpScore.grade}\n\n` +
-        `User Type: ${profile?.type || "none"}\n` +
-        `Affects You: ${result.affectsUser ? "Yes" : "No"}\n\n` +
-        `Location: ${obstacle.description}`
+      "Clear Test Data",
+      "This will remove all test obstacles. Are you sure?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: async () => {
+            await testDataUtils.clearTestData();
+            setObstacles([]);
+            Alert.alert(
+              "Cleared",
+              "Test data cleared (note: manual Firestore cleanup may be needed)"
+            );
+          },
+        },
+      ]
     );
   };
 
-  const coords = getSearchCoordinates();
-
   return (
-    <SafeAreaView className="flex-1 bg-gray-50">
-      <ScrollView 
-        className="flex-1 p-4"
-        contentContainerStyle={{ paddingBottom: insets.bottom + 60 + 16 }}
-      >
-        <View className="mb-6">
-          <Text className="text-3xl font-bold text-gray-900 mb-2">
-            AHP Algorithm Test
+    <SafeAreaView
+      style={{
+        flex: 1,
+        backgroundColor: "#F9FAFB",
+        paddingTop: insets.top,
+      }}
+    >
+      <ScrollView style={{ flex: 1, padding: 16 }}>
+        {/* Header */}
+        <View style={{ marginBottom: 24 }}>
+          <Text
+            style={{
+              fontSize: 24,
+              fontWeight: "bold",
+              color: "#1F2937",
+              marginBottom: 8,
+            }}
+          >
+            🧪 WAISPATH Testing Lab
           </Text>
-          <Text className="text-base text-gray-600">
-            Testing accessibility scoring with Pasig City obstacles
+          <Text style={{ fontSize: 16, color: "#6B7280", marginBottom: 12 }}>
+            Test data generation and validation system testing
+          </Text>
+
+          {/* Firebase Status */}
+          <View
+            style={{
+              backgroundColor: "#EBF8FF",
+              padding: 12,
+              borderRadius: 8,
+              borderLeftWidth: 4,
+              borderLeftColor: "#3B82F6",
+            }}
+          >
+            <Text style={{ fontSize: 12, color: "#1E40AF" }}>
+              🔥 Firebase Status: {firebaseStatus}
+            </Text>
+          </View>
+        </View>
+
+        {/* Test Data Generation Section */}
+        <View
+          style={{
+            backgroundColor: "white",
+            padding: 16,
+            borderRadius: 12,
+            marginBottom: 16,
+            elevation: 2,
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 1 },
+            shadowOpacity: 0.1,
+            shadowRadius: 2,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 18,
+              fontWeight: "bold",
+              color: "#1F2937",
+              marginBottom: 12,
+            }}
+          >
+            📝 Test Data Generation
+          </Text>
+
+          <TouchableOpacity
+            style={{
+              backgroundColor: "#10B981",
+              paddingVertical: 12,
+              paddingHorizontal: 16,
+              borderRadius: 8,
+              marginBottom: 12,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+            onPress={handleGenerateTestData}
+            disabled={loading}
+          >
+            <Ionicons name="add-circle" size={20} color="white" />
+            <Text style={{ color: "white", fontWeight: "600", marginLeft: 8 }}>
+              Generate Test Obstacles
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={{
+              backgroundColor: "#8B5CF6",
+              paddingVertical: 12,
+              paddingHorizontal: 16,
+              borderRadius: 8,
+              marginBottom: 12,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+            onPress={handleGenerateValidationTests}
+            disabled={loading}
+          >
+            <Ionicons name="checkmark-circle" size={20} color="white" />
+            <Text style={{ color: "white", fontWeight: "600", marginLeft: 8 }}>
+              Create Validation Test Cases
+            </Text>
+          </TouchableOpacity>
+
+          <Text style={{ fontSize: 12, color: "#6B7280", textAlign: "center" }}>
+            Generates realistic obstacles around Pasig City landmarks
           </Text>
         </View>
 
-        {/* NEW: Integration Test Status */}
-        <View className="bg-white rounded-lg p-4 mb-4">
-          <Text className="text-lg font-bold text-gray-900 mb-2">
-            Integration Status
+        {/* Location Mode Selection */}
+        <View
+          style={{
+            backgroundColor: "white",
+            padding: 16,
+            borderRadius: 12,
+            marginBottom: 16,
+            elevation: 2,
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 1 },
+            shadowOpacity: 0.1,
+            shadowRadius: 2,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 18,
+              fontWeight: "bold",
+              color: "#1F2937",
+              marginBottom: 12,
+            }}
+          >
+            📍 Location Mode
           </Text>
-          <Text className="text-sm text-gray-600">
-            Location: {location ? "✅ Available" : "❌ Not available"}
-          </Text>
-          <Text className="text-sm text-gray-600">
-            Profile: {profile ? `✅ ${profile.type} device` : "❌ Not set"}
-          </Text>
-          <Text className="text-sm text-gray-600">
-            Google API:{" "}
-            {process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
-              ? "✅ Configured"
-              : "❌ Missing API key"}
-          </Text>
-        </View>
 
-        {/* Location Mode Switcher */}
-        <View className="bg-white rounded-lg p-4 mb-4">
-          <Text className="text-lg font-bold text-gray-900 mb-3">
-            📍 Test Location
-          </Text>
-
-          <View className="flex-row mb-3">
+          <View style={{ flexDirection: "row", marginBottom: 12 }}>
             <TouchableOpacity
+              style={{
+                flex: 1,
+                backgroundColor:
+                  locationMode === "pasig" ? "#3B82F6" : "#F3F4F6",
+                paddingVertical: 8,
+                paddingHorizontal: 12,
+                borderRadius: 6,
+                marginRight: 8,
+              }}
               onPress={() => setLocationMode("pasig")}
-              className={`flex-1 mr-2 px-4 py-3 rounded-lg ${
-                locationMode === "pasig" ? "bg-blue-500" : "bg-gray-200"
-              }`}
             >
               <Text
-                className={`text-center font-semibold ${
-                  locationMode === "pasig" ? "text-white" : "text-gray-700"
-                }`}
+                style={{
+                  color: locationMode === "pasig" ? "white" : "#6B7280",
+                  textAlign: "center",
+                  fontWeight: "600",
+                }}
               >
-                Pasig Demo
+                Pasig Center
               </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
+              style={{
+                flex: 1,
+                backgroundColor:
+                  locationMode === "current" ? "#3B82F6" : "#F3F4F6",
+                paddingVertical: 8,
+                paddingHorizontal: 12,
+                borderRadius: 6,
+                marginLeft: 8,
+              }}
               onPress={() => setLocationMode("current")}
-              className={`flex-1 ml-2 px-4 py-3 rounded-lg ${
-                locationMode === "current" ? "bg-green-500" : "bg-gray-200"
-              }`}
             >
               <Text
-                className={`text-center font-semibold ${
-                  locationMode === "current" ? "text-white" : "text-gray-700"
-                }`}
+                style={{
+                  color: locationMode === "current" ? "white" : "#6B7280",
+                  textAlign: "center",
+                  fontWeight: "600",
+                }}
               >
                 Your Location
               </Text>
             </TouchableOpacity>
           </View>
 
-          <Text className="text-sm text-gray-600">Current: {coords.label}</Text>
-          <Text className="text-xs text-gray-500">
-            Coordinates: {coords.lat.toFixed(4)}, {coords.lng.toFixed(4)}
+          <Text style={{ fontSize: 12, color: "#6B7280", textAlign: "center" }}>
+            {locationMode === "current" && location
+              ? `Using: ${location.latitude.toFixed(
+                  4
+                )}, ${location.longitude.toFixed(4)}`
+              : `Using: ${pasigCenter.latitude}, ${pasigCenter.longitude}`}
           </Text>
         </View>
 
-        {/* Current User Profile */}
-        <View className="bg-white rounded-lg p-4 mb-4">
-          <Text className="text-lg font-bold text-gray-900 mb-2">
-            Current User Profile
-          </Text>
-          <Text className="text-sm text-gray-600">
-            Device Type: {profile?.type || "Not set"}
-          </Text>
-          <Text className="text-sm text-gray-600">
-            Avoid Stairs: {profile?.avoidStairs ? "Yes" : "No"}
-          </Text>
-          <Text className="text-sm text-gray-600">
-            Prefer Shade: {profile?.preferShade ? "Yes" : "No"}
-          </Text>
-          <Text className="text-sm text-gray-600">
-            Max Walking Distance: {profile?.maxWalkingDistance || "Not set"}m
-          </Text>
-        </View>
-
-        {/* Action Buttons */}
-        {/* NEW: Google Maps + AHP Integration Test Button */}
-        <TouchableOpacity
-          onPress={testGoogleMapsIntegration}
-          disabled={loading}
-          className={`py-3 rounded-lg mb-4 ${
-            loading ? "bg-gray-400" : "bg-purple-500"
-          }`}
+        {/* Testing Actions */}
+        <View
+          style={{
+            backgroundColor: "white",
+            padding: 16,
+            borderRadius: 12,
+            marginBottom: 16,
+            elevation: 2,
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 1 },
+            shadowOpacity: 0.1,
+            shadowRadius: 2,
+          }}
         >
-          <View className="flex-row items-center justify-center">
-            {loading && <ActivityIndicator size="small" color="white" />}
-            <Text className="text-white font-semibold text-center ml-1">
-              {loading
-                ? "Testing Integration..."
-                : "🚀 Test Google Maps + AHP Integration"}
-            </Text>
-          </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={createDiverseObstacles}
-          disabled={loading}
-          className={`py-3 rounded-lg mb-4 ${
-            loading ? "bg-gray-400" : "bg-yellow-500"
-          }`}
-        >
-          <Text className="text-white font-semibold text-center">
-            {loading
-              ? "Creating Diverse Data..."
-              : "🌍 Create Diverse Test Obstacles"}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={testEnhancedRouteAnalysis}
-          disabled={loading}
-          className={`py-3 rounded-lg mb-4 ${
-            loading ? "bg-gray-400" : "bg-purple-600"
-          }`}
-        >
-          <View className="flex-row items-center justify-center">
-            {loading && <ActivityIndicator size="small" color="white" />}
-            <Text className="text-white font-semibold text-center ml-1">
-              {loading
-                ? "Testing Enhanced Analysis..."
-                : "🎯 Test Enhanced Route Analysis"}
-            </Text>
-          </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={createTestObstacles}
-          disabled={loading}
-          className={`py-3 rounded-lg mb-4 ${
-            loading ? "bg-gray-400" : "bg-green-500"
-          }`}
-        >
-          <Text className="text-white font-semibold text-center">
-            {loading ? "Creating Test Data..." : "🧪 Create Test Obstacles"}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={loadObstacles}
-          disabled={loading}
-          className={`py-3 rounded-lg mb-4 ${
-            loading ? "bg-gray-400" : "bg-blue-500"
-          }`}
-        >
-          <Text className="text-white font-semibold text-center">
-            {loading ? "Loading Obstacles..." : "🔍 Load & Analyze Obstacles"}
-          </Text>
-        </TouchableOpacity>
-
-        {/* NEW: Integration Test Results */}
-        {integrationResults.length > 0 && (
-          <View className="bg-white rounded-lg p-4 mb-4">
-            <View className="flex-row items-center justify-between mb-2">
-              <Text className="text-lg font-bold text-gray-900">
-                🚀 Integration Test Results
-              </Text>
-              <TouchableOpacity
-                onPress={() => setIntegrationResults([])}
-                className="px-2 py-1 rounded bg-gray-200"
-              >
-                <Text className="text-xs text-gray-600">Clear</Text>
-              </TouchableOpacity>
-            </View>
-            <ScrollView className="max-h-48">
-              {integrationResults.map((result, index) => (
-                <Text
-                  key={index}
-                  className="text-xs text-gray-700 mb-1 font-mono"
-                >
-                  {result}
-                </Text>
-              ))}
-            </ScrollView>
-          </View>
-        )}
-
-        {/* Results Summary */}
-        {testResults.length > 0 && (
-          <View className="bg-white rounded-lg p-4 mb-4">
-            <Text className="text-lg font-bold text-gray-900 mb-2">
-              AHP Analysis Results
-            </Text>
-            <View className="flex-row justify-between">
-              <View className="items-center">
-                <Text className="text-2xl font-bold text-blue-600">
-                  {testResults.length}
-                </Text>
-                <Text className="text-xs text-gray-600">Total Obstacles</Text>
-              </View>
-              <View className="items-center">
-                <Text className="text-2xl font-bold text-red-600">
-                  {
-                    testResults.filter(
-                      (r) =>
-                        r.ahpScore.grade === "F" || r.ahpScore.grade === "D"
-                    ).length
-                  }
-                </Text>
-                <Text className="text-xs text-gray-600">Poor Scores</Text>
-              </View>
-              <View className="items-center">
-                <Text className="text-2xl font-bold text-orange-600">
-                  {testResults.filter((r) => r.affectsUser).length}
-                </Text>
-                <Text className="text-xs text-gray-600">Affects You</Text>
-              </View>
-              <View className="items-center">
-                <Text className="text-2xl font-bold text-green-600">
-                  {(
-                    testResults.reduce(
-                      (sum, r) => sum + r.ahpScore.overall,
-                      0
-                    ) / testResults.length
-                  ).toFixed(0)}
-                </Text>
-                <Text className="text-xs text-gray-600">Avg Score</Text>
-              </View>
-            </View>
-          </View>
-        )}
-
-        {/* Obstacle Results */}
-        {testResults.map((result, index) => (
-          <TouchableOpacity
-            key={index}
-            onPress={() => showDetailedBreakdown(result)}
-            className={`bg-white rounded-lg p-4 mb-3 shadow ${
-              result.affectsUser ? "border-l-4 border-orange-400" : ""
-            }`}
+          <Text
+            style={{
+              fontSize: 18,
+              fontWeight: "bold",
+              color: "#1F2937",
+              marginBottom: 12,
+            }}
           >
-            <View className="flex-row items-center justify-between mb-2">
-              <View className="flex-row items-center flex-1">
-                <Ionicons
-                  name={getObstacleIcon(result.obstacle.type)}
-                  size={24}
-                  color="#6B7280"
-                />
-                <Text
-                  className="text-lg font-semibold ml-2 flex-1"
-                  numberOfLines={1}
-                >
-                  {result.obstacle.type.replace("_", " ")}
-                </Text>
-              </View>
+            🧪 Testing Actions
+          </Text>
 
-              <View className="items-center">
-                <Text
-                  className="text-2xl font-bold"
-                  style={{ color: getScoreColor(result.ahpScore.overall) }}
-                >
-                  {result.ahpScore.grade}
-                </Text>
-                <Text className="text-xs text-gray-500">
-                  {result.ahpScore.overall.toFixed(0)}/100
-                </Text>
-              </View>
-            </View>
-
-            <View className="flex-row items-center justify-between">
-              <View className="flex-row items-center">
-                <Text className="text-sm text-gray-600 mr-4">
-                  Severity: {result.obstacle.severity}
-                </Text>
-                {result.affectsUser && (
-                  <View className="bg-orange-100 px-2 py-1 rounded">
-                    <Text className="text-xs text-orange-800 font-medium">
-                      Affects You
-                    </Text>
-                  </View>
-                )}
-              </View>
-
-              <Text className="text-xs text-gray-500">Tap for breakdown</Text>
-            </View>
-
-            <Text className="text-xs text-gray-600 mt-1" numberOfLines={1}>
-              📍 {result.obstacle.description}
+          <TouchableOpacity
+            style={{
+              backgroundColor: "#3B82F6",
+              paddingVertical: 12,
+              paddingHorizontal: 16,
+              borderRadius: 8,
+              marginBottom: 12,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+            onPress={loadObstacles}
+            disabled={loading}
+          >
+            <Ionicons name="refresh" size={20} color="white" />
+            <Text style={{ color: "white", fontWeight: "600", marginLeft: 8 }}>
+              Load Obstacles ({obstacles.length})
             </Text>
           </TouchableOpacity>
-        ))}
 
-        {/* Academic Info */}
-        <View className="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-4">
-          <Text className="text-sm font-semibold text-blue-800 mb-2">
-            🎓 AHP Algorithm Demo - Enhanced with Google Maps Integration
+          <TouchableOpacity
+            style={{
+              backgroundColor: "#F59E0B",
+              paddingVertical: 12,
+              paddingHorizontal: 16,
+              borderRadius: 8,
+              marginBottom: 12,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+            onPress={testValidationSystem}
+            disabled={loading || obstacles.length === 0}
+          >
+            <Ionicons name="flask" size={20} color="white" />
+            <Text style={{ color: "white", fontWeight: "600", marginLeft: 8 }}>
+              Test Validation System
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={{
+              backgroundColor: "#EF4444",
+              paddingVertical: 12,
+              paddingHorizontal: 16,
+              borderRadius: 8,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+            onPress={handleClearTestData}
+            disabled={loading}
+          >
+            <Ionicons name="trash" size={20} color="white" />
+            <Text style={{ color: "white", fontWeight: "600", marginLeft: 8 }}>
+              Clear Test Data
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Results Display */}
+        {obstacles.length > 0 && (
+          <View
+            style={{
+              backgroundColor: "white",
+              padding: 16,
+              borderRadius: 12,
+              marginBottom: 16,
+              elevation: 2,
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 1 },
+              shadowOpacity: 0.1,
+              shadowRadius: 2,
+            }}
+          >
+            <Text
+              style={{
+                fontSize: 18,
+                fontWeight: "bold",
+                color: "#1F2937",
+                marginBottom: 12,
+              }}
+            >
+              📊 Loaded Obstacles ({obstacles.length})
+            </Text>
+
+            {obstacles.slice(0, 5).map((obstacle, index) => (
+              <View
+                key={obstacle.id}
+                style={{
+                  borderLeftWidth: 4,
+                  borderLeftColor:
+                    obstacle.status === "community_verified"
+                      ? "#10B981"
+                      : obstacle.status === "disputed"
+                      ? "#F59E0B"
+                      : "#6B7280",
+                  paddingLeft: 12,
+                  paddingVertical: 8,
+                  marginBottom: 8,
+                  backgroundColor: "#F9FAFB",
+                  borderRadius: 4,
+                }}
+              >
+                <Text style={{ fontWeight: "600", color: "#1F2937" }}>
+                  {obstacle.type.replace(/_/g, " ").toUpperCase()}
+                </Text>
+                <Text style={{ color: "#6B7280", fontSize: 12 }}>
+                  {obstacle.description.substring(0, 60)}...
+                </Text>
+                <Text style={{ color: "#6B7280", fontSize: 10 }}>
+                  ↑{obstacle.upvotes || 0} ↓{obstacle.downvotes || 0} •{" "}
+                  {obstacle.status}
+                </Text>
+              </View>
+            ))}
+
+            {obstacles.length > 5 && (
+              <Text
+                style={{ color: "#6B7280", fontSize: 12, textAlign: "center" }}
+              >
+                ... and {obstacles.length - 5} more obstacles
+              </Text>
+            )}
+          </View>
+        )}
+
+        {/* Instructions */}
+        <View
+          style={{
+            backgroundColor: "#FEF3C7",
+            padding: 16,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: "#F59E0B",
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 16,
+              fontWeight: "bold",
+              color: "#92400E",
+              marginBottom: 8,
+            }}
+          >
+            🚀 Testing Instructions
           </Text>
-          <Text className="text-xs text-blue-700">
-            • Weights: Traversability (70%), Safety (20%), Comfort (10%){"\n"}•
-            User-specific penalties based on mobility device{"\n"}• Severity
-            multipliers for obstacle impact{"\n"}• Integrated with Google Maps
-            Directions API{"\n"}• Real route analysis with dual path comparison
-            {"\n"}• Ready for NavigationScreen deployment{"\n"}• Academic
-            methodology validated for defense
+          <Text style={{ color: "#92400E", fontSize: 14, lineHeight: 20 }}>
+            1. Generate test obstacles for empty Firestore{"\n"}
+            2. Load obstacles to verify they exist{"\n"}
+            3. Test validation system functionality{"\n"}
+            4. Go to NavigationScreen to see validation prompts{"\n"}
+            5. Walk near obstacles to trigger proximity-based validation
           </Text>
         </View>
+
+        {loading && (
+          <View
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(255, 255, 255, 0.8)",
+              justifyContent: "center",
+              alignItems: "center",
+            }}
+          >
+            <ActivityIndicator size="large" color="#3B82F6" />
+            <Text style={{ marginTop: 16, color: "#6B7280" }}>
+              Processing...
+            </Text>
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );

@@ -1,5 +1,5 @@
 // src/services/obstacleValidationService.ts
-// Two-Tier Obstacle Validation System for WAISPATH Testing Phase
+// FIXED: Two-Tier Obstacle Validation System with correct types
 
 import { firebaseServices } from "./firebase";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -25,7 +25,7 @@ export interface ValidationPrompt {
   location: UserLocation;
   obstacleType: ObstacleType;
   reportCount: number;
-  lastAsked?: Date; // Keep as Date | undefined
+  lastAsked?: Date;
 }
 
 export interface ObstacleValidationStatus {
@@ -194,6 +194,7 @@ class ObstacleValidationService {
 
   /**
    * Get validation status for UI display
+   * FIXED: Maps actual status values to display tiers
    */
   getValidationStatus(
     obstacle: AccessibilityObstacle
@@ -203,11 +204,12 @@ class ObstacleValidationService {
     const totalValidations = upvotes + downvotes;
     const reportAge = this.getAgeInDays(obstacle.reportedAt);
 
-    // Determine tier based on validation count and admin status
+    // FIXED: Map actual status values to display tiers
     let tier: "single_report" | "community_verified" | "admin_resolved";
     let confidence: "low" | "medium" | "high";
     let displayLabel: string;
 
+    // Admin resolved statuses
     if (obstacle.verified || obstacle.status === "resolved") {
       tier = "admin_resolved";
       confidence = "high";
@@ -215,11 +217,15 @@ class ObstacleValidationService {
         obstacle.status === "resolved"
           ? "CLEARED by Admin"
           : "VERIFIED by Admin";
-    } else if (totalValidations >= 2) {
+    }
+    // Community verified - when status is "verified" OR has enough upvotes
+    else if (obstacle.status === "verified" || totalValidations >= 2) {
       tier = "community_verified";
       confidence = upvotes > downvotes ? "medium" : "low";
       displayLabel = `Community Verified (${upvotes} confirms, ${downvotes} disputes)`;
-    } else {
+    }
+    // Single report - pending status or new obstacles
+    else {
       tier = "single_report";
       confidence = "low";
       displayLabel = "Single Report - Unverified";
@@ -284,6 +290,14 @@ class ObstacleValidationService {
   }
 
   /**
+   * Reset session counters (call when navigation starts)
+   */
+  resetSessionCounters(): void {
+    this.sessionPromptCount = 0;
+    console.log("🔄 Validation session counters reset");
+  }
+
+  /**
    * Check if obstacles need auto-expiry cleanup
    */
   async cleanupExpiredObstacles(): Promise<void> {
@@ -296,7 +310,8 @@ class ObstacleValidationService {
     }
   }
 
-  // Helper methods
+  // HELPER METHODS
+
   private async getUserLastValidation(
     obstacleId: string
   ): Promise<Date | undefined> {
@@ -304,77 +319,25 @@ class ObstacleValidationService {
       const key = `@validation:${obstacleId}`;
       const timestamp = await AsyncStorage.getItem(key);
       return timestamp ? new Date(timestamp) : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  private async recordValidationInteraction(
-    obstacleId: string,
-    action: "confirmed" | "disputed" | "skipped"
-  ): Promise<void> {
-    try {
-      // Store locally for cooldown tracking
-      const key = `@validation:${obstacleId}`;
-      await AsyncStorage.setItem(key, new Date().toISOString());
-
-      // Also record interaction type for analytics
-      const analyticsKey = `@validation_analytics:${obstacleId}`;
-      await AsyncStorage.setItem(
-        analyticsKey,
-        JSON.stringify({
-          action,
-          timestamp: new Date().toISOString(),
-        })
-      );
-
-      // CRITICAL: Persist prompt event to Firestore for analytics + audit trail
-      try {
-        await firebaseServices.obstacle.recordPromptEvent(obstacleId, {
-          action,
-          timestamp: new Date().toISOString(),
-          location: null, // Could add user location if needed for analytics
-          method: "proximity_prompt",
-        });
-        console.log("✅ Validation event recorded to Firestore");
-      } catch (firestoreError) {
-        console.warn(
-          "⚠️ Failed to record validation to Firestore:",
-          firestoreError
-        );
-        // Don't fail the whole operation - local storage is sufficient for UX
-      }
     } catch (error) {
-      console.error("❌ Error recording validation interaction:", error);
+      return undefined;
     }
   }
 
   private isRecentValidation(lastValidated: Date): boolean {
-    const VALIDATION_COOLDOWN = 7 * 24 * 60 * 60 * 1000; // 7 days
-    return Date.now() - lastValidated.getTime() < VALIDATION_COOLDOWN;
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    return lastValidated > sevenDaysAgo;
   }
 
   private isExpired(obstacle: AccessibilityObstacle): boolean {
-    const ageInDays = this.getAgeInDays(obstacle.reportedAt);
-    return ageInDays > this.AUTO_EXPIRE_DAYS;
-  }
-
-  private getAgeInDays(dateLike: any): number {
-    const d = toDate(dateLike);
-    if (!d) return Number.POSITIVE_INFINITY;
-    return Math.floor((Date.now() - d.getTime()) / (24 * 60 * 60 * 1000));
-  }
-
-  private async getLastPromptTime(
-    obstacleId: string
-  ): Promise<Date | undefined> {
-    try {
-      const key = `@prompt:${obstacleId}`;
-      const timestamp = await AsyncStorage.getItem(key);
-      return timestamp ? new Date(timestamp) : undefined;
-    } catch {
-      return undefined;
-    }
+    const reportDate =
+      obstacle.reportedAt instanceof Date
+        ? obstacle.reportedAt
+        : new Date(obstacle.reportedAt);
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - this.AUTO_EXPIRE_DAYS);
+    return reportDate < thirtyDaysAgo;
   }
 
   private calculateDistance(
@@ -382,22 +345,65 @@ class ObstacleValidationService {
     point2: UserLocation
   ): number {
     const R = 6371000; // Earth's radius in meters
-    const dLat = ((point2.latitude - point1.latitude) * Math.PI) / 180;
-    const dLon = ((point2.longitude - point1.longitude) * Math.PI) / 180;
+    const lat1Rad = (point1.latitude * Math.PI) / 180;
+    const lat2Rad = (point2.latitude * Math.PI) / 180;
+    const deltaLatRad = ((point2.latitude - point1.latitude) * Math.PI) / 180;
+    const deltaLngRad = ((point2.longitude - point1.longitude) * Math.PI) / 180;
+
     const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos((point1.latitude * Math.PI) / 180) *
-        Math.cos((point2.latitude * Math.PI) / 180) *
-        Math.sin(dLon / 2) *
-        Math.sin(dLon / 2);
+      Math.sin(deltaLatRad / 2) * Math.sin(deltaLatRad / 2) +
+      Math.cos(lat1Rad) *
+        Math.cos(lat2Rad) *
+        Math.sin(deltaLngRad / 2) *
+        Math.sin(deltaLngRad / 2);
+
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
+    return R * c; // Distance in meters
   }
 
-  // Reset session counters (call when navigation session starts)
-  resetSessionCounters(): void {
-    this.sessionPromptCount = 0;
+  private getAgeInDays(reportedAt: Date | string): number {
+    const reportDate =
+      reportedAt instanceof Date ? reportedAt : new Date(reportedAt);
+    const now = new Date();
+    const diffTime = Math.abs(now.getTime() - reportDate.getTime());
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  }
+
+  private async recordValidationInteraction(
+    obstacleId: string,
+    action: "confirmed" | "disputed" | "skipped"
+  ): Promise<void> {
+    try {
+      // Record user interaction locally
+      const key = `@validation:${obstacleId}`;
+      await AsyncStorage.setItem(key, new Date().toISOString());
+
+      // Record analytics event
+      await firebaseServices.obstacle.recordPromptEvent(obstacleId, {
+        action,
+        timestamp: new Date().toISOString(),
+        method: "proximity_prompt",
+      });
+
+      console.log(
+        `📊 Validation interaction recorded: ${obstacleId} - ${action}`
+      );
+    } catch (error) {
+      console.error("❌ Failed to record validation interaction:", error);
+      // Don't throw - this shouldn't break the validation flow
+    }
+  }
+
+  private async getLastPromptTime(obstacleId: string): Promise<Date | null> {
+    try {
+      const key = `@prompt:${obstacleId}`;
+      const timestamp = await AsyncStorage.getItem(key);
+      return timestamp ? new Date(timestamp) : null;
+    } catch (error) {
+      return null;
+    }
   }
 }
 
+// Export singleton instance
 export const obstacleValidationService = new ObstacleValidationService();
