@@ -351,6 +351,8 @@ dilg-integration-keys.json
 university-api-keys.json
 research-collaboration-secrets.json
 
+
+AndroidManifest.xml
 # =======================================================
 # IMPORTANT NOTES FOR WAISPATH TEAM:
 # =======================================================
@@ -359,5 +361,3 @@ research-collaboration-secrets.json
 # 3. If you see any .env or API key files listed, STOP!
 # 4. Use "git add -p" to review each change before committing
 # 5. For production deploys, use environment-specific configs
-# 6. Regularly audit this file for new sensitive patterns
-# =======================================================
