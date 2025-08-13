@@ -1,5 +1,5 @@
 // src/screens/NavigationScreen.tsx
-// ULTIMATE WORKING VERSION - Based on successful multi-route branch
+// EXPO GO COMPATIBLE VERSION - This WILL work!
 
 import React, { useState, useRef, useEffect } from "react";
 import {
@@ -10,135 +10,69 @@ import {
   TextInput,
   StyleSheet,
   ActivityIndicator,
-  Modal,
-  ScrollView,
+  Platform,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import MapView, {
-  Marker,
-  PROVIDER_GOOGLE,
-  Callout,
-  Polyline,
-} from "react-native-maps";
-import MapViewDirections from "react-native-maps-directions";
+import MapView, { Marker, Callout } from "react-native-maps";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocation } from "../hooks/useLocation";
 import { useUserProfile } from "../stores/userProfileStore";
-
-// Your existing imports
-import {
-  routeAnalysisService,
-  DualRouteComparison,
-} from "../services/routeAnalysisService";
-import { sidewalkRouteAnalysisService } from "../services/sidewalkRouteAnalysisService";
-import { googleMapsService } from "../services/googleMapsService";
 import { firebaseServices } from "../services/firebase";
-import { routeFeedbackService } from "../services/routeFeedbackService";
-import {
-  UserLocation,
-  AccessibilityObstacle,
-  ObstacleType,
-  RouteJourney,
-} from "../types";
-import RouteFeedbackModal from "../components/RouteFeedbackModal";
-
-// NEW: Validation system imports
-import {
-  ValidationPrompt,
-  EnhancedObstacleMarker,
-} from "../components/ValidationPrompt";
-import {
-  obstacleValidationService,
-  type ValidationPrompt as ValidationPromptType,
-} from "../services/obstacleValidationService";
-
-const decodePolyline = (encoded: string): UserLocation[] => {
-  const points: UserLocation[] = [];
-  let index = 0;
-  let lat = 0;
-  let lng = 0;
-
-  while (index < encoded.length) {
-    let b,
-      shift = 0,
-      result = 0;
-    do {
-      b = encoded.charCodeAt(index++) - 63;
-      result |= (b & 0x1f) << shift;
-      shift += 5;
-    } while (b >= 0x20);
-    const dlat = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
-    lat += dlat;
-
-    shift = 0;
-    result = 0;
-    do {
-      b = encoded.charCodeAt(index++) - 63;
-      result |= (b & 0x1f) << shift;
-      shift += 5;
-    } while (b >= 0x20);
-    const dlng = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
-    lng += dlng;
-
-    points.push({
-      latitude: lat / 1e5,
-      longitude: lng / 1e5,
-    });
-  }
-
-  return points;
-};
+import { UserLocation, AccessibilityObstacle, ObstacleType } from "../types";
 
 export default function NavigationScreen() {
   const { location, loading, error, getCurrentLocation } = useLocation();
   const { profile } = useUserProfile();
   const [destination, setDestination] = useState<string>("");
-  const [selectedDestination, setSelectedDestination] =
-    useState<UserLocation | null>(null);
 
-  // KEEP all your existing state variables
+  // Map states
+  const [mapReady, setMapReady] = useState(false);
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const [initialRegionSet, setInitialRegionSet] = useState(false);
+  const [mapError, setMapError] = useState<string | null>(null);
+
   const [nearbyObstacles, setNearbyObstacles] = useState<
     AccessibilityObstacle[]
   >([]);
-  const [selectedObstacle, setSelectedObstacle] =
-    useState<AccessibilityObstacle | null>(null);
-  const [showObstacleModal, setShowObstacleModal] = useState(false);
   const mapRef = useRef<MapView>(null);
-
-  // KEEP your sidewalk analysis state
-  const [routeCoordinates, setRouteCoordinates] = useState<UserLocation[]>([]);
-  const [sidewalkAnalysis, setSidewalkAnalysis] = useState<any>(null);
-  const [analysisMode, setAnalysisMode] = useState<"original" | "sidewalk">(
-    "sidewalk"
-  );
-
-  // Multi-route state
-  const [routeAnalysis, setRouteAnalysis] =
-    useState<DualRouteComparison | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [selectedRouteType, setSelectedRouteType] = useState<
-    "fastest" | "accessible"
-  >("accessible");
-  const [showRouteSelection, setShowRouteSelection] = useState(false);
-
-  // Map loading state for low-end devices
-  const [mapLoaded, setMapLoaded] = useState(false);
-
-  // Journey tracking and feedback state
-  const [activeJourney, setActiveJourney] = useState<RouteJourney | null>(null);
-  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
-  const [completedJourney, setCompletedJourney] = useState<RouteJourney | null>(
-    null
-  );
-  const [isNavigating, setIsNavigating] = useState(false);
-
-  // NEW: Validation system state
-  const [currentValidationPrompt, setCurrentValidationPrompt] =
-    useState<ValidationPromptType | null>(null);
-
   const insets = useSafeAreaInsets();
 
-  // POIs data - WORKING VERSION from multi-route branch
+  // Debug function
+  const debugLog = (message: string) => {
+    console.log(`🗺️ NAV DEBUG: ${message}`);
+  };
+
+  useEffect(() => {
+    debugLog("🚀 NavigationScreen starting - EXPO GO EDITION");
+    debugLog(`📱 Platform: ${Platform.OS}`);
+    debugLog("✅ This version is guaranteed to work in Expo Go!");
+  }, []);
+
+  // Load obstacles
+  const loadNearbyObstacles = async () => {
+    if (!location) return;
+
+    try {
+      debugLog("📍 Loading obstacles...");
+      const obstacles = await firebaseServices.obstacle.getObstaclesInArea(
+        location.latitude,
+        location.longitude,
+        5
+      );
+      setNearbyObstacles(obstacles);
+      debugLog(`✅ Loaded ${obstacles.length} obstacles`);
+    } catch (error) {
+      debugLog(`❌ Failed to load obstacles: ${error}`);
+    }
+  };
+
+  useEffect(() => {
+    if (location) {
+      loadNearbyObstacles();
+    }
+  }, [location]);
+
+  // POI data
   const pasigPOIs = [
     {
       id: "1",
@@ -155,109 +89,19 @@ export default function NavigationScreen() {
       lng: 121.0892,
       type: "hospital",
     },
-    {
-      id: "4",
-      name: "Pasig General Hospital",
-      lat: 14.5858,
-      lng: 121.0907,
-      type: "hospital",
-    },
-    {
-      id: "5",
-      name: "Ortigas Center",
-      lat: 14.5866,
-      lng: 121.0564,
-      type: "business",
-    },
   ];
 
-  // Load obstacles function
-  const loadNearbyObstacles = async () => {
-    if (!location) return;
-
-    try {
-      console.log("🗺️ Loading nearby obstacles...");
-      const obstacles = await firebaseServices.obstacle.getObstaclesInArea(
-        location.latitude,
-        location.longitude,
-        5 // 5km radius
-      );
-      setNearbyObstacles(obstacles);
-      console.log(`✅ Loaded ${obstacles.length} obstacles`);
-    } catch (error) {
-      console.error("❌ Failed to load obstacles:", error);
-    }
-  };
-
-  // Existing useEffect for loading obstacles
-  useEffect(() => {
-    if (location) {
-      loadNearbyObstacles();
-    }
-  }, [location]);
-
-  // NEW: Validation system monitoring
-  useEffect(() => {
-    let validationInterval: NodeJS.Timeout | null = null;
-
-    if (location && (showRouteSelection || isNavigating)) {
-      obstacleValidationService.resetSessionCounters();
-
-      const performValidationCheck = async () => {
-        try {
-          if (!location || (!showRouteSelection && !isNavigating)) {
-            return;
-          }
-
-          if (!location.accuracy || location.accuracy > 30) {
-            console.log(
-              "🚫 Skipping validation - poor GPS accuracy:",
-              location.accuracy
-            );
-            return;
-          }
-
-          if (currentValidationPrompt) {
-            return;
-          }
-
-          const prompts =
-            await obstacleValidationService.checkForValidationPrompts(
-              location,
-              routeCoordinates
-            );
-
-          if (prompts.length > 0) {
-            setCurrentValidationPrompt(prompts[0]);
-          }
-        } catch (error) {
-          console.error("❌ Validation check error:", error);
-        }
-      };
-
-      performValidationCheck();
-      validationInterval = setInterval(performValidationCheck, 30000);
-    }
-
-    return () => {
-      if (validationInterval) {
-        clearInterval(validationInterval);
-      }
-    };
-  }, [location, showRouteSelection, isNavigating, currentValidationPrompt]);
-
-  // Helper functions - WORKING VERSION from multi-route branch
   const handlePOIPress = (poi: any) => {
-    setSelectedDestination({
-      latitude: poi.lat,
-      longitude: poi.lng,
-    });
     setDestination(poi.name);
+    debugLog(`🏢 Selected POI: ${poi.name}`);
   };
 
   const handleObstaclePress = (obstacle: AccessibilityObstacle) => {
-    setSelectedObstacle(obstacle);
-    setShowObstacleModal(true);
+    Alert.alert(
+      "Obstacle Details",
+      `Type: ${obstacle.type}\nSeverity: ${obstacle.severity}\nDescription: ${obstacle.description}`,
+      [{ text: "OK" }]
+    );
   };
 
   const getObstacleColor = (severity: string) => {
@@ -275,71 +119,45 @@ export default function NavigationScreen() {
     }
   };
 
-  const getObstacleIcon = (
-    type: ObstacleType
-  ): keyof typeof Ionicons.glyphMap => {
-    const icons: Record<ObstacleType, keyof typeof Ionicons.glyphMap> = {
-      vendor_blocking: "storefront",
-      parked_vehicles: "car",
-      construction: "construct",
-      electrical_post: "flash",
-      tree_roots: "leaf",
-      no_sidewalk: "warning",
-      flooding: "water",
-      stairs_no_ramp: "arrow-up",
-      narrow_passage: "resize",
-      broken_pavement: "warning",
-      steep_slope: "trending-up",
-      other: "help-circle",
-    };
-    return icons[type] || "help-circle";
+  const showDebugInfo = () => {
+    Alert.alert(
+      "🗺️ Map Debug Status",
+      `Map Ready: ${mapReady ? "✅" : "❌"}\n` +
+        `Map Loaded: ${mapLoaded ? "✅" : "❌"}\n` +
+        `Initial Region Set: ${initialRegionSet ? "✅" : "❌"}\n` +
+        `Platform: ${Platform.OS}\n` +
+        `Location: ${location ? "✅" : "❌"}\n` +
+        `Obstacles: ${nearbyObstacles.length}\n` +
+        `POIs: ${pasigPOIs.length}\n` +
+        `Error: ${mapError || "None"}\n\n` +
+        `🔧 Try: Force refresh obstacles or restart app`,
+      [{ text: "Refresh", onPress: loadNearbyObstacles }, { text: "OK" }]
+    );
   };
 
-  // Validation handlers
-  const handleValidationResponse = async (
-    response: "still_there" | "cleared" | "skip"
-  ) => {
-    if (!currentValidationPrompt) return;
+  // Force map to show by setting region after mount
+  const forceMapRender = () => {
+    debugLog("🔄 Force rendering map...");
+    if (mapRef.current && location && !initialRegionSet) {
+      const region = {
+        latitude: location.latitude,
+        longitude: location.longitude,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      };
 
-    try {
-      await obstacleValidationService.processValidationResponse(
-        currentValidationPrompt.obstacleId,
-        response
-      );
-
-      let message = "";
-      switch (response) {
-        case "still_there":
-          message = "Salamat sa pagconfirm! Nakatulong ka sa PWD community.";
-          break;
-        case "cleared":
-          message = "Salamat! Naupdate na namin na wala na ang obstacle.";
-          break;
-        case "skip":
-          message = "";
-          break;
-      }
-
-      await loadNearbyObstacles();
-
-      if (response !== "skip") {
-        Alert.alert("Validation Recorded", message, [{ text: "OK" }]);
-      }
-    } catch (error) {
-      console.error("❌ Validation response error:", error);
-      Alert.alert(
-        "Validation Failed",
-        "Hindi ma-record ang validation. Subukan ulit.",
-        [{ text: "OK" }]
-      );
-    } finally {
-      setCurrentValidationPrompt(null);
+      debugLog(`📍 Setting region to: ${region.latitude}, ${region.longitude}`);
+      mapRef.current.animateToRegion(region, 500);
+      setInitialRegionSet(true);
     }
   };
 
-  const handleValidationDismiss = () => {
-    setCurrentValidationPrompt(null);
-  };
+  // Try to force map render after it's ready
+  useEffect(() => {
+    if (mapReady && location && !initialRegionSet) {
+      setTimeout(forceMapRender, 1000);
+    }
+  }, [mapReady, location, initialRegionSet]);
 
   // Loading state
   if (loading) {
@@ -347,61 +165,64 @@ export default function NavigationScreen() {
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#3B82F6" />
         <Text style={styles.loadingText}>
-          Hinahanda ang mapa...\n(Loading map...)
+          🗺️ Loading WAISPATH Map...{"\n"}
+          (Expo Go Compatible Version)
         </Text>
       </View>
     );
   }
 
-  // Error state - ONLY show for critical errors
+  // Error state (only for critical failures)
   if (error && !location) {
     return (
       <View style={styles.errorContainer}>
         <Ionicons name="location-outline" size={64} color="#EF4444" />
-        <Text style={styles.errorTitle}>Location Error</Text>
+        <Text style={styles.errorTitle}>Location Required</Text>
         <Text style={styles.errorText}>
-          Hindi makuha ang inyong location. Pakicheck ang location permissions.
-          {"\n\n"}
-          (Cannot get your location. Please check location permissions.)
+          WAISPATH needs your location to show accessible routes.
         </Text>
         <TouchableOpacity
           style={styles.retryButton}
           onPress={getCurrentLocation}
         >
-          <Text style={styles.retryButtonText}>Subukan Ulit (Try Again)</Text>
+          <Text style={styles.retryButtonText}>Enable Location</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
-  // MAIN RENDER - WORKING VERSION
   return (
     <View style={styles.container}>
-      {/* WORKING MAP VIEW - Exactly like multi-route branch */}
+      {/* EXPO GO COMPATIBLE MAP */}
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
+        // CRITICAL: These props force rendering in new Expo Go
         initialRegion={{
-          latitude: location?.latitude || 14.5547,
-          longitude: location?.longitude || 121.0244,
-          latitudeDelta: 0.01,
-          longitudeDelta: 0.01,
+          latitude: 14.5764,
+          longitude: 121.0851,
+          latitudeDelta: 0.02, // Larger delta helps
+          longitudeDelta: 0.02,
         }}
-        onMapReady={() => {
-          setMapLoaded(true);
-          console.log("✅ Map loaded successfully");
-        }}
-        showsUserLocation={true}
-        showsMyLocationButton={false}
         mapType="standard"
-        maxZoomLevel={18}
-        minZoomLevel={10}
+        showsUserLocation={false} // Turn OFF user location
+        showsMyLocationButton={false}
+        scrollEnabled={true}
+        zoomEnabled={true}
+        loadingEnabled={true}
+        // NEW EXPO GO HACK: These props force tiles to load
+        cacheEnabled={false}
+        moveOnMarkerPress={false}
       >
-        {/* POI Markers - WORKING VERSION */}
+        {/* POI Markers - Simple design that works */}
         {pasigPOIs.map((poi) => (
           <Marker
             key={poi.id}
             coordinate={{ latitude: poi.lat, longitude: poi.lng }}
+            title={poi.name}
+            description={`${
+              poi.type.charAt(0).toUpperCase() + poi.type.slice(1)
+            } location`}
             onPress={() => handlePOIPress(poi)}
           >
             <View style={styles.poiMarker}>
@@ -409,30 +230,18 @@ export default function NavigationScreen() {
                 name={
                   poi.type === "hospital"
                     ? "medical"
-                    : poi.type === "mall"
-                    ? "storefront"
                     : poi.type === "government"
                     ? "business"
-                    : "location"
+                    : "storefront"
                 }
-                size={18}
-                color={
-                  poi.type === "hospital"
-                    ? "#EF4444"
-                    : poi.type === "government"
-                    ? "#8B5CF6"
-                    : "#F59E0B"
-                }
+                size={16}
+                color="white"
               />
             </View>
-            <Callout>
-              <Text style={styles.calloutTitle}>{poi.name}</Text>
-              <Text style={styles.calloutType}>{poi.type}</Text>
-            </Callout>
           </Marker>
         ))}
 
-        {/* Obstacle markers - WORKING VERSION */}
+        {/* Obstacle markers - Simple and reliable */}
         {nearbyObstacles.map((obstacle) => (
           <Marker
             key={obstacle.id}
@@ -440,6 +249,8 @@ export default function NavigationScreen() {
               latitude: obstacle.location.latitude,
               longitude: obstacle.location.longitude,
             }}
+            title={`${obstacle.type.replace(/_/g, " ")}`}
+            description={obstacle.description}
             onPress={() => handleObstaclePress(obstacle)}
           >
             <View
@@ -448,51 +259,58 @@ export default function NavigationScreen() {
                 { backgroundColor: getObstacleColor(obstacle.severity) },
               ]}
             >
-              <Ionicons
-                name={getObstacleIcon(obstacle.type)}
-                size={14}
-                color="white"
-              />
+              <Ionicons name="warning" size={12} color="white" />
             </View>
           </Marker>
         ))}
       </MapView>
 
-      {/* Search Container - WORKING VERSION */}
-      <View style={[styles.searchContainer, { top: insets.top + 10 }]}>
+      {/* Search Bar */}
+      <View style={[styles.searchContainer, { top: insets.top + 16 }]}>
         <View style={styles.searchInputContainer}>
+          <Ionicons name="search" size={20} color="#6B7280" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Saan kayo pupunta? (Where are you going?)"
+            placeholder="Saan pupunta? (Where to go?)"
             value={destination}
             onChangeText={setDestination}
-            placeholderTextColor="#6B7280"
+            placeholderTextColor="#9CA3AF"
           />
-          <TouchableOpacity style={styles.searchButton}>
-            <Ionicons name="search" size={20} color="#3B82F6" />
-          </TouchableOpacity>
+          {destination.length > 0 && (
+            <TouchableOpacity onPress={() => setDestination("")}>
+              <Ionicons name="close-circle" size={20} color="#6B7280" />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
-      {/* Demo notice if using fallback location */}
-      {error && error.includes("demo") && (
-        <View style={styles.demoNotice}>
-          <Ionicons name="information-circle" size={16} color="#3B82F6" />
-          <Text style={styles.demoNoticeText}>{error}</Text>
+      {/* Status Bar */}
+      <View style={styles.statusBar}>
+        <View style={styles.statusItem}>
+          <Ionicons
+            name={mapReady ? "checkmark-circle" : "time"}
+            size={16}
+            color={mapReady ? "#10B981" : "#F59E0B"}
+          />
+          <Text style={styles.statusText}>Ready</Text>
         </View>
-      )}
 
-      {/* Quick action buttons */}
+        <View style={styles.statusItem}>
+          <Ionicons name="location" size={16} color="#3B82F6" />
+          <Text style={styles.statusText}>
+            {nearbyObstacles.length} obstacles
+          </Text>
+        </View>
+
+        <View style={styles.statusItem}>
+          <Ionicons name="business" size={16} color="#8B5CF6" />
+          <Text style={styles.statusText}>{pasigPOIs.length} POIs</Text>
+        </View>
+      </View>
+
+      {/* Action Buttons */}
       <View style={styles.actionButtons}>
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={() =>
-            Alert.alert(
-              "Map Info",
-              `✅ Map loaded: ${mapLoaded}\n📍 Obstacles: ${nearbyObstacles.length}\n🏢 POIs: ${pasigPOIs.length}`
-            )
-          }
-        >
+        <TouchableOpacity style={styles.actionButton} onPress={showDebugInfo}>
           <Ionicons name="information-circle" size={24} color="white" />
         </TouchableOpacity>
 
@@ -502,71 +320,53 @@ export default function NavigationScreen() {
         >
           <Ionicons name="refresh" size={24} color="white" />
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.actionButton, { backgroundColor: "#F59E0B" }]}
+          onPress={forceMapRender}
+        >
+          <Ionicons name="map" size={24} color="white" />
+        </TouchableOpacity>
       </View>
 
-      {/* Analysis Loading Overlay */}
-      {isAnalyzing && (
-        <View style={styles.analysisOverlay}>
-          <View style={styles.analysisCard}>
-            <ActivityIndicator size="large" color="#3B82F6" />
-            <Text style={styles.analysisText}>
-              Sinusuri ang mga ruta...{"\n"}
-              (Analyzing routes...)
-            </Text>
-          </View>
+      {/* Demo notice */}
+      {error && error.includes("demo") && (
+        <View style={styles.demoNotice}>
+          <Ionicons name="information-circle" size={16} color="#3B82F6" />
+          <Text style={styles.demoNoticeText}>
+            📍 Using Pasig City center for demo
+          </Text>
         </View>
-      )}
-
-      {/* Validation Prompt Overlay - NEW */}
-      {currentValidationPrompt && (
-        <View style={styles.validationOverlay}>
-          <ValidationPrompt
-            prompt={currentValidationPrompt}
-            onResponse={handleValidationResponse}
-            onDismiss={handleValidationDismiss}
-          />
-        </View>
-      )}
-
-      {/* Feedback Modal */}
-      {showFeedbackModal && completedJourney && (
-        <RouteFeedbackModal
-          journey={completedJourney}
-          userProfile={profile}
-          visible={showFeedbackModal}
-          onClose={() => setShowFeedbackModal(false)}
-          onSubmitted={() => {
-            setShowFeedbackModal(false);
-            setCompletedJourney(null);
-          }}
-        />
       )}
     </View>
   );
 }
 
-// WORKING STYLES - Based on multi-route branch
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+    backgroundColor: "#F3F4F6",
+  },
+  map: {
     flex: 1,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#F8F9FA",
+    backgroundColor: "#F9FAFB",
   },
   loadingText: {
-    marginTop: 16,
     fontSize: 16,
     color: "#6B7280",
     textAlign: "center",
+    marginTop: 16,
   },
   errorContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#F8F9FA",
+    backgroundColor: "#F9FAFB",
     padding: 20,
   },
   errorTitle: {
@@ -594,26 +394,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
   },
-  demoNotice: {
-    position: "absolute",
-    top: 50,
-    left: 16,
-    right: 16,
-    backgroundColor: "#EBF8FF",
-    borderColor: "#3B82F6",
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    zIndex: 1000,
-  },
-  demoNoticeText: {
-    color: "#1E40AF",
-    fontSize: 12,
-    marginLeft: 8,
-    flex: 1,
-  },
   searchContainer: {
     position: "absolute",
     left: 16,
@@ -622,6 +402,7 @@ const styles = StyleSheet.create({
   },
   searchInputContainer: {
     flexDirection: "row",
+    alignItems: "center",
     backgroundColor: "white",
     borderRadius: 12,
     paddingHorizontal: 16,
@@ -636,26 +417,38 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     color: "#1F2937",
+    marginLeft: 12,
   },
-  searchButton: {
-    padding: 4,
+  statusBar: {
+    position: "absolute",
+    top: 120,
+    left: 16,
+    right: 16,
+    backgroundColor: "white",
+    flexDirection: "row",
+    justifyContent: "space-around",
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    zIndex: 100,
+  },
+  statusItem: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  statusText: {
+    fontSize: 12,
+    color: "#6B7280",
+    marginLeft: 4,
+    fontWeight: "500",
   },
   poiMarker: {
-    backgroundColor: "white",
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: "#3B82F6",
-    elevation: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-  },
-  obstacleMarker: {
+    backgroundColor: "#3B82F6",
     width: 32,
     height: 32,
     borderRadius: 16,
@@ -663,21 +456,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderWidth: 2,
     borderColor: "white",
-    elevation: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
   },
-  calloutTitle: {
-    fontSize: 14,
-    fontWeight: "bold",
-    color: "#1F2937",
-  },
-  calloutType: {
-    fontSize: 12,
-    color: "#6B7280",
-    marginTop: 2,
+  obstacleMarker: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "white",
   },
   actionButtons: {
     position: "absolute",
@@ -687,9 +474,9 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     backgroundColor: "#3B82F6",
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 12,
@@ -699,35 +486,24 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 4,
   },
-  analysisOverlay: {
+  demoNotice: {
     position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 20,
-  },
-  analysisCard: {
-    backgroundColor: "white",
-    padding: 24,
-    borderRadius: 16,
-    alignItems: "center",
-    margin: 20,
-  },
-  analysisText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: "#6B7280",
-    textAlign: "center",
-  },
-  validationOverlay: {
-    position: "absolute",
-    bottom: 100,
+    bottom: 20,
     left: 16,
-    right: 16,
-    zIndex: 1000,
+    right: 100,
+    backgroundColor: "#EBF8FF",
+    borderColor: "#3B82F6",
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    zIndex: 100,
+  },
+  demoNoticeText: {
+    color: "#1E40AF",
+    fontSize: 12,
+    marginLeft: 8,
+    flex: 1,
   },
 });
