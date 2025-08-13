@@ -1,37 +1,363 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+# =======================================================
+# WAISPATH - Comprehensive Security-Focused .gitignore
+# =======================================================
+# Protects API keys, secrets, and sensitive accessibility data
 
-# dependencies
+# ========================================
+# CRITICAL SECURITY - API KEYS & SECRETS
+# ========================================
+# Environment files with API keys
+.env
+.env.*
+.env.local
+.env.local.*
+.env.development
+.env.development.*
+.env.staging
+.env.staging.*
+.env.production
+.env.production.*
+
+# Firebase credentials (NEVER commit these!)
+google-services.json
+GoogleService-Info.plist
+firebase-config.json
+firebase-adminsdk-*.json
+service-account-file.json
+
+# API keys and configuration files
+api-keys.json
+secrets.json
+config.production.json
+
+# ========================================
+# NODE.JS & DEPENDENCIES
+# ========================================
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
 
+# Package manager locks (keep one, ignore others)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# ========================================
+# EXPO & REACT NATIVE
+# ========================================
 # Expo
 .expo/
+.expo-shared/
 dist/
 web-build/
 
-# Native
-.kotlin/
-*.orig.*
-*.jks
+# Metro bundler
+.metro-health-check*
+.metro-cache/
+
+# React Native build artifacts
+*.jsbundle
+*.bundle
+*.map
+
+# ========================================
+# ANDROID - SECURITY CRITICAL
+# ========================================
+# Android build outputs
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/gradle.properties.local
+
+# Android signing keys (EXTREMELY SENSITIVE!)
+android/app/*.jks
+android/app/*.keystore
+android/app/my-release-key.keystore
+android/app/release.keystore
+android/app/debug.keystore
+
+# Android sensitive config files
+android/app/google-services.json
+android/app/src/main/res/values/strings.xml
+android/app/src/main/res/values/config.xml
+android/app/src/main/AndroidManifest.xml.backup
+
+# Android certificates and keys
 *.p8
 *.p12
+*.cer
+*.crt
+*.der
 *.key
+*.pem
 *.mobileprovision
 
-# Metro
-.metro-health-check*
+# Gradle sensitive files
+gradle.properties.local
+local.properties
 
-# debug
-npm-debug.*
-yarn-debug.*
-yarn-error.*
+# ========================================
+# iOS - SECURITY CRITICAL
+# ========================================
+# iOS build outputs
+ios/build/
+ios/DerivedData/
+ios/*.xcworkspace/xcuserdata/
+ios/*.xcodeproj/xcuserdata/
+ios/*.xcodeproj/project.xcworkspace/xcuserdata/
 
+# iOS sensitive config files
+ios/GoogleService-Info.plist
+ios/Config.xcconfig
+ios/Runner/Info.plist.backup
+
+# iOS certificates and provisioning
+ios/*.mobileprovision
+ios/*.cer
+ios/*.crt
+ios/*.p12
+ios/*.key
+
+# CocoaPods
+ios/Pods/
+ios/Podfile.lock
+
+# ========================================
+# DEVELOPMENT & BUILD TOOLS
+# ========================================
+# TypeScript
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# Build artifacts
+build/
+dist/
+out/
+.next/
+
+# Source maps (may contain sensitive info)
+*.map
+*.js.map
+*.css.map
+
+# ========================================
+# OPERATING SYSTEM FILES
+# ========================================
 # macOS
 .DS_Store
-*.pem
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
-# local env files
-.env*.local.
-.env
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
 
-# typescript
-*.tsbuildinfo
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# ========================================
+# EDITOR & IDE FILES
+# ========================================
+# VSCode
+.vscode/settings.json
+.vscode/tasks.json
+.vscode/launch.json
+.vscode/extensions.json
+.vscode/.ropeproject
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Android Studio
+*.hprof
+.cxx/
+.kotlin/
+
+# Xcode
+*.xccheckout
+*.xcscmblueprint
+*.xcuserstate
+
+# ========================================
+# TESTING & COVERAGE
+# ========================================
+# Test coverage
+coverage/
+.nyc_output/
+.coverage
+*.cover
+*.lcov
+
+# Jest
+jest-coverage/
+
+# ========================================
+# LOGS & DEBUGGING
+# ========================================
+# Application logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Runtime logs
+*.log.*
+*.out
+*.err
+
+# Crash reports
+crash-*.log
+
+# ========================================
+# TEMPORARY & CACHE FILES
+# ========================================
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Cache directories
+.cache/
+.parcel-cache/
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+
+# ========================================
+# PWD-SPECIFIC SENSITIVE DATA
+# ========================================
+# User accessibility data exports
+user-data-exports/
+accessibility-reports/
+personal-mobility-profiles/
+
+# PWD user photos and media (may contain identifying info)
+user-uploads/
+obstacle-photos/
+private-media/
+
+# Analytics and user tracking data
+analytics-exports/
+user-behavior-data/
+
+# Government/NGO sensitive documents
+government-docs/
+partnership-agreements/
+sensitive-reports/
+
+# ========================================
+# BACKUP & ARCHIVE FILES
+# ========================================
+# Database backups
+*.sql
+*.dump
+*.backup
+*.bak
+
+# Archive files
+*.zip
+*.tar
+*.gz
+*.rar
+*.7z
+
+# Old/backup versions
+*.orig
+*.orig.*
+*.bak.*
+
+# ========================================
+# DEPLOYMENT & CI/CD
+# ========================================
+# Deployment configs (may contain secrets)
+docker-compose.override.yml
+docker-compose.local.yml
+k8s-secrets.yml
+deployment-secrets.yml
+
+# CI/CD sensitive files
+.github/workflows/secrets.yml
+.gitlab-ci-secrets.yml
+.travis-secrets.yml
+
+# Terraform state files (may contain secrets)
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# ========================================
+# EXPO EAS & DEPLOYMENT
+# ========================================
+# EAS Build credentials
+eas.json.local
+eas-secrets.json
+
+# OTA Update secrets
+.expo/ota-secrets.json
+
+# ========================================
+# ACCESSIBILITY TESTING DATA
+# ========================================
+# Screen reader test recordings
+screen-reader-tests/
+accessibility-test-results/
+usability-test-recordings/
+
+# PWD user feedback (may contain personal info)
+user-feedback-raw/
+interview-transcripts/
+accessibility-audit-reports/
+
+# ========================================
+# GOVERNMENT INTEGRATION SECRETS
+# ========================================
+# Philippine government API credentials
+dost-api-keys.json
+mmda-credentials.json
+lgu-api-secrets.json
+dilg-integration-keys.json
+
+# Research partnership credentials
+university-api-keys.json
+research-collaboration-secrets.json
+
+# =======================================================
+# IMPORTANT NOTES FOR WAISPATH TEAM:
+# =======================================================
+# 1. NEVER remove this .gitignore file
+# 2. Before committing, always run: git status
+# 3. If you see any .env or API key files listed, STOP!
+# 4. Use "git add -p" to review each change before committing
+# 5. For production deploys, use environment-specific configs
+# 6. Regularly audit this file for new sensitive patterns
+# =======================================================
