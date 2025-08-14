@@ -1,11 +1,11 @@
 // src/hooks/useLocation.ts
-// FIXED: Proper error handling and location permissions
+// RAHHH UPDATE: Real user location ALWAYS - no more location lock!
 
 import { useState, useEffect } from "react";
 import * as Location from "expo-location";
 import { UserLocation } from "../types";
 
-// Pasig City center coordinates for fallback
+// Pasig City center coordinates for fallback ONLY in case of errors
 const PASIG_CENTER: UserLocation = {
   latitude: 14.5764,
   longitude: 121.0851,
@@ -27,7 +27,7 @@ export function useLocation() {
     hasPermission: false,
   });
 
-  // Get user location with Pasig fallback
+  // 🔥 RAHHH: Get user's REAL location - anywhere in the world!
   const getCurrentLocation = async (): Promise<UserLocation> => {
     try {
       setState((prev) => ({ ...prev, loading: true, error: null }));
@@ -42,7 +42,8 @@ export function useLocation() {
         setState((prev) => ({
           ...prev,
           loading: false,
-          error: "Location permission denied. Using Pasig City center.",
+          error:
+            "Location permission denied. Using Pasig City center for demo.",
           hasPermission: false,
           location: PASIG_CENTER,
         }));
@@ -53,47 +54,40 @@ export function useLocation() {
         "✅ Location permission granted, getting current position..."
       );
 
-      // Get current position with longer timeout for Filipino networks
+      // Get current position with longer timeout for various network conditions
       const position = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
-        timeInterval: 15000, // 15 seconds timeout for slow networks
+        timeInterval: 15000, // 15 seconds timeout
       });
 
       console.log(
-        `📍 Got location: ${position.coords.latitude}, ${position.coords.longitude}`
+        `📍 Got real user location: ${position.coords.latitude}, ${position.coords.longitude}`
       );
 
+      // 🚀 REAL WORLD READY: Use actual user location!
       const userLocation: UserLocation = {
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
         accuracy: position.coords.accuracy || undefined,
       };
 
-      // Check if user is reasonably near Pasig (for development/testing)
-      const isInPasigArea = isNearPasig(userLocation);
-      console.log(`🗺️ Is in Pasig area: ${isInPasigArea}`);
-
-      const finalLocation = isInPasigArea ? userLocation : PASIG_CENTER;
-
-      // FIXED: Only show demo message if using fallback location
-      const locationNote = !isInPasigArea
-        ? "Using Pasig City center for demo purposes"
-        : null;
-
+      // 🔥 NO MORE LOCATION LOCK - Use real location everywhere!
       setState((prev) => ({
         ...prev,
         loading: false,
         hasPermission: true,
-        location: finalLocation,
-        error: locationNote, // This is just informational, not an error
+        location: userLocation, // Always use real location!
+        error: null,
       }));
 
-      console.log("✅ Location successfully set:", finalLocation);
-      return finalLocation;
+      console.log("✅ RAHHH! Real user location set:", userLocation);
+      console.log("🌍 WAISPATH now works GLOBALLY!");
+
+      return userLocation;
     } catch (error: any) {
       console.log("❌ Location error:", error.message);
 
-      // Provide more specific error messages
+      // Provide specific error messages
       let errorMessage = "Could not get location. Using Pasig City center.";
 
       if (
@@ -111,15 +105,15 @@ export function useLocation() {
         ...prev,
         loading: false,
         error: errorMessage,
-        hasPermission: true, // FIXED: We still have permission, just couldn't get location
-        location: PASIG_CENTER,
+        hasPermission: true,
+        location: PASIG_CENTER, // Only fallback on actual errors
       }));
 
       return PASIG_CENTER;
     }
   };
 
-  // Simple check if coordinates are near Pasig City (rough bounds)
+  // Keep the isNearPasig function for informational purposes (but don't use it to lock location)
   const isNearPasig = (location: UserLocation): boolean => {
     const pasigBounds = {
       north: 14.62,
@@ -155,11 +149,11 @@ export function useLocation() {
             accuracy: position.coords.accuracy || undefined,
           };
 
-          console.log("📍 Location update:", newLocation);
+          console.log("📍 Location update - REAL WORLD:", newLocation);
 
           setState((prev) => ({
             ...prev,
-            location: newLocation,
+            location: newLocation, // Always use real updates!
           }));
         }
       );
@@ -177,7 +171,7 @@ export function useLocation() {
     ...state,
     getCurrentLocation,
     watchLocation,
-    pasigCenter: PASIG_CENTER,
-    isNearPasig,
+    pasigCenter: PASIG_CENTER, // Keep for fallback reference
+    isNearPasig, // Keep for informational use
   };
 }

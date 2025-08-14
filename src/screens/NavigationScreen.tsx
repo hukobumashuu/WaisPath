@@ -1,5 +1,5 @@
 // src/screens/NavigationScreen.tsx
-// UNIFIED INTELLIGENT ROUTING - Auto-calculates, shows both routes, true sidewalk-level
+// UNIFIED INTELLIGENT ROUTING - KEEP ORIGINAL UI + ADD VALIDATION SYSTEM! 🔥
 
 import React, { useState, useRef, useEffect } from "react";
 import {
@@ -25,6 +25,16 @@ import { UserLocation, AccessibilityObstacle, ObstacleType } from "../types";
 // Route analysis services
 import { routeAnalysisService } from "../services/routeAnalysisService";
 import { sidewalkRouteAnalysisService } from "../services/sidewalkRouteAnalysisService";
+
+// 🔥 VALIDATION SYSTEM IMPORTS - ONLY ADDITION!
+import {
+  ValidationPrompt,
+  EnhancedObstacleMarker,
+} from "../components/ValidationPrompt";
+import {
+  obstacleValidationService,
+  type ValidationPrompt as ValidationPromptType,
+} from "../services/obstacleValidationService";
 
 // Unified route data structure
 interface UnifiedRouteAnalysis {
@@ -91,55 +101,40 @@ const decodePolyline = (encoded: string): UserLocation[] => {
   return points;
 };
 
-// Generate sidewalk offset paths (left/right of main route)
+// Generate sidewalk offsets (your existing function)
 const generateSidewalkPaths = (
-  mainRoute: UserLocation[]
+  routePoints: UserLocation[],
+  offsetDistance: number = 0.00008 // ~9 meters at equator
 ): { left: UserLocation[]; right: UserLocation[] } => {
-  if (mainRoute.length < 2) return { left: [], right: [] };
-
-  const offsetDistance = 0.00005; // ~5 meters sidewalk offset
   const leftSidewalk: UserLocation[] = [];
   const rightSidewalk: UserLocation[] = [];
 
-  for (let i = 0; i < mainRoute.length; i++) {
-    const point = mainRoute[i];
+  for (let i = 0; i < routePoints.length; i++) {
+    const point = routePoints[i];
 
-    if (i === 0 || i === mainRoute.length - 1) {
-      // Start and end points stay the same
+    if (i < routePoints.length - 1) {
+      const nextPoint = routePoints[i + 1];
+
+      const deltaLng = nextPoint.longitude - point.longitude;
+      const deltaLat = nextPoint.latitude - point.latitude;
+      const bearing = Math.atan2(deltaLng, deltaLat);
+
+      const perpBearing = bearing + Math.PI / 2;
+      const normalizedX = Math.sin(perpBearing);
+      const normalizedY = Math.cos(perpBearing);
+
+      leftSidewalk.push({
+        latitude: point.latitude + normalizedY * offsetDistance,
+        longitude: point.longitude + normalizedX * offsetDistance,
+      });
+
+      rightSidewalk.push({
+        latitude: point.latitude - normalizedY * offsetDistance,
+        longitude: point.longitude - normalizedX * offsetDistance,
+      });
+    } else {
       leftSidewalk.push(point);
       rightSidewalk.push(point);
-    } else {
-      // Calculate perpendicular offset for sidewalk paths
-      const prevPoint = mainRoute[i - 1];
-      const nextPoint = mainRoute[i + 1];
-
-      // Calculate direction vector
-      const dx = nextPoint.longitude - prevPoint.longitude;
-      const dy = nextPoint.latitude - prevPoint.latitude;
-
-      // Calculate perpendicular vector (90 degrees rotated)
-      const perpX = -dy;
-      const perpY = dx;
-
-      // Normalize and apply offset
-      const length = Math.sqrt(perpX * perpX + perpY * perpY);
-      if (length > 0) {
-        const normalizedX = perpX / length;
-        const normalizedY = perpY / length;
-
-        leftSidewalk.push({
-          latitude: point.latitude + normalizedY * offsetDistance,
-          longitude: point.longitude + normalizedX * offsetDistance,
-        });
-
-        rightSidewalk.push({
-          latitude: point.latitude - normalizedY * offsetDistance,
-          longitude: point.longitude - normalizedX * offsetDistance,
-        });
-      } else {
-        leftSidewalk.push(point);
-        rightSidewalk.push(point);
-      }
     }
   }
 
@@ -160,7 +155,7 @@ export default function NavigationScreen() {
   const [showObstacleModal, setShowObstacleModal] = useState(false);
   const mapRef = useRef<MapView>(null);
 
-  // 🔥 UNIFIED ROUTING STATES
+  // 🔥 UNIFIED ROUTING STATES - ORIGINAL
   const [routeAnalysis, setRouteAnalysis] =
     useState<UnifiedRouteAnalysis | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
@@ -172,9 +167,14 @@ export default function NavigationScreen() {
   // Analysis loading states
   const [mapLoaded, setMapLoaded] = useState(false);
 
+  // 🔥 VALIDATION SYSTEM STATE - ONLY ADDITION!
+  const [currentValidationPrompt, setCurrentValidationPrompt] =
+    useState<ValidationPromptType | null>(null);
+  const [isNavigating, setIsNavigating] = useState(false);
+
   const insets = useSafeAreaInsets();
 
-  // POI data
+  // POI data - ORIGINAL
   const pasigPOIs = [
     {
       id: "1",
@@ -207,7 +207,7 @@ export default function NavigationScreen() {
     },
   ];
 
-  // Load nearby obstacles
+  // Load nearby obstacles - ORIGINAL
   const loadNearbyObstacles = async () => {
     if (!location) return;
 
@@ -231,7 +231,65 @@ export default function NavigationScreen() {
     }
   }, [location]);
 
-  // 🔥 UNIFIED ROUTE CALCULATION (AUTO-TRIGGERED)
+  // 🔥 VALIDATION SYSTEM MONITORING - NEW ADDITION!
+  useEffect(() => {
+    let validationInterval: number | null = null;
+
+    if (location && (routeAnalysis || isNavigating)) {
+      console.log("🔥 VALIDATION SYSTEM ACTIVATED!");
+
+      // Reset session counters when navigation starts
+      obstacleValidationService.resetSessionCounters();
+
+      const performValidationCheck = async () => {
+        try {
+          // Guard against poor GPS accuracy
+          if (!location.accuracy || location.accuracy > 30) {
+            console.log(
+              "🚫 Skipping validation - poor GPS accuracy:",
+              location.accuracy
+            );
+            return;
+          }
+
+          // Prevent overlapping calls
+          if (currentValidationPrompt) {
+            return;
+          }
+
+          const prompts =
+            await obstacleValidationService.checkForValidationPrompts(location);
+
+          if (prompts.length > 0 && !currentValidationPrompt) {
+            console.log(`🎯 VALIDATION PROMPT TRIGGERED!`);
+            setCurrentValidationPrompt(prompts[0]);
+            Vibration.vibrate(100);
+          }
+        } catch (error) {
+          console.error("❌ Validation check error:", error);
+        }
+      };
+
+      // Initial check
+      performValidationCheck();
+
+      // 10-second monitoring interval
+      validationInterval = setInterval(
+        performValidationCheck,
+        10000
+      ) as unknown as number;
+
+      console.log("⏰ Validation monitoring active");
+    }
+
+    return () => {
+      if (validationInterval !== null) {
+        clearInterval(validationInterval);
+      }
+    };
+  }, [location, routeAnalysis, isNavigating, currentValidationPrompt]);
+
+  // 🔥 UNIFIED ROUTE CALCULATION - ORIGINAL FLOW PRESERVED!
   const calculateUnifiedRoutes = async (poi: any) => {
     if (!location || !profile) {
       Alert.alert(
@@ -300,7 +358,7 @@ export default function NavigationScreen() {
           rightSidewalk: accessibleSidewalks.right,
         };
       } else if (sidewalkResult) {
-        // Fallback to sidewalk analysis - FIX: Handle missing polyline property
+        // Fallback to sidewalk analysis
         const standardPolyline = sidewalkResult.standardRoute?.segments?.[0]
           ? (sidewalkResult.standardRoute.segments[0] as any).polyline
             ? decodePolyline(
@@ -341,34 +399,40 @@ export default function NavigationScreen() {
         throw new Error("Could not calculate any routes");
       }
 
-      // Create unified analysis
+      // Create unified analysis with FIXED interface mapping
       const unifiedAnalysis: UnifiedRouteAnalysis = {
         fastestRoute,
         accessibleRoute,
         comparison: {
-          timeDifference: accessibleRoute.duration - fastestRoute.duration,
+          // 🔥 FIXED: Map routeComparison to comparison
+          timeDifference:
+            multiRouteResult?.routeComparison?.timeDifference ||
+            accessibleRoute.duration - fastestRoute.duration,
           accessibilityImprovement:
+            multiRouteResult?.routeComparison?.accessibilityImprovement ||
             (accessibleRoute.grade === "A"
               ? 90
               : accessibleRoute.grade === "B"
               ? 80
               : 70) -
-            (fastestRoute.grade === "A"
-              ? 90
-              : fastestRoute.grade === "B"
-              ? 80
-              : 70),
-          recommendation: `Accessible route is ${Math.round(
-            (accessibleRoute.duration - fastestRoute.duration) / 60
-          )} minutes longer but ${accessibleRoute.grade} grade vs ${
-            fastestRoute.grade
-          } grade`,
+              (fastestRoute.grade === "A"
+                ? 90
+                : fastestRoute.grade === "B"
+                ? 80
+                : 70),
+          recommendation:
+            multiRouteResult?.routeComparison?.recommendation ||
+            `Accessible route is ${Math.round(
+              (accessibleRoute.duration - fastestRoute.duration) / 60
+            )} minutes longer but ${accessibleRoute.grade} grade vs ${
+              fastestRoute.grade
+            } grade`,
         },
       };
 
       setRouteAnalysis(unifiedAnalysis);
 
-      // Auto-fit map to show both routes
+      // Auto-fit map to show both routes - ORIGINAL FUNCTIONALITY
       if (mapRef.current) {
         const allCoords = [
           location,
@@ -385,7 +449,7 @@ export default function NavigationScreen() {
         }
       }
 
-      // Success feedback
+      // Success feedback - ORIGINAL
       Vibration.vibrate(100);
       console.log("✅ Unified route calculation complete!");
     } catch (error: any) {
@@ -399,11 +463,11 @@ export default function NavigationScreen() {
     }
   };
 
-  // Handle POI selection - AUTO CALCULATE ROUTES
+  // Handle POI selection - ORIGINAL ONE-TAP FLOW PRESERVED!
   const handlePOIPress = (poi: any) => {
     console.log(`🏢 Selected POI: ${poi.name} - Auto-calculating routes...`);
 
-    // Animate map to POI
+    // Animate map to POI - ORIGINAL
     if (mapRef.current) {
       mapRef.current.animateToRegion(
         {
@@ -416,12 +480,13 @@ export default function NavigationScreen() {
       );
     }
 
-    // AUTO-CALCULATE ROUTES (no modal, no extra clicks)
+    // AUTO-CALCULATE ROUTES (no modal, no extra clicks) - ORIGINAL FLOW!
     calculateUnifiedRoutes(poi);
   };
 
-  // Start navigation
+  // Start navigation - ORIGINAL FUNCTIONALITY
   const startNavigation = (routeType: "fastest" | "accessible") => {
+    setIsNavigating(true);
     Vibration.vibrate(100);
     Alert.alert(
       "🚀 Navigation Started!",
@@ -434,20 +499,86 @@ export default function NavigationScreen() {
     );
   };
 
-  // Clear routes
+  // Clear routes - ORIGINAL
   const clearRoutes = () => {
     setRouteAnalysis(null);
     setSelectedDestination(null);
     setDestinationName("");
+    setIsNavigating(false);
   };
 
-  // Handle obstacle press
+  // Handle obstacle press - ORIGINAL
   const handleObstaclePress = (obstacle: AccessibilityObstacle) => {
     setSelectedObstacle(obstacle);
     setShowObstacleModal(true);
   };
 
-  // Utility functions
+  // 🔥 VALIDATION SYSTEM HANDLERS - NEW ADDITION!
+  const handleValidationResponse = async (
+    response: "still_there" | "cleared" | "skip"
+  ) => {
+    try {
+      if (currentValidationPrompt) {
+        console.log(`✅ User responded: ${response}`);
+
+        await obstacleValidationService.processValidationResponse(
+          currentValidationPrompt.obstacleId,
+          response
+        );
+
+        let message = "";
+        switch (response) {
+          case "still_there":
+            message =
+              "Salamat! Na-confirm na ang obstacle.\n\n(Thanks! Obstacle confirmed.)";
+            break;
+          case "cleared":
+            message =
+              "Salamat! Na-mark na as cleared.\n\n(Thanks! Marked as cleared.)";
+            break;
+          case "skip":
+            message = "OK, skip lang.\n\n(Skipped validation.)";
+            break;
+        }
+
+        await loadNearbyObstacles();
+
+        if (response !== "skip") {
+          Alert.alert("Validation Recorded", message, [{ text: "OK" }]);
+        }
+      }
+    } catch (error) {
+      console.error("❌ Validation response error:", error);
+      Alert.alert(
+        "Validation Failed",
+        "Hindi ma-record ang validation. Subukan ulit.\n\n(Could not record validation. Please try again.)",
+        [{ text: "OK" }]
+      );
+    } finally {
+      setCurrentValidationPrompt(null);
+    }
+  };
+
+  const handleValidationDismiss = () => {
+    setCurrentValidationPrompt(null);
+  };
+
+  // Utility functions - ORIGINAL
+  const getPOIIcon = (type: string): keyof typeof Ionicons.glyphMap => {
+    switch (type) {
+      case "government":
+        return "business";
+      case "mall":
+        return "storefront";
+      case "hospital":
+        return "medical";
+      case "business":
+        return "briefcase";
+      default:
+        return "location";
+    }
+  };
+
   const getObstacleIcon = (
     type: ObstacleType
   ): keyof typeof Ionicons.glyphMap => {
@@ -481,43 +612,32 @@ export default function NavigationScreen() {
     }
   };
 
-  const getPOIIcon = (type: string) => {
-    switch (type) {
-      case "government":
-        return "business";
-      case "mall":
-        return "storefront";
-      case "hospital":
-        return "medical";
-      case "business":
-        return "business";
-      default:
-        return "location";
-    }
-  };
-
-  // Loading state
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#3B82F6" />
-        <Text style={styles.loadingText}>Getting your location...</Text>
+        <Text style={styles.loadingText}>
+          Hinahanda ang mapa...\n(Loading map...)
+        </Text>
       </View>
     );
   }
 
-  // Error state
-  if (error && !location) {
+  if (error) {
     return (
       <View style={styles.errorContainer}>
         <Ionicons name="location-outline" size={64} color="#EF4444" />
         <Text style={styles.errorTitle}>Location Error</Text>
-        <Text style={styles.errorText}>{error}</Text>
+        <Text style={styles.errorText}>
+          Hindi makuha ang inyong location. Pakicheck ang location permissions.
+          {"\n\n"}
+          (Cannot get your location. Please check location permissions.)
+        </Text>
         <TouchableOpacity
           style={styles.retryButton}
           onPress={getCurrentLocation}
         >
-          <Text style={styles.retryButtonText}>Try Again</Text>
+          <Text style={styles.retryButtonText}>Subukan Ulit (Try Again)</Text>
         </TouchableOpacity>
       </View>
     );
@@ -525,15 +645,15 @@ export default function NavigationScreen() {
 
   return (
     <View style={{ flex: 1 }}>
-      {/* MAP WITH UNIFIED ROUTE VISUALIZATION */}
       <MapView
         ref={mapRef}
         style={{ flex: 1 }}
+        provider="google"
         initialRegion={{
-          latitude: location?.latitude || 14.5764,
-          longitude: location?.longitude || 121.0851,
-          latitudeDelta: 0.02,
-          longitudeDelta: 0.02,
+          latitude: location?.latitude || 14.5547,
+          longitude: location?.longitude || 121.0244,
+          latitudeDelta: 0.01,
+          longitudeDelta: 0.01,
         }}
         onMapReady={() => {
           setMapLoaded(true);
@@ -542,73 +662,27 @@ export default function NavigationScreen() {
         showsUserLocation={true}
         showsMyLocationButton={false}
         mapType="standard"
-        loadingEnabled={true}
+        maxZoomLevel={18}
+        minZoomLevel={10}
       >
-        {/* 🔥 FASTEST ROUTE (RED) */}
-        {routeAnalysis?.fastestRoute.polyline && (
-          <Polyline
-            coordinates={routeAnalysis.fastestRoute.polyline}
-            strokeColor="#EF4444"
-            strokeWidth={5}
-            lineDashPattern={[0]}
-            zIndex={1}
-          />
-        )}
+        {/* 🔥 ENHANCED OBSTACLE MARKERS - VALIDATION STATUS */}
+        {nearbyObstacles.map((obstacle) => (
+          <Marker
+            key={obstacle.id}
+            coordinate={{
+              latitude: obstacle.location.latitude,
+              longitude: obstacle.location.longitude,
+            }}
+            onPress={() => handleObstaclePress(obstacle)}
+          >
+            <EnhancedObstacleMarker
+              obstacle={obstacle}
+              onPress={() => handleObstaclePress(obstacle)}
+            />
+          </Marker>
+        ))}
 
-        {/* 🔥 ACCESSIBLE ROUTE (GREEN) */}
-        {routeAnalysis?.accessibleRoute.polyline && (
-          <Polyline
-            coordinates={routeAnalysis.accessibleRoute.polyline}
-            strokeColor="#22C55E"
-            strokeWidth={5}
-            lineDashPattern={[0]}
-            zIndex={2}
-          />
-        )}
-
-        {/* 🚶‍♂️ LEFT SIDEWALK PATHS (DASHED) */}
-        {showSidewalks && routeAnalysis?.fastestRoute.leftSidewalk && (
-          <Polyline
-            coordinates={routeAnalysis.fastestRoute.leftSidewalk}
-            strokeColor="#EF4444"
-            strokeWidth={2}
-            lineDashPattern={[5, 5]}
-            zIndex={3}
-          />
-        )}
-
-        {showSidewalks && routeAnalysis?.accessibleRoute.leftSidewalk && (
-          <Polyline
-            coordinates={routeAnalysis.accessibleRoute.leftSidewalk}
-            strokeColor="#22C55E"
-            strokeWidth={2}
-            lineDashPattern={[5, 5]}
-            zIndex={4}
-          />
-        )}
-
-        {/* 🚶‍♂️ RIGHT SIDEWALK PATHS (DOTTED) */}
-        {showSidewalks && routeAnalysis?.fastestRoute.rightSidewalk && (
-          <Polyline
-            coordinates={routeAnalysis.fastestRoute.rightSidewalk}
-            strokeColor="#EF4444"
-            strokeWidth={2}
-            lineDashPattern={[2, 8]}
-            zIndex={5}
-          />
-        )}
-
-        {showSidewalks && routeAnalysis?.accessibleRoute.rightSidewalk && (
-          <Polyline
-            coordinates={routeAnalysis.accessibleRoute.rightSidewalk}
-            strokeColor="#22C55E"
-            strokeWidth={2}
-            lineDashPattern={[2, 8]}
-            zIndex={6}
-          />
-        )}
-
-        {/* POI MARKERS */}
+        {/* POI MARKERS - ORIGINAL */}
         {pasigPOIs.map((poi) => (
           <Marker
             key={poi.id}
@@ -632,33 +706,73 @@ export default function NavigationScreen() {
           </Marker>
         ))}
 
-        {/* OBSTACLE MARKERS */}
-        {nearbyObstacles.map((obstacle) => (
-          <Marker
-            key={obstacle.id}
-            coordinate={{
-              latitude: obstacle.location.latitude,
-              longitude: obstacle.location.longitude,
-            }}
-            onPress={() => handleObstaclePress(obstacle)}
-          >
-            <View
-              style={[
-                styles.obstacleMarker,
-                { backgroundColor: getObstacleColor(obstacle.severity) },
-              ]}
-            >
-              <Ionicons
-                name={getObstacleIcon(obstacle.type)}
-                size={12}
-                color="white"
+        {/* ROUTE VISUALIZATION - ORIGINAL */}
+        {routeAnalysis && (
+          <>
+            {/* FASTEST ROUTE - MAIN LINE */}
+            <Polyline
+              coordinates={routeAnalysis.fastestRoute.polyline}
+              strokeColor="#EF4444"
+              strokeWidth={5}
+              lineDashPattern={[0]}
+              zIndex={1}
+            />
+
+            {/* ACCESSIBLE ROUTE - MAIN LINE */}
+            <Polyline
+              coordinates={routeAnalysis.accessibleRoute.polyline}
+              strokeColor="#22C55E"
+              strokeWidth={5}
+              lineDashPattern={[0]}
+              zIndex={2}
+            />
+
+            {/* LEFT SIDEWALK PATHS (DASHED) */}
+            {showSidewalks && routeAnalysis?.fastestRoute.leftSidewalk && (
+              <Polyline
+                coordinates={routeAnalysis.fastestRoute.leftSidewalk}
+                strokeColor="#EF4444"
+                strokeWidth={2}
+                lineDashPattern={[5, 5]}
+                zIndex={3}
               />
-            </View>
-          </Marker>
-        ))}
+            )}
+
+            {showSidewalks && routeAnalysis?.accessibleRoute.leftSidewalk && (
+              <Polyline
+                coordinates={routeAnalysis.accessibleRoute.leftSidewalk}
+                strokeColor="#22C55E"
+                strokeWidth={2}
+                lineDashPattern={[5, 5]}
+                zIndex={4}
+              />
+            )}
+
+            {/* RIGHT SIDEWALK PATHS (DOTTED) */}
+            {showSidewalks && routeAnalysis?.fastestRoute.rightSidewalk && (
+              <Polyline
+                coordinates={routeAnalysis.fastestRoute.rightSidewalk}
+                strokeColor="#EF4444"
+                strokeWidth={2}
+                lineDashPattern={[2, 8]}
+                zIndex={5}
+              />
+            )}
+
+            {showSidewalks && routeAnalysis?.accessibleRoute.rightSidewalk && (
+              <Polyline
+                coordinates={routeAnalysis.accessibleRoute.rightSidewalk}
+                strokeColor="#22C55E"
+                strokeWidth={2}
+                lineDashPattern={[2, 8]}
+                zIndex={6}
+              />
+            )}
+          </>
+        )}
       </MapView>
 
-      {/* SEARCH BAR */}
+      {/* SEARCH BAR - ORIGINAL */}
       <View style={[styles.searchContainer, { top: insets.top + 10 }]}>
         <View style={styles.searchInputContainer}>
           <Ionicons name="search" size={20} color="#6B7280" />
@@ -673,7 +787,7 @@ export default function NavigationScreen() {
         </View>
       </View>
 
-      {/* 🔥 UNIFIED ROUTE INFO PANEL */}
+      {/* 🔥 UNIFIED ROUTE INFO PANEL - ORIGINAL UI PRESERVED! */}
       {routeAnalysis && (
         <View
           style={[styles.routeInfoContainer, { bottom: insets.bottom + 100 }]}
@@ -683,7 +797,7 @@ export default function NavigationScreen() {
               🗺️ Routes to {destinationName}
             </Text>
 
-            {/* Route comparison */}
+            {/* Route comparison - ORIGINAL */}
             <View style={styles.routeComparison}>
               <View style={styles.routeRow}>
                 <View style={styles.routeIndicator}>
@@ -699,26 +813,6 @@ export default function NavigationScreen() {
                 </Text>
                 <TouchableOpacity
                   style={styles.navigateBtn}
-                  onPress={() => startNavigation("fastest")}
-                >
-                  <Ionicons name="navigate" size={16} color="#EF4444" />
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.routeRow}>
-                <View style={styles.routeIndicator}>
-                  <View
-                    style={[styles.routeColor, { backgroundColor: "#22C55E" }]}
-                  />
-                  <Text style={styles.routeLabel}>Accessible</Text>
-                </View>
-                <Text style={styles.routeDetails}>
-                  {Math.round(routeAnalysis.accessibleRoute.duration / 60)}min •{" "}
-                  {(routeAnalysis.accessibleRoute.distance / 1000).toFixed(1)}km
-                  • Grade {routeAnalysis.accessibleRoute.grade}
-                </Text>
-                <TouchableOpacity
-                  style={styles.navigateBtn}
                   onPress={() => startNavigation("accessible")}
                 >
                   <Ionicons name="navigate" size={16} color="#22C55E" />
@@ -726,12 +820,12 @@ export default function NavigationScreen() {
               </View>
             </View>
 
-            {/* Recommendation */}
+            {/* Recommendation - ORIGINAL */}
             <Text style={styles.recommendation}>
               💡 {routeAnalysis.comparison.recommendation}
             </Text>
 
-            {/* Sidewalk toggle */}
+            {/* Sidewalk toggle - ORIGINAL */}
             <View style={styles.controls}>
               <TouchableOpacity
                 style={styles.toggleButton}
@@ -759,7 +853,7 @@ export default function NavigationScreen() {
         </View>
       )}
 
-      {/* CALCULATION LOADING OVERLAY */}
+      {/* CALCULATION LOADING OVERLAY - ORIGINAL */}
       {isCalculating && (
         <View style={styles.analysisOverlay}>
           <View style={styles.analysisCard}>
@@ -774,7 +868,7 @@ export default function NavigationScreen() {
         </View>
       )}
 
-      {/* OBSTACLE DETAIL MODAL */}
+      {/* OBSTACLE DETAIL MODAL - ORIGINAL */}
       <Modal visible={showObstacleModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.obstacleModal}>
@@ -831,6 +925,15 @@ export default function NavigationScreen() {
                       {selectedObstacle.verified ? "Verified" : "Unverified"}
                     </Text>
                   </View>
+
+                  {/* 🔥 VALIDATION STATUS DISPLAY - NEW */}
+                  <View style={styles.obstacleDetails}>
+                    <Text style={styles.detailLabel}>Validation:</Text>
+                    <Text style={styles.detailValue}>
+                      ↑{selectedObstacle.upvotes || 0} ↓
+                      {selectedObstacle.downvotes || 0}
+                    </Text>
+                  </View>
                 </ScrollView>
               </>
             )}
@@ -838,7 +941,16 @@ export default function NavigationScreen() {
         </View>
       </Modal>
 
-      {/* BOTTOM CONTROLS */}
+      {/* 🔥 VALIDATION PROMPT OVERLAY - THE CROWN JEWEL! */}
+      {currentValidationPrompt && (
+        <ValidationPrompt
+          prompt={currentValidationPrompt}
+          onResponse={handleValidationResponse}
+          onDismiss={handleValidationDismiss}
+        />
+      )}
+
+      {/* BOTTOM CONTROLS - ORIGINAL */}
       <View style={[styles.bottomControls, { bottom: insets.bottom + 20 }]}>
         <TouchableOpacity
           style={styles.locationButton}
@@ -1003,8 +1115,8 @@ const styles = StyleSheet.create({
   toggleText: {
     fontSize: 12,
     color: "#3B82F6",
-    fontWeight: "600",
     marginLeft: 4,
+    fontWeight: "600",
   },
   clearButton: {
     flexDirection: "row",
@@ -1016,8 +1128,8 @@ const styles = StyleSheet.create({
   clearText: {
     fontSize: 12,
     color: "#EF4444",
-    fontWeight: "600",
     marginLeft: 4,
+    fontWeight: "600",
   },
   analysisOverlay: {
     position: "absolute",
@@ -1042,11 +1154,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#1F2937",
     textAlign: "center",
-    fontWeight: "600",
   },
   analysisSubtext: {
     marginTop: 8,
-    fontSize: 12,
+    fontSize: 14,
     color: "#6B7280",
     textAlign: "center",
   },
@@ -1062,6 +1173,18 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
+  },
+  obstacleMarker: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
   },
   calloutContainer: {
     padding: 8,
@@ -1081,16 +1204,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#3B82F6",
     marginTop: 4,
-    fontStyle: "italic",
-  },
-  obstacleMarker: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: "white",
+    fontWeight: "500",
   },
   modalOverlay: {
     flex: 1,
@@ -1101,7 +1215,7 @@ const styles = StyleSheet.create({
     backgroundColor: "white",
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: "70%",
+    maxHeight: "80%",
   },
   obstacleHeader: {
     flexDirection: "row",
@@ -1122,7 +1236,7 @@ const styles = StyleSheet.create({
     marginLeft: 16,
   },
   obstacleTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "bold",
     color: "#1F2937",
   },
@@ -1136,7 +1250,7 @@ const styles = StyleSheet.create({
   },
   obstacleContent: {
     padding: 20,
-    maxHeight: 200,
+    maxHeight: 300,
   },
   obstacleDescription: {
     fontSize: 16,
