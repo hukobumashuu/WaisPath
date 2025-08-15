@@ -1,5 +1,5 @@
 // src/screens/NavigationScreen.tsx
-// UNIFIED INTELLIGENT ROUTING - KEEP ORIGINAL UI + ADD VALIDATION SYSTEM! 🔥
+// UPDATED: Obstacle-First Design + Fixed Dual Routes Display! 🔥
 
 import React, { useState, useRef, useEffect } from "react";
 import {
@@ -26,15 +26,375 @@ import { UserLocation, AccessibilityObstacle, ObstacleType } from "../types";
 import { routeAnalysisService } from "../services/routeAnalysisService";
 import { sidewalkRouteAnalysisService } from "../services/sidewalkRouteAnalysisService";
 
-// 🔥 VALIDATION SYSTEM IMPORTS - ONLY ADDITION!
-import {
-  ValidationPrompt,
-  EnhancedObstacleMarker,
-} from "../components/ValidationPrompt";
+// 🔥 VALIDATION SYSTEM IMPORTS - Updated with new obstacle marker!
+import { ValidationPrompt } from "../components/ValidationPrompt";
 import {
   obstacleValidationService,
   type ValidationPrompt as ValidationPromptType,
 } from "../services/obstacleValidationService";
+
+// 🔥 IMPROVED THREE-TIER VALIDATION UI/UX MARKER COMPONENT
+interface ObstacleMarkerProps {
+  obstacle: AccessibilityObstacle;
+  onPress: () => void;
+}
+
+function EnhancedObstacleMarker({ obstacle, onPress }: ObstacleMarkerProps) {
+  // 🔥 USE EXISTING VALIDATION SERVICE (keep three-tier logic!)
+  const validationStatus =
+    obstacleValidationService.getValidationStatus(obstacle);
+
+  // Get obstacle-specific icon and color
+  const obstacleDisplay = getObstacleDisplay(obstacle.type, obstacle.severity);
+
+  // 🎨 IMPROVED UI MAPPING for three-tier system
+  const getValidationUI = (status: any) => {
+    switch (status.tier) {
+      case "admin_resolved":
+        return {
+          badgeColor: "#3B82F6", // Blue for official
+          badgeIcon: "shield-checkmark",
+          badgeText: "OFFICIAL",
+          textColor: "#3B82F6",
+        };
+
+      case "community_verified":
+        // 🔥 IMPROVED: Show dispute status clearly!
+        if (status.conflictingReports && status.confidence === "low") {
+          return {
+            badgeColor: "#F59E0B", // Orange for disputed
+            badgeIcon: "warning",
+            badgeText: "DISPUTED",
+            textColor: "#F59E0B",
+          };
+        } else {
+          return {
+            badgeColor: "#22C55E", // Green for verified
+            badgeIcon: "checkmark",
+            badgeText: "VERIFIED",
+            textColor: "#22C55E",
+          };
+        }
+
+      case "single_report":
+      default:
+        return {
+          badgeColor: "#EF4444", // Red for unverified
+          badgeIcon: "alert",
+          badgeText: "UNVERIFIED",
+          textColor: "#EF4444",
+        };
+    }
+  };
+
+  const uiConfig = getValidationUI(validationStatus);
+
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      style={{
+        alignItems: "center",
+        opacity: 1.0, // Always full opacity
+        paddingTop: 8, // 🔥 FIX: Add padding to prevent badge clipping!
+        paddingRight: 8, // 🔥 FIX: Add padding to prevent badge clipping!
+        paddingLeft: 8, // 🔥 FIX: Symmetric padding for better touch area
+      }}
+      accessibilityLabel={`${obstacle.type} obstacle - ${validationStatus.displayLabel}`}
+    >
+      <View
+        style={{
+          position: "relative",
+          // 🔥 FIX: Ensure container has enough space for badges
+          minWidth: 60, // Wider than icon (44px) + badge overhang
+          minHeight: 60, // Taller than icon (44px) + badge overhang
+          alignItems: "center",
+          justifyContent: "flex-start",
+        }}
+      >
+        {/* 🎯 MAIN OBSTACLE ICON - Always shows actual obstacle type */}
+        <View
+          style={{
+            backgroundColor: obstacleDisplay.backgroundColor,
+            width: 44,
+            height: 44,
+            borderRadius: 22,
+            justifyContent: "center",
+            alignItems: "center",
+            elevation: 4,
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.3,
+            shadowRadius: 4,
+            borderWidth: 2,
+            borderColor: "white",
+            // 🔥 FIX: Position icon to allow badge space
+            marginTop: 4,
+          }}
+        >
+          <Ionicons
+            name={obstacleDisplay.icon as any}
+            size={22}
+            color="white"
+          />
+        </View>
+
+        {/* 🎨 VALIDATION BADGE - Top-right corner with clear status */}
+        <View
+          style={{
+            position: "absolute",
+            top: 0, // 🔥 FIX: Changed from -4 to 0 (within bounds)
+            right: 0, // 🔥 FIX: Changed from -4 to 0 (within bounds)
+            width: 20,
+            height: 20,
+            borderRadius: 10,
+            backgroundColor: uiConfig.badgeColor,
+            justifyContent: "center",
+            alignItems: "center",
+            borderWidth: 2,
+            borderColor: "white",
+            elevation: 6, // 🔥 FIX: Higher elevation to appear above icon
+            zIndex: 10, // 🔥 FIX: Ensure badge appears on top
+          }}
+        >
+          <Ionicons name={uiConfig.badgeIcon as any} size={12} color="white" />
+        </View>
+
+        {/* 📝 CLEAR STATUS TEXT - Shows exactly what the status is */}
+        <Text
+          style={{
+            fontSize: 8,
+            color: uiConfig.textColor,
+            fontWeight: "700",
+            textAlign: "center",
+            marginTop: 4,
+            backgroundColor: "white",
+            paddingHorizontal: 4,
+            paddingVertical: 2,
+            borderRadius: 6,
+            borderWidth: 1,
+            borderColor: uiConfig.badgeColor,
+            overflow: "hidden",
+            minWidth: 50,
+          }}
+        >
+          {uiConfig.badgeText}
+        </Text>
+
+        {/* 🔥 ENHANCED: Validation count indicator for transparency */}
+        <Text
+          style={{
+            fontSize: 6,
+            color: "#6B7280",
+            textAlign: "center",
+            marginTop: 1,
+            backgroundColor: "#F9FAFB",
+            paddingHorizontal: 2,
+            borderRadius: 3,
+          }}
+        >
+          ↑{obstacle.upvotes || 0} ↓{obstacle.downvotes || 0}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+// 🎨 Get obstacle-specific icon and colors
+function getObstacleDisplay(type: ObstacleType, severity?: string) {
+  const displays: Record<
+    ObstacleType,
+    {
+      icon: string;
+      backgroundColor: string;
+    }
+  > = {
+    vendor_blocking: {
+      icon: "storefront",
+      backgroundColor: "#F97316", // Orange - vendors
+    },
+    parked_vehicles: {
+      icon: "car",
+      backgroundColor: "#EF4444", // Red - blocking vehicles
+    },
+    construction: {
+      icon: "construct",
+      backgroundColor: "#F59E0B", // Yellow/Amber - construction
+    },
+    electrical_post: {
+      icon: "flash",
+      backgroundColor: "#8B5CF6", // Purple - electrical
+    },
+    tree_roots: {
+      icon: "leaf",
+      backgroundColor: "#22C55E", // Green - nature
+    },
+    no_sidewalk: {
+      icon: "ban",
+      backgroundColor: "#DC2626", // Dark red - danger
+    },
+    flooding: {
+      icon: "water",
+      backgroundColor: "#3B82F6", // Blue - water
+    },
+    stairs_no_ramp: {
+      icon: "arrow-up",
+      backgroundColor: "#EC4899", // Pink - accessibility barrier
+    },
+    narrow_passage: {
+      icon: "resize",
+      backgroundColor: "#F59E0B", // Amber - width issue
+    },
+    broken_pavement: {
+      icon: "warning",
+      backgroundColor: "#EF4444", // Red - danger
+    },
+    steep_slope: {
+      icon: "trending-up",
+      backgroundColor: "#F97316", // Orange - difficulty
+    },
+    other: {
+      icon: "help-circle",
+      backgroundColor: "#6B7280", // Gray - unknown
+    },
+  };
+
+  // Override color for blocking severity
+  const display = displays[type] || displays.other;
+
+  if (severity === "blocking") {
+    return {
+      ...display,
+      backgroundColor: "#DC2626", // Dark red for blocking obstacles
+    };
+  }
+
+  return display;
+}
+
+// 🔥 ENHANCED VALIDATION DISPLAY COMPONENT
+function EnhancedValidationDisplay({
+  obstacle,
+}: {
+  obstacle: AccessibilityObstacle;
+}) {
+  const validationStatus =
+    obstacleValidationService.getValidationStatus(obstacle);
+  const upvotes = obstacle.upvotes || 0;
+  const downvotes = obstacle.downvotes || 0;
+
+  const getStatusDisplay = () => {
+    switch (validationStatus.tier) {
+      case "admin_resolved":
+        return {
+          icon: "shield-checkmark",
+          color: "#3B82F6",
+          title: "Official Status",
+          description: "Verified by government assessor or admin",
+          bgColor: "#EFF6FF",
+        };
+
+      case "community_verified":
+        if (
+          validationStatus.conflictingReports &&
+          validationStatus.confidence === "low"
+        ) {
+          return {
+            icon: "warning",
+            color: "#F59E0B",
+            title: "Disputed Report",
+            description: `Community has mixed opinions (${upvotes} confirm, ${downvotes} dispute)`,
+            bgColor: "#FFFBEB",
+          };
+        } else {
+          return {
+            icon: "checkmark-circle",
+            color: "#22C55E",
+            title: "Community Verified",
+            description: `Confirmed by ${upvotes} users, disputed by ${downvotes}`,
+            bgColor: "#F0FDF4",
+          };
+        }
+
+      case "single_report":
+      default:
+        return {
+          icon: "alert-circle",
+          color: "#EF4444",
+          title: "Single Report",
+          description: "Needs community validation - help verify this obstacle",
+          bgColor: "#FEF2F2",
+        };
+    }
+  };
+
+  const statusDisplay = getStatusDisplay();
+
+  return (
+    <View
+      style={{
+        backgroundColor: statusDisplay.bgColor,
+        padding: 12,
+        borderRadius: 8,
+        marginVertical: 8,
+        borderWidth: 1,
+        borderColor: statusDisplay.color + "40", // 25% opacity
+      }}
+    >
+      <View
+        style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}
+      >
+        <Ionicons
+          name={statusDisplay.icon as any}
+          size={20}
+          color={statusDisplay.color}
+        />
+        <Text
+          style={{
+            fontSize: 16,
+            fontWeight: "600",
+            color: statusDisplay.color,
+            marginLeft: 8,
+          }}
+        >
+          {statusDisplay.title}
+        </Text>
+      </View>
+
+      <Text
+        style={{
+          fontSize: 14,
+          color: "#374151",
+          lineHeight: 20,
+          marginBottom: 8,
+        }}
+      >
+        {statusDisplay.description}
+      </Text>
+
+      {/* Validation breakdown */}
+      {(upvotes > 0 || downvotes > 0) && (
+        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <Ionicons name="thumbs-up" size={16} color="#22C55E" />
+            <Text
+              style={{ marginLeft: 4, color: "#22C55E", fontWeight: "600" }}
+            >
+              {upvotes} confirmed
+            </Text>
+          </View>
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <Ionicons name="thumbs-down" size={16} color="#EF4444" />
+            <Text
+              style={{ marginLeft: 4, color: "#EF4444", fontWeight: "600" }}
+            >
+              {downvotes} disputed
+            </Text>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
 
 // Unified route data structure
 interface UnifiedRouteAnalysis {
@@ -101,7 +461,7 @@ const decodePolyline = (encoded: string): UserLocation[] => {
   return points;
 };
 
-// Generate sidewalk offsets (your existing function)
+// Generate sidewalk offsets
 const generateSidewalkPaths = (
   routePoints: UserLocation[],
   offsetDistance: number = 0.00008 // ~9 meters at equator
@@ -155,7 +515,7 @@ export default function NavigationScreen() {
   const [showObstacleModal, setShowObstacleModal] = useState(false);
   const mapRef = useRef<MapView>(null);
 
-  // 🔥 UNIFIED ROUTING STATES - ORIGINAL
+  // 🔥 UNIFIED ROUTING STATES
   const [routeAnalysis, setRouteAnalysis] =
     useState<UnifiedRouteAnalysis | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
@@ -167,14 +527,14 @@ export default function NavigationScreen() {
   // Analysis loading states
   const [mapLoaded, setMapLoaded] = useState(false);
 
-  // 🔥 VALIDATION SYSTEM STATE - ONLY ADDITION!
+  // 🔥 VALIDATION SYSTEM STATE
   const [currentValidationPrompt, setCurrentValidationPrompt] =
     useState<ValidationPromptType | null>(null);
   const [isNavigating, setIsNavigating] = useState(false);
 
   const insets = useSafeAreaInsets();
 
-  // POI data - ORIGINAL
+  // POI data
   const pasigPOIs = [
     {
       id: "1",
@@ -207,7 +567,7 @@ export default function NavigationScreen() {
     },
   ];
 
-  // Load nearby obstacles - ORIGINAL
+  // Load nearby obstacles
   const loadNearbyObstacles = async () => {
     if (!location) return;
 
@@ -231,7 +591,7 @@ export default function NavigationScreen() {
     }
   }, [location]);
 
-  // 🔥 VALIDATION SYSTEM MONITORING - NEW ADDITION!
+  // 🔥 VALIDATION SYSTEM MONITORING
   useEffect(() => {
     let validationInterval: number | null = null;
 
@@ -289,7 +649,7 @@ export default function NavigationScreen() {
     };
   }, [location, routeAnalysis, isNavigating, currentValidationPrompt]);
 
-  // 🔥 UNIFIED ROUTE CALCULATION - ORIGINAL FLOW PRESERVED!
+  // 🔥 UNIFIED ROUTE CALCULATION
   const calculateUnifiedRoutes = async (poi: any) => {
     if (!location || !profile) {
       Alert.alert(
@@ -404,7 +764,6 @@ export default function NavigationScreen() {
         fastestRoute,
         accessibleRoute,
         comparison: {
-          // 🔥 FIXED: Map routeComparison to comparison
           timeDifference:
             multiRouteResult?.routeComparison?.timeDifference ||
             accessibleRoute.duration - fastestRoute.duration,
@@ -432,7 +791,7 @@ export default function NavigationScreen() {
 
       setRouteAnalysis(unifiedAnalysis);
 
-      // Auto-fit map to show both routes - ORIGINAL FUNCTIONALITY
+      // Auto-fit map to show both routes
       if (mapRef.current) {
         const allCoords = [
           location,
@@ -449,7 +808,7 @@ export default function NavigationScreen() {
         }
       }
 
-      // Success feedback - ORIGINAL
+      // Success feedback
       Vibration.vibrate(100);
       console.log("✅ Unified route calculation complete!");
     } catch (error: any) {
@@ -467,7 +826,7 @@ export default function NavigationScreen() {
   const handlePOIPress = (poi: any) => {
     console.log(`🏢 Selected POI: ${poi.name} - Auto-calculating routes...`);
 
-    // Animate map to POI - ORIGINAL
+    // Animate map to POI
     if (mapRef.current) {
       mapRef.current.animateToRegion(
         {
@@ -480,11 +839,11 @@ export default function NavigationScreen() {
       );
     }
 
-    // AUTO-CALCULATE ROUTES (no modal, no extra clicks) - ORIGINAL FLOW!
+    // AUTO-CALCULATE ROUTES (no modal, no extra clicks)
     calculateUnifiedRoutes(poi);
   };
 
-  // Start navigation - ORIGINAL FUNCTIONALITY
+  // Start navigation
   const startNavigation = (routeType: "fastest" | "accessible") => {
     setIsNavigating(true);
     Vibration.vibrate(100);
@@ -499,7 +858,7 @@ export default function NavigationScreen() {
     );
   };
 
-  // Clear routes - ORIGINAL
+  // Clear routes
   const clearRoutes = () => {
     setRouteAnalysis(null);
     setSelectedDestination(null);
@@ -507,13 +866,13 @@ export default function NavigationScreen() {
     setIsNavigating(false);
   };
 
-  // Handle obstacle press - ORIGINAL
+  // Handle obstacle press
   const handleObstaclePress = (obstacle: AccessibilityObstacle) => {
     setSelectedObstacle(obstacle);
     setShowObstacleModal(true);
   };
 
-  // 🔥 VALIDATION SYSTEM HANDLERS - NEW ADDITION!
+  // 🔥 VALIDATION SYSTEM HANDLERS
   const handleValidationResponse = async (
     response: "still_there" | "cleared" | "skip"
   ) => {
@@ -563,7 +922,7 @@ export default function NavigationScreen() {
     setCurrentValidationPrompt(null);
   };
 
-  // Utility functions - ORIGINAL
+  // Utility functions
   const getPOIIcon = (type: string): keyof typeof Ionicons.glyphMap => {
     switch (type) {
       case "government":
@@ -665,7 +1024,7 @@ export default function NavigationScreen() {
         maxZoomLevel={18}
         minZoomLevel={10}
       >
-        {/* 🔥 ENHANCED OBSTACLE MARKERS - VALIDATION STATUS */}
+        {/* 🔥 NEW OBSTACLE-FIRST MARKERS */}
         {nearbyObstacles.map((obstacle) => (
           <Marker
             key={obstacle.id}
@@ -682,7 +1041,7 @@ export default function NavigationScreen() {
           </Marker>
         ))}
 
-        {/* POI MARKERS - ORIGINAL */}
+        {/* POI MARKERS */}
         {pasigPOIs.map((poi) => (
           <Marker
             key={poi.id}
@@ -706,7 +1065,7 @@ export default function NavigationScreen() {
           </Marker>
         ))}
 
-        {/* ROUTE VISUALIZATION - ORIGINAL */}
+        {/* ROUTE VISUALIZATION */}
         {routeAnalysis && (
           <>
             {/* FASTEST ROUTE - MAIN LINE */}
@@ -772,7 +1131,7 @@ export default function NavigationScreen() {
         )}
       </MapView>
 
-      {/* SEARCH BAR - ORIGINAL */}
+      {/* SEARCH BAR */}
       <View style={[styles.searchContainer, { top: insets.top + 10 }]}>
         <View style={styles.searchInputContainer}>
           <Ionicons name="search" size={20} color="#6B7280" />
@@ -787,7 +1146,7 @@ export default function NavigationScreen() {
         </View>
       </View>
 
-      {/* 🔥 UNIFIED ROUTE INFO PANEL - ORIGINAL UI PRESERVED! */}
+      {/* 🔥 FIXED DUAL ROUTE INFO PANEL! */}
       {routeAnalysis && (
         <View
           style={[styles.routeInfoContainer, { bottom: insets.bottom + 100 }]}
@@ -797,8 +1156,9 @@ export default function NavigationScreen() {
               🗺️ Routes to {destinationName}
             </Text>
 
-            {/* Route comparison - ORIGINAL */}
+            {/* 🔥 BOTH ROUTES DISPLAYED! */}
             <View style={styles.routeComparison}>
+              {/* FASTEST ROUTE ROW */}
               <View style={styles.routeRow}>
                 <View style={styles.routeIndicator}>
                   <View
@@ -813,6 +1173,27 @@ export default function NavigationScreen() {
                 </Text>
                 <TouchableOpacity
                   style={styles.navigateBtn}
+                  onPress={() => startNavigation("fastest")}
+                >
+                  <Ionicons name="navigate" size={16} color="#EF4444" />
+                </TouchableOpacity>
+              </View>
+
+              {/* ACCESSIBLE ROUTE ROW */}
+              <View style={styles.routeRow}>
+                <View style={styles.routeIndicator}>
+                  <View
+                    style={[styles.routeColor, { backgroundColor: "#22C55E" }]}
+                  />
+                  <Text style={styles.routeLabel}>Accessible</Text>
+                </View>
+                <Text style={styles.routeDetails}>
+                  {Math.round(routeAnalysis.accessibleRoute.duration / 60)}min •{" "}
+                  {(routeAnalysis.accessibleRoute.distance / 1000).toFixed(1)}km
+                  • Grade {routeAnalysis.accessibleRoute.grade}
+                </Text>
+                <TouchableOpacity
+                  style={styles.navigateBtn}
                   onPress={() => startNavigation("accessible")}
                 >
                   <Ionicons name="navigate" size={16} color="#22C55E" />
@@ -820,12 +1201,32 @@ export default function NavigationScreen() {
               </View>
             </View>
 
-            {/* Recommendation - ORIGINAL */}
+            {/* Recommendation */}
             <Text style={styles.recommendation}>
               💡 {routeAnalysis.comparison.recommendation}
             </Text>
 
-            {/* Sidewalk toggle - ORIGINAL */}
+            {/* 🔥 ROUTE COMPARISON STATS */}
+            <View style={styles.comparisonStats}>
+              <View style={styles.statItem}>
+                <Text style={styles.statLabel}>Time Difference</Text>
+                <Text style={styles.statValue}>
+                  {Math.round(routeAnalysis.comparison.timeDifference / 60)} min
+                </Text>
+              </View>
+              <View style={styles.statItem}>
+                <Text style={styles.statLabel}>Accessibility</Text>
+                <Text style={styles.statValue}>
+                  +
+                  {Math.round(
+                    routeAnalysis.comparison.accessibilityImprovement
+                  )}{" "}
+                  pts
+                </Text>
+              </View>
+            </View>
+
+            {/* Sidewalk toggle */}
             <View style={styles.controls}>
               <TouchableOpacity
                 style={styles.toggleButton}
@@ -853,7 +1254,7 @@ export default function NavigationScreen() {
         </View>
       )}
 
-      {/* CALCULATION LOADING OVERLAY - ORIGINAL */}
+      {/* CALCULATION LOADING OVERLAY */}
       {isCalculating && (
         <View style={styles.analysisOverlay}>
           <View style={styles.analysisCard}>
@@ -868,7 +1269,7 @@ export default function NavigationScreen() {
         </View>
       )}
 
-      {/* OBSTACLE DETAIL MODAL - ORIGINAL */}
+      {/* OBSTACLE DETAIL MODAL */}
       <Modal visible={showObstacleModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.obstacleModal}>
@@ -926,7 +1327,7 @@ export default function NavigationScreen() {
                     </Text>
                   </View>
 
-                  {/* 🔥 VALIDATION STATUS DISPLAY - NEW */}
+                  {/* 🔥 ENHANCED VALIDATION STATUS DISPLAY */}
                   <View style={styles.obstacleDetails}>
                     <Text style={styles.detailLabel}>Validation:</Text>
                     <Text style={styles.detailValue}>
@@ -934,6 +1335,9 @@ export default function NavigationScreen() {
                       {selectedObstacle.downvotes || 0}
                     </Text>
                   </View>
+
+                  {/* 🔥 NEW: Enhanced validation breakdown */}
+                  <EnhancedValidationDisplay obstacle={selectedObstacle} />
                 </ScrollView>
               </>
             )}
@@ -941,7 +1345,7 @@ export default function NavigationScreen() {
         </View>
       </Modal>
 
-      {/* 🔥 VALIDATION PROMPT OVERLAY - THE CROWN JEWEL! */}
+      {/* 🔥 VALIDATION PROMPT OVERLAY */}
       {currentValidationPrompt && (
         <ValidationPrompt
           prompt={currentValidationPrompt}
@@ -950,7 +1354,7 @@ export default function NavigationScreen() {
         />
       )}
 
-      {/* BOTTOM CONTROLS - ORIGINAL */}
+      {/* BOTTOM CONTROLS */}
       <View style={[styles.bottomControls, { bottom: insets.bottom + 20 }]}>
         <TouchableOpacity
           style={styles.locationButton}
@@ -1069,7 +1473,7 @@ const styles = StyleSheet.create({
   routeIndicator: {
     flexDirection: "row",
     alignItems: "center",
-    width: 80,
+    width: 90,
   },
   routeColor: {
     width: 12,
@@ -1099,6 +1503,29 @@ const styles = StyleSheet.create({
     fontStyle: "italic",
     marginBottom: 12,
     textAlign: "center",
+  },
+  // 🔥 NEW COMPARISON STATS STYLES
+  comparisonStats: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    marginBottom: 12,
+    paddingVertical: 8,
+    backgroundColor: "#F9FAFB",
+    borderRadius: 8,
+  },
+  statItem: {
+    alignItems: "center",
+  },
+  statLabel: {
+    fontSize: 10,
+    color: "#6B7280",
+    fontWeight: "500",
+  },
+  statValue: {
+    fontSize: 14,
+    color: "#1F2937",
+    fontWeight: "bold",
+    marginTop: 2,
   },
   controls: {
     flexDirection: "row",
@@ -1173,18 +1600,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
-  },
-  obstacleMarker: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    justifyContent: "center",
-    alignItems: "center",
-    elevation: 3,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
   },
   calloutContainer: {
     padding: 8,
