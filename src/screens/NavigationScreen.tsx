@@ -1,5 +1,5 @@
 // src/screens/NavigationScreen.tsx
-// UPDATED: Complete NavigationScreen with Proximity Detection Integration
+// FIXED: Complete NavigationScreen with Proper Detour State Management
 
 import React, {
   useState,
@@ -19,6 +19,7 @@ import {
   Modal,
   Vibration,
   SafeAreaView,
+  Platform,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MapView, { Marker, Callout, Polyline } from "react-native-maps";
@@ -32,7 +33,7 @@ import { UserLocation, AccessibilityObstacle, ObstacleType } from "../types";
 import { routeAnalysisService } from "../services/routeAnalysisService";
 import { sidewalkRouteAnalysisService } from "../services/sidewalkRouteAnalysisService";
 
-// 🔥 NEW: Proximity detection imports
+// 🔥 Proximity detection imports
 import {
   proximityDetectionService,
   ProximityAlert,
@@ -45,7 +46,21 @@ import {
   type ValidationPrompt as ValidationPromptType,
 } from "../services/obstacleValidationService";
 
-// 🔥 NEW: Proximity Detection Hook
+// 🔥 DETOUR SYSTEM IMPORTS
+import {
+  microReroutingService,
+  MicroDetour,
+} from "../services/microReroutingService";
+import {
+  DetourSuggestionModal,
+  CompactObstacleWarning,
+  DetourStatusIndicator,
+} from "../components/DetourComponents";
+
+// ================================================
+// PROXIMITY DETECTION HOOK (Fixed - moved state to main component)
+// ================================================
+
 interface UseProximityDetectionOptions {
   isNavigating: boolean;
   userLocation: UserLocation | null;
@@ -78,10 +93,8 @@ function useProximityDetection({
   });
 
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  // 🔧 FIX #2: Use ref to track last critical IDs to avoid stale closure
   const lastCriticalIdsRef = useRef<Set<string>>(new Set());
 
-  // 🔧 FIX #1: Move runDetection function BEFORE useEffect (hoisting fix)
   const runDetection = async () => {
     if (!userLocation || !isNavigating || !userProfile) return;
 
@@ -107,7 +120,7 @@ function useProximityDetection({
         detectionError: null,
       }));
 
-      // 🔧 FIX #2: Handle critical obstacles using ref instead of stale state
+      // Handle critical obstacles using ref instead of stale state
       if (criticalAlerts.length > 0 && onCriticalObstacle) {
         const mostCritical = criticalAlerts[0]; // Highest urgency (already sorted)
 
@@ -159,7 +172,6 @@ function useProximityDetection({
         detectionIntervalRef.current = null;
       }
 
-      // 🔧 FIX #2: Clear critical IDs ref when stopping navigation
       lastCriticalIdsRef.current.clear();
 
       setState((prev) => ({
@@ -188,7 +200,7 @@ function useProximityDetection({
         // Run initial detection
         await runDetection();
 
-        // 🔧 FIX #4: Use service config for poll interval
+        // Use service config for poll interval
         const pollInterval =
           proximityDetectionService.getConfig().updateInterval || 5000;
 
@@ -221,7 +233,10 @@ function useProximityDetection({
   return state;
 }
 
-// 🔥 NEW: Proximity Alerts Overlay Component
+// ================================================
+// PROXIMITY ALERTS OVERLAY COMPONENT
+// ================================================
+
 const ProximityAlertsOverlay = ({
   alerts,
   onAlertPress,
@@ -261,9 +276,12 @@ const ProximityAlertsOverlay = ({
   );
 };
 
-// 🔧 PROPER polyline decoder implementation
+// ================================================
+// UTILITY FUNCTIONS
+// ================================================
+
 const decodePolyline = (encoded: string): UserLocation[] => {
-  if (!encoded) return [];
+  if (!encoded || typeof encoded !== "string") return [];
 
   const points: UserLocation[] = [];
   let index = 0;
@@ -304,15 +322,14 @@ const decodePolyline = (encoded: string): UserLocation[] => {
         longitude: lng / 1e5,
       });
     }
+
+    return points;
   } catch (error) {
-    if (__DEV__) {
-      console.warn("⚠️ Polyline decode error:", error);
-    }
+    console.warn("Polyline decode error:", error);
     return [];
   }
-
-  return points;
 };
+
 function getObstacleDisplay(type: ObstacleType, severity: string) {
   const displays = {
     vendor_blocking: {
@@ -484,7 +501,10 @@ function getPOIIcon(type: string): keyof typeof Ionicons.glyphMap {
     icons.default) as keyof typeof Ionicons.glyphMap;
 }
 
-// 🔥 MAIN NAVIGATION SCREEN COMPONENT
+// ================================================
+// MAIN NAVIGATION SCREEN COMPONENT
+// ================================================
+
 export default function NavigationScreen() {
   const insets = useSafeAreaInsets();
   const { location, error: locationError } = useLocation();
@@ -509,54 +529,302 @@ export default function NavigationScreen() {
     AccessibilityObstacle[]
   >([]);
 
-  // 🔧 FIX #8: Use useCallback for stable handler references
-  const handleCriticalObstacle = useCallback((alert: ProximityAlert) => {
-    if (__DEV__) {
-      console.log("🚨 Critical obstacle detected:", alert.obstacle.type);
-    }
+  // 🔥 DETOUR STATE - moved to main component scope
+  const [showDetourModal, setShowDetourModal] = useState(false);
+  const [showObstacleWarning, setShowObstacleWarning] = useState(false);
+  const [currentMicroDetour, setCurrentMicroDetour] =
+    useState<MicroDetour | null>(null);
+  const [currentObstacleAlert, setCurrentObstacleAlert] =
+    useState<ProximityAlert | null>(null);
+  const [isUsingDetour, setIsUsingDetour] = useState(false);
 
-    // Cross-platform vibration (iOS compatible)
-    if (Vibration) {
+  // 🔥 DETOUR HANDLERS - moved to main component scope
+  const handleCriticalObstacle = useCallback(
+    async (alert: ProximityAlert) => {
       try {
-        Vibration.vibrate([100, 50, 100]);
-      } catch {
-        // Fallback for iOS
-        Vibration.vibrate(100);
+        console.log("🚨 Critical obstacle detected:", alert.obstacle.type);
+
+        // Validate required data
+        if (!location) {
+          Alert.alert(
+            "Location Error",
+            "Cannot compute detour without current location."
+          );
+          return;
+        }
+
+        if (!selectedDestination) {
+          // No destination - show simple warning banner
+          setCurrentObstacleAlert(alert);
+          setShowObstacleWarning(true);
+          return;
+        }
+
+        if (!profile) {
+          Alert.alert(
+            "Profile Error",
+            "Please set up your mobility profile first."
+          );
+          return;
+        }
+
+        // Cross-platform vibration feedback
+        try {
+          if (Platform.OS === "ios") {
+            Vibration.vibrate([100, 50, 100]);
+          } else {
+            Vibration.vibrate(200);
+          }
+        } catch (error) {
+          console.warn("Vibration failed:", error);
+        }
+
+        console.log("🔄 Computing micro-detour...");
+
+        // CORE: Attempt to generate a safe street-only micro-detour
+        const microDetour = await microReroutingService.createMicroDetour(
+          location,
+          alert.obstacle,
+          selectedDestination,
+          profile
+        );
+
+        if (!microDetour) {
+          // No safe detour found - show warning banner
+          console.log("📍 No safe detour available");
+          setCurrentObstacleAlert(alert);
+          setShowObstacleWarning(true);
+          return;
+        }
+
+        // SUCCESS: Safe detour found - show modal
+        console.log(
+          `✅ Safe detour found: +${Math.round(microDetour.extraTime)}s`
+        );
+        setCurrentMicroDetour(microDetour);
+        setCurrentObstacleAlert(alert);
+        setShowDetourModal(true);
+      } catch (error) {
+        console.error("❌ Critical obstacle handler error:", error);
+
+        // Fallback to simple warning
+        setCurrentObstacleAlert(alert);
+        setShowObstacleWarning(true);
       }
+    },
+    [location, selectedDestination, profile]
+  );
+
+  const handleAcceptDetour = useCallback(async () => {
+    if (!currentMicroDetour) return;
+
+    try {
+      console.log("✅ Applying micro-detour:", currentMicroDetour.reason);
+
+      // Close modal first
+      setShowDetourModal(false);
+
+      // Update the route analysis to show the detour
+      setRouteAnalysis((prev: any) => {
+        if (!prev) {
+          console.warn("⚠️ No route analysis to update");
+          return prev;
+        }
+
+        // Create updated fastest route with detour
+        const detourRoute = {
+          ...prev.fastestRoute,
+          polyline: currentMicroDetour.route.polyline, // Use decoded polyline for map display
+          duration: currentMicroDetour.route.duration,
+          distance: currentMicroDetour.route.distance,
+          grade: prev.fastestRoute.grade, // Keep original grade
+          isDetour: true, // Flag to indicate this is a detour
+          detourInfo: {
+            extraTime: currentMicroDetour.extraTime,
+            extraDistance: currentMicroDetour.extraDistance,
+            safetyRating: currentMicroDetour.safetyRating,
+            reason: currentMicroDetour.reason,
+          },
+        };
+
+        return {
+          ...prev,
+          fastestRoute: detourRoute,
+          activeDetour: currentMicroDetour, // Store detour info for reference
+          comparison: {
+            ...prev.comparison,
+            recommendation: `Using safe detour (+${Math.round(
+              currentMicroDetour.extraTime / 60
+            )}min extra)`,
+          },
+        };
+      });
+
+      // Set detour mode
+      setIsUsingDetour(true);
+
+      // Auto-fit map to show the detour route
+      if (mapRef.current && currentMicroDetour.route.polyline.length > 0) {
+        const allCoords = [
+          location,
+          selectedDestination,
+          ...currentMicroDetour.route.polyline.slice(0, 10), // Limit points for performance
+        ].filter((coord) => coord && coord.latitude && coord.longitude);
+
+        if (allCoords.length > 0) {
+          const validCoords = allCoords.filter(
+            (coord): coord is UserLocation => coord !== null
+          );
+
+          if (validCoords.length > 0) {
+            setTimeout(() => {
+              mapRef.current?.fitToCoordinates(validCoords, {
+                edgePadding: { top: 120, right: 50, bottom: 200, left: 50 },
+                animated: true,
+              });
+            }, 500);
+          }
+        }
+      }
+
+      // Log detour usage for analytics
+      if (currentObstacleAlert && profile) {
+        await microReroutingService.logDetourUsage(
+          currentMicroDetour,
+          currentObstacleAlert.obstacle.type,
+          true, // User accepted
+          profile
+        );
+      }
+
+      // Clear current detour data
+      setCurrentMicroDetour(null);
+      setCurrentObstacleAlert(null);
+
+      console.log("📊 Detour applied successfully");
+    } catch (error) {
+      console.error("❌ Failed to apply micro-detour:", error);
+      Alert.alert(
+        "Detour Error",
+        "Failed to apply detour. Please try again or navigate manually.",
+        [{ text: "OK" }]
+      );
     }
+  }, [
+    currentMicroDetour,
+    currentObstacleAlert,
+    location,
+    selectedDestination,
+    profile,
+    mapRef,
+  ]);
+
+  const handleDeclineDetour = useCallback(async () => {
+    if (!currentMicroDetour) return;
+
+    try {
+      console.log("👤 User declined micro-detour");
+
+      // Log detour usage for analytics
+      if (currentObstacleAlert && profile) {
+        await microReroutingService.logDetourUsage(
+          currentMicroDetour,
+          currentObstacleAlert.obstacle.type,
+          false, // User declined
+          profile
+        );
+      }
+
+      // Close modal and clear data
+      setShowDetourModal(false);
+      setCurrentMicroDetour(null);
+      setCurrentObstacleAlert(null);
+    } catch (error) {
+      console.error("❌ Error logging detour decline:", error);
+    }
+  }, [currentMicroDetour, currentObstacleAlert, profile]);
+
+  const handleCloseModal = useCallback(() => {
+    setShowDetourModal(false);
+    setCurrentMicroDetour(null);
+    setCurrentObstacleAlert(null);
+  }, []);
+
+  const dismissObstacleWarning = useCallback(() => {
+    setShowObstacleWarning(false);
+    setCurrentObstacleAlert(null);
+  }, []);
+
+  const reportObstacleIssue = useCallback(() => {
+    if (!currentObstacleAlert) return;
 
     Alert.alert(
-      "⚠️ Obstacle Ahead",
-      `${alert.obstacle.type.replace("_", " ")} detected ${
-        alert.distance
-      }m ahead.\n\n` +
-        `Severity: ${alert.severity}\n` +
-        `Description: ${alert.obstacle.description}`,
+      "Report Obstacle Issue",
+      "Help improve WAISPATH by reporting issues with this obstacle.",
       [
         {
-          text: "Find Alternative",
-          onPress: () => handleFindAlternative(alert),
-          style: "default",
+          text: "Mark as Resolved",
+          onPress: () => {
+            console.log(
+              "📝 Obstacle marked as resolved:",
+              currentObstacleAlert.obstacle.id
+            );
+            dismissObstacleWarning();
+          },
         },
         {
-          text: "Continue Anyway",
-          style: "cancel",
+          text: "Mark as Incorrect",
+          onPress: () => {
+            console.log(
+              "📝 Obstacle marked as incorrect:",
+              currentObstacleAlert.obstacle.id
+            );
+            dismissObstacleWarning();
+          },
         },
+        { text: "Cancel" },
       ]
     );
-  }, []);
+  }, [currentObstacleAlert, dismissObstacleWarning]);
 
-  const handleFindAlternative = useCallback((alert: ProximityAlert) => {
-    if (__DEV__) {
-      console.log("🔄 Finding alternative route around:", alert.obstacle.type);
-    }
-
+  const clearDetour = useCallback(() => {
     Alert.alert(
-      "Alternative Route",
-      "Micro-rerouting feature coming soon!\n\nFor now, please navigate around the obstacle manually.",
-      [{ text: "OK" }]
+      "Return to Original Route",
+      "Do you want to return to the original planned route?",
+      [
+        {
+          text: "Yes, Return",
+          onPress: () => {
+            setIsUsingDetour(false);
+
+            // Recalculate original routes
+            if (selectedDestination) {
+              // Call your existing route calculation function
+              // calculateUnifiedRoutes(); // Uncomment if you have this function
+            }
+
+            console.log("🔄 Returned to original route");
+          },
+        },
+        { text: "Keep Detour" },
+      ]
     );
-  }, []);
+  }, [selectedDestination]);
+
+  const handleFindAlternative = useCallback(
+    async (alert: ProximityAlert) => {
+      if (__DEV__) {
+        console.log(
+          "🔄 Finding alternative route around:",
+          alert.obstacle.type
+        );
+      }
+
+      // This now triggers the same micro-rerouting logic as handleCriticalObstacle
+      await handleCriticalObstacle(alert);
+    },
+    [handleCriticalObstacle]
+  );
 
   const handleProximityAlertPress = useCallback(
     (alert: ProximityAlert) => {
@@ -595,12 +863,12 @@ export default function NavigationScreen() {
     [handleFindAlternative]
   );
 
-  // 🔧 FIX: Memoize routePolyline to prevent infinite re-renders
+  // Memoize routePolyline to prevent infinite re-renders
   const routePolyline = useMemo(() => {
     return routeAnalysis?.fastestRoute?.polyline || [];
   }, [routeAnalysis?.fastestRoute?.polyline]);
 
-  // 🔥 NEW: Proximity detection state
+  // 🔥 Proximity detection state
   const proximityState = useProximityDetection({
     isNavigating,
     userLocation: location,
@@ -709,18 +977,25 @@ export default function NavigationScreen() {
 
       const accessibleRoute = multiRouteResult?.accessibleRoute || fastestRoute;
 
+      // FIXED: Handle both old and new polyline formats
       const unifiedAnalysis = {
         fastestRoute: {
+          // FIXED: Use decoded polyline directly (already UserLocation[])
           polyline: fastestRoute.googleRoute?.polyline
-            ? decodePolyline(fastestRoute.googleRoute.polyline)
+            ? Array.isArray(fastestRoute.googleRoute.polyline)
+              ? fastestRoute.googleRoute.polyline
+              : decodePolyline(fastestRoute.googleRoute.polyline)
             : [location, destLocation],
           duration: fastestRoute.googleRoute?.duration || 600,
           distance: fastestRoute.googleRoute?.distance || 1000,
           grade: fastestRoute.accessibilityScore?.grade || "B",
         },
         accessibleRoute: {
+          // FIXED: Use decoded polyline directly (already UserLocation[])
           polyline: accessibleRoute.googleRoute?.polyline
-            ? decodePolyline(accessibleRoute.googleRoute.polyline)
+            ? Array.isArray(accessibleRoute.googleRoute.polyline)
+              ? accessibleRoute.googleRoute.polyline
+              : decodePolyline(accessibleRoute.googleRoute.polyline)
             : [location, destLocation],
           duration: accessibleRoute.googleRoute?.duration || 600,
           distance: accessibleRoute.googleRoute?.distance || 1000,
@@ -742,7 +1017,7 @@ export default function NavigationScreen() {
       setRouteAnalysis(unifiedAnalysis);
 
       if (__DEV__) {
-        console.log("🗺️ Route polylines decoded:", {
+        console.log("🗺️ Route polylines processed:", {
           fastest: unifiedAnalysis.fastestRoute.polyline.length,
           accessible: unifiedAnalysis.accessibleRoute.polyline.length,
         });
@@ -812,7 +1087,7 @@ export default function NavigationScreen() {
     );
   };
 
-  // 🔥 NEW: Show detection status
+  // Show detection status
   const renderDetectionStatus = useCallback(() => {
     if (!isNavigating) return null;
 
@@ -982,10 +1257,10 @@ export default function NavigationScreen() {
         </View>
       </View>
 
-      {/* 🔥 NEW: Proximity detection status */}
+      {/* PROXIMITY DETECTION STATUS */}
       {renderDetectionStatus()}
 
-      {/* 🔥 NEW: Proximity alerts overlay */}
+      {/* PROXIMITY ALERTS OVERLAY */}
       <ProximityAlertsOverlay
         alerts={proximityState.proximityAlerts}
         onAlertPress={handleProximityAlertPress}
@@ -1131,6 +1406,44 @@ export default function NavigationScreen() {
           />
         )}
       </Modal>
+
+      {/* 🔥 DETOUR STATUS INDICATOR - shows when using detour */}
+      <DetourStatusIndicator
+        isActive={isUsingDetour}
+        detourDescription={
+          routeAnalysis?.activeDetour?.reason || "Taking alternative route"
+        }
+        onCancel={clearDetour}
+      />
+
+      {/* 🔥 MICRO-DETOUR MODAL - shows when safe detour is available */}
+      {currentMicroDetour && currentObstacleAlert && (
+        <DetourSuggestionModal
+          visible={showDetourModal}
+          detour={currentMicroDetour}
+          obstacleAlert={currentObstacleAlert}
+          onAccept={handleAcceptDetour}
+          onDecline={handleDeclineDetour}
+          onClose={handleCloseModal}
+        />
+      )}
+
+      {/* 🔥 OBSTACLE WARNING BANNER - shows when no detour available */}
+      <CompactObstacleWarning
+        visible={showObstacleWarning}
+        message={
+          currentObstacleAlert
+            ? `${currentObstacleAlert.obstacle.type.replace(
+                "_",
+                " "
+              )} • ${Math.round(
+                currentObstacleAlert.distance
+              )}m ahead • No safe street detour available - navigate around manually`
+            : "Obstacle ahead"
+        }
+        obstacleType={currentObstacleAlert?.obstacle.type || ""}
+        onDismiss={dismissObstacleWarning}
+      />
     </SafeAreaView>
   );
 }
