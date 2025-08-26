@@ -1,5 +1,6 @@
 // src/screens/NavigationScreen.tsx
-// FIXED: Complete NavigationScreen with Proper Detour State Management
+// FIXED: Complete NavigationScreen with Proper Detour State Management + Proximity fixes
+// UPDATED: Added proximity detection reset and enhanced route visualization
 
 import React, {
   useState,
@@ -20,6 +21,7 @@ import {
   Vibration,
   SafeAreaView,
   Platform,
+  InteractionManager,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MapView, { Marker, Callout, Polyline } from "react-native-maps";
@@ -118,9 +120,34 @@ export default function NavigationScreen() {
     useState<ProximityAlert | null>(null);
   const [isUsingDetour, setIsUsingDetour] = useState(false);
 
+  // === SAFETY / CONCURRENCY REFS ===
+  // Track in-flight obstacle detour computations to avoid duplicates
+  const processingDetourIdsRef = useRef<Set<string>>(new Set());
+  // Snapshot of the original fastest route before applying a detour
+  const originalFastestRouteRef = useRef<any | null>(null);
+  // Mounted flag to avoid state updates after unmount
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // 🔥 DETOUR HANDLERS - moved to main component scope
   const handleCriticalObstacle = useCallback(
     async (alert: ProximityAlert) => {
+      const obstacleId = alert?.obstacle?.id;
+      if (!alert || !obstacleId) return;
+
+      // Prevent duplicate processing for same obstacle while one request is active
+      if (processingDetourIdsRef.current.has(obstacleId)) {
+        if (__DEV__)
+          console.log("🛑 Already processing detour for", obstacleId);
+        return;
+      }
+      processingDetourIdsRef.current.add(obstacleId);
+
       try {
         console.log("🚨 Critical obstacle detected:", alert.obstacle.type);
 
@@ -169,6 +196,9 @@ export default function NavigationScreen() {
           profile
         );
 
+        // If component unmounted while waiting, ignore results
+        if (!isMountedRef.current) return;
+
         if (!microDetour) {
           // No safe detour found - show warning banner
           console.log("📍 No safe detour available");
@@ -190,6 +220,9 @@ export default function NavigationScreen() {
         // Fallback to simple warning
         setCurrentObstacleAlert(alert);
         setShowObstacleWarning(true);
+      } finally {
+        // allow reprocessing later
+        processingDetourIdsRef.current.delete(obstacleId);
       }
     },
     [location, selectedDestination, profile]
@@ -209,6 +242,11 @@ export default function NavigationScreen() {
         if (!prev) {
           console.warn("⚠️ No route analysis to update");
           return prev;
+        }
+
+        // store original fastest route snapshot once
+        if (!originalFastestRouteRef.current) {
+          originalFastestRouteRef.current = prev.fastestRoute;
         }
 
         // Create updated fastest route with detour
@@ -257,12 +295,13 @@ export default function NavigationScreen() {
           );
 
           if (validCoords.length > 0) {
-            setTimeout(() => {
+            // Use InteractionManager instead of setTimeout
+            InteractionManager.runAfterInteractions(() => {
               mapRef.current?.fitToCoordinates(validCoords, {
                 edgePadding: { top: 120, right: 50, bottom: 200, left: 50 },
                 animated: true,
               });
-            }, 500);
+            });
           }
         }
       }
@@ -277,7 +316,7 @@ export default function NavigationScreen() {
         );
       }
 
-      // Clear current detour data
+      // Clear current detour data (UI-only, routeAnalysis still holds activeDetour to track)
       setCurrentMicroDetour(null);
       setCurrentObstacleAlert(null);
 
@@ -297,6 +336,7 @@ export default function NavigationScreen() {
     selectedDestination,
     profile,
     mapRef,
+    updateRouteAnalysis,
   ]);
 
   const handleDeclineDetour = useCallback(async () => {
@@ -377,11 +417,22 @@ export default function NavigationScreen() {
           onPress: () => {
             setIsUsingDetour(false);
 
-            // Recalculate original routes
-            if (selectedDestination) {
-              // Call your existing route calculation function
-              // calculateUnifiedRoutes(); // Uncomment if you have this function
-            }
+            // Restore the original fastest route snapshot if present
+            updateRouteAnalysis((prev: any) => {
+              if (!prev || !originalFastestRouteRef.current) return prev;
+              const restored = {
+                ...prev,
+                fastestRoute: originalFastestRouteRef.current,
+                activeDetour: undefined,
+                comparison: {
+                  ...prev.comparison,
+                  recommendation: "Returned to original route",
+                },
+              };
+              // clear snapshot after restoring
+              originalFastestRouteRef.current = null;
+              return restored;
+            });
 
             console.log("🔄 Returned to original route");
           },
@@ -389,7 +440,7 @@ export default function NavigationScreen() {
         { text: "Keep Detour" },
       ]
     );
-  }, [selectedDestination]);
+  }, [updateRouteAnalysis]);
 
   const handleFindAlternative = useCallback(
     async (alert: ProximityAlert) => {
@@ -443,19 +494,99 @@ export default function NavigationScreen() {
     [handleFindAlternative]
   );
 
-  // Memoize routePolyline to prevent infinite re-renders
+  // Memoize routePolyline to prefer fastest route but fallback to accessible route
   const routePolyline = useMemo(() => {
-    return routeAnalysis?.fastestRoute?.polyline || [];
-  }, [routeAnalysis?.fastestRoute?.polyline]);
+    if (!routeAnalysis) return [];
+    return (
+      routeAnalysis.fastestRoute?.polyline ||
+      routeAnalysis.accessibleRoute?.polyline ||
+      []
+    );
+  }, [
+    routeAnalysis?.fastestRoute?.polyline,
+    routeAnalysis?.accessibleRoute?.polyline,
+    destinationName, // Force update when destination changes
+  ]);
 
-  // 🔥 Proximity detection state
+  // Start detection automatically when navigating OR when a route exists
+  const shouldDetectProximity = useMemo(() => {
+    const hasValidRoute = routePolyline && routePolyline.length > 0;
+    const shouldDetect = isNavigating || hasValidRoute;
+
+    if (__DEV__ && hasValidRoute) {
+      console.log("🎯 Route detected, enabling proximity detection:", {
+        destination: destinationName,
+        routeLength: routePolyline.length,
+        shouldDetect,
+      });
+    }
+
+    return shouldDetect;
+  }, [isNavigating, routePolyline, destinationName]);
+
+  // 🔥 CRITICAL FIX: Force proximity detection reset when destination changes
+  useEffect(() => {
+    if (destinationName && shouldDetectProximity) {
+      // Force reset proximity detection when destination changes
+      proximityDetectionService.resetDetectionState();
+      console.log(
+        "🔄 Forced proximity detection reset for new destination:",
+        destinationName
+      );
+    }
+  }, [destinationName, shouldDetectProximity]);
+
+  // 🔥 Proximity detection state — uses shouldDetectProximity so selecting POIs restarts detection
   const proximityState = useProximityDetection({
-    isNavigating, // Now this exists!
+    isNavigating: shouldDetectProximity,
     userLocation: location,
     routePolyline,
     userProfile: profile,
     onCriticalObstacle: handleCriticalObstacle,
   });
+
+  // Debug logging in dev for proximity + route changes
+  useEffect(() => {
+    if (!__DEV__) return;
+    console.log("📍 Proximity Debug:", {
+      isNavigating,
+      shouldDetectProximity,
+      hasRoutePolyline: routePolyline.length > 0,
+      isDetecting: proximityState.isDetecting,
+      alertsCount: proximityState.proximityAlerts.length,
+      destination: destinationName,
+      routeLength: routePolyline.length,
+    });
+  }, [
+    isNavigating,
+    shouldDetectProximity,
+    routePolyline.length,
+    proximityState.isDetecting,
+    proximityState.proximityAlerts.length,
+    destinationName,
+  ]);
+
+  // ENHANCED: Debug route coordinates to verify distinct routes
+  useEffect(() => {
+    if (routeAnalysis && __DEV__) {
+      const fastest = routeAnalysis.fastestRoute?.polyline || [];
+      const accessible = routeAnalysis.accessibleRoute?.polyline || [];
+
+      console.log("🗺️ Route Debug:", {
+        destination: destinationName,
+        fastestPoints: fastest.length,
+        accessiblePoints: accessible.length,
+        firstDifference: fastest.findIndex(
+          (point: UserLocation, i: number) =>
+            !accessible[i] ||
+            Math.abs(point.latitude - accessible[i].latitude) > 0.0001 ||
+            Math.abs(point.longitude - accessible[i].longitude) > 0.0001
+        ),
+        fastestStart: fastest.slice(0, 2),
+        accessibleStart: accessible.slice(0, 2),
+      });
+    }
+  }, [routeAnalysis, destinationName]);
 
   // Load nearby obstacles when location changes
   useEffect(() => {
@@ -614,27 +745,27 @@ export default function NavigationScreen() {
           </Marker>
         ))}
 
-        {/* ROUTE VISUALIZATION */}
+        {/* ROUTE VISUALIZATION - ENHANCED DISTINCT STYLING */}
         {routeAnalysis && (
           <>
-            {/* FASTEST ROUTE - MAIN LINE */}
-            {routeAnalysis.fastestRoute.polyline && (
+            {/* ACCESSIBLE ROUTE - THICK GREEN WITH DASH PATTERN (Render first, lower zIndex) */}
+            {routeAnalysis.accessibleRoute?.polyline && (
               <Polyline
-                coordinates={routeAnalysis.fastestRoute.polyline}
-                strokeColor={MAP_STYLES.FASTEST_ROUTE_COLOR}
-                strokeWidth={MAP_STYLES.ROUTE_STROKE_WIDTH}
-                lineDashPattern={[0]}
+                coordinates={routeAnalysis.accessibleRoute.polyline}
+                strokeColor="#10B981" // Bright green
+                strokeWidth={8} // Thicker
+                lineDashPattern={[10, 10]} // Dashed pattern to differentiate
                 zIndex={1}
               />
             )}
 
-            {/* ACCESSIBLE ROUTE - MAIN LINE */}
-            {routeAnalysis.accessibleRoute.polyline && (
+            {/* FASTEST ROUTE - SOLID RED (Render second, higher zIndex) */}
+            {routeAnalysis.fastestRoute?.polyline && (
               <Polyline
-                coordinates={routeAnalysis.accessibleRoute.polyline}
-                strokeColor={MAP_STYLES.ACCESSIBLE_ROUTE_COLOR}
-                strokeWidth={MAP_STYLES.ROUTE_STROKE_WIDTH}
-                lineDashPattern={[0]}
+                coordinates={routeAnalysis.fastestRoute.polyline}
+                strokeColor="#DC2626" // Bright red
+                strokeWidth={6} // Thinner to show green underneath
+                lineDashPattern={[0]} // Solid
                 zIndex={2}
               />
             )}

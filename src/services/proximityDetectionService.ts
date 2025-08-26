@@ -1,5 +1,6 @@
 // src/services/proximityDetectionService.ts
 // WAISPATH Algorithm 2: Proximity-Based Obstacle Detection
+// UPDATED: Added resetDetectionState method to fix route change issues
 
 import {
   UserLocation,
@@ -334,87 +335,85 @@ export class ProximityDetectionService {
       wheelchair: {
         stairs_no_ramp: true,
         narrow_passage: true,
-        broken_pavement: true,
-        vendor_blocking: true,
         parked_vehicles: true,
-        construction: true,
-        no_sidewalk: true,
+        broken_pavement: true,
         steep_slope: true,
+        construction: true,
         flooding: true,
-        electrical_post: false, // Can usually navigate around
+        vendor_blocking: true,
+        electrical_post: true,
         tree_roots: true,
-        other: true,
+        no_sidewalk: true,
+        other: false,
       },
       walker: {
         stairs_no_ramp: true,
-        narrow_passage: false, // Usually can pass through
-        broken_pavement: true,
-        vendor_blocking: true,
-        parked_vehicles: true,
-        construction: true,
-        no_sidewalk: true,
-        steep_slope: true,
-        flooding: true,
-        electrical_post: false,
-        tree_roots: true,
-        other: true,
-      },
-      cane: {
-        stairs_no_ramp: true,
         narrow_passage: false,
+        parked_vehicles: true,
         broken_pavement: true,
-        vendor_blocking: false, // Usually can navigate around
-        parked_vehicles: false,
-        construction: true,
-        no_sidewalk: true,
         steep_slope: true,
+        construction: true,
         flooding: true,
+        vendor_blocking: true,
         electrical_post: false,
         tree_roots: true,
+        no_sidewalk: true,
         other: false,
       },
       crutches: {
         stairs_no_ramp: true,
         narrow_passage: true,
-        broken_pavement: true,
-        vendor_blocking: true,
         parked_vehicles: true,
-        construction: true,
-        no_sidewalk: true,
+        broken_pavement: true,
         steep_slope: true,
+        construction: true,
         flooding: true,
+        vendor_blocking: true,
         electrical_post: false,
         tree_roots: true,
-        other: true,
+        no_sidewalk: true,
+        other: false,
+      },
+      cane: {
+        stairs_no_ramp: true,
+        narrow_passage: false,
+        parked_vehicles: false,
+        broken_pavement: true,
+        steep_slope: true,
+        construction: true,
+        flooding: true,
+        vendor_blocking: false,
+        electrical_post: false,
+        tree_roots: true,
+        no_sidewalk: false,
+        other: false,
       },
       none: {
         stairs_no_ramp: false,
         narrow_passage: false,
-        broken_pavement: false,
-        vendor_blocking: false,
         parked_vehicles: false,
-        construction: true, // Still affects everyone
-        no_sidewalk: true, // Still affects everyone
+        broken_pavement: true,
         steep_slope: false,
-        flooding: true, // Still affects everyone
+        construction: true,
+        flooding: true,
+        vendor_blocking: false,
         electrical_post: false,
         tree_roots: false,
+        no_sidewalk: false,
         other: false,
       },
     };
 
     const userRelevance = relevanceMatrix[userProfile.type];
-    // Default to false for unknown obstacle types to reduce false positives
-    return userRelevance?.[obstacle.type] ?? false;
+    return userRelevance ? userRelevance[obstacle.type] || false : false;
   }
 
   /**
-   * UTILITY: Calculate time to encounter obstacle (seconds)
-   * Uses user-profile-specific walking speeds
+   * UTILITY: Calculate time to encounter obstacle based on walking speed
    */
   private calculateTimeToEncounter(
     distance: number,
-    userProfile?: UserMobilityProfile
+    userProfile: UserMobilityProfile
   ): number {
     // Profile-specific walking speeds (m/s)
     const walkingSpeeds = {
@@ -493,6 +492,14 @@ export class ProximityDetectionService {
     urgency *= confidence;
 
     return Math.min(100, urgency);
+  }
+
+  /**
+   * PUBLIC: Reset detection state - CRITICAL FIX for route changes
+   */
+  resetDetectionState(): void {
+    this.lastDetectionLocation = undefined;
+    console.log("🔄 Proximity detection state reset - will run on next check");
   }
 
   /**
