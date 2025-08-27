@@ -48,7 +48,10 @@ import { getPOIIcon } from "../utils/mapUtils";
 import { SAMPLE_POIS } from "../constants/navigationConstants";
 
 // Proximity detection
-import { ProximityAlert } from "../services/proximityDetectionService";
+import {
+  ProximityAlert,
+  proximityDetectionService,
+} from "../services/proximityDetectionService";
 
 // Validation
 import { ValidationPrompt } from "../components/ValidationPrompt";
@@ -366,6 +369,17 @@ export default function NavigationScreen() {
       checkForValidationPrompts();
     }
   }, [location]);
+
+  useEffect(() => {
+    if (destinationName && proximityState.isDetecting) {
+      // Reset proximity detection service internal state
+      proximityDetectionService.resetDetectionState();
+      console.log(
+        "🔄 Forced proximity detection reset for new destination:",
+        destinationName
+      );
+    }
+  }, [destinationName, proximityState.isDetecting]);
 
   const loadNearbyObstacles = async () => {
     if (!location) return;
