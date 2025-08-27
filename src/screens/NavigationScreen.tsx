@@ -30,14 +30,18 @@ import { useUserProfile } from "../stores/userProfileStore";
 import { firebaseServices } from "../services/firebase";
 import { UserLocation, AccessibilityObstacle, ObstacleType } from "../types";
 
+// 🔥 EXTRACTED STYLES
+import { navigationStyles as styles } from "../styles/navigationStyles";
+
 // SIMPLIFIED: Only essential imports
 import { useProximityDetection } from "../hooks/useProximityDetection";
 import { useRouteCalculation } from "../hooks/useRouteCalculation";
 
-// Components
+// 🔥 EXTRACTED COMPONENTS
 import { ProximityAlertsOverlay } from "../components/ProximityAlertsOverlay";
 import { EnhancedObstacleMarker } from "../components/EnhancedObstacleMarker";
 import { RouteInfoPanel } from "../components/RouteInfoPanel";
+import { NavigationControls } from "../components/NavigationControls";
 
 // Utils
 import { getPOIIcon } from "../utils/mapUtils";
@@ -410,31 +414,6 @@ export default function NavigationScreen() {
     );
   };
 
-  const renderDetectionStatus = useCallback(() => {
-    if (!isNavigating) return null;
-
-    return (
-      <View style={styles.detectionStatusContainer}>
-        <Text style={styles.detectionStatus}>
-          {proximityState.isDetecting
-            ? `🔍 Scanning ahead... (${proximityState.proximityAlerts.length} obstacles)`
-            : "⏸️ Detection paused"}
-        </Text>
-
-        {proximityState.detectionError && (
-          <Text style={styles.detectionError}>
-            ⚠️ {proximityState.detectionError}
-          </Text>
-        )}
-      </View>
-    );
-  }, [
-    isNavigating,
-    proximityState.isDetecting,
-    proximityState.proximityAlerts.length,
-    proximityState.detectionError,
-  ]);
-
   if (locationError) {
     return (
       <SafeAreaView style={styles.container}>
@@ -562,23 +541,20 @@ export default function NavigationScreen() {
         )}
       </MapView>
 
-      {/* SEARCH BAR */}
-      <View style={[styles.searchContainer, { top: insets.top + 10 }]}>
-        <View style={styles.searchInputContainer}>
-          <Ionicons name="search" size={20} color="#6B7280" />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Where do you want to go?"
-            value={destination}
-            onChangeText={setDestination}
-            placeholderTextColor="#6B7280"
-          />
-          {isCalculating && <ActivityIndicator size="small" color="#3B82F6" />}
-        </View>
-      </View>
-
-      {/* PROXIMITY DETECTION STATUS */}
-      {renderDetectionStatus()}
+      {/* 🔥 NAVIGATION CONTROLS - EXTRACTED COMPONENT */}
+      <NavigationControls
+        destination={destination}
+        onDestinationChange={setDestination}
+        isCalculating={isCalculating}
+        searchContainerStyle={{ top: insets.top + 10 }}
+        showFAB={!routeAnalysis}
+        onFABPress={() => calculateUnifiedRoutes()}
+        fabStyle={{ bottom: insets.bottom + 20 }}
+        isNavigating={isNavigating}
+        isDetecting={proximityState.isDetecting}
+        proximityAlertsCount={proximityState.proximityAlerts.length}
+        detectionError={proximityState.detectionError}
+      />
 
       {/* PROXIMITY ALERTS OVERLAY */}
       <ProximityAlertsOverlay
@@ -596,21 +572,6 @@ export default function NavigationScreen() {
         showSidewalks={showSidewalks}
         style={{ bottom: insets.bottom + 100 }}
       />
-
-      {/* FLOATING ACTION BUTTON */}
-      {!routeAnalysis && (
-        <TouchableOpacity
-          style={[styles.fab, { bottom: insets.bottom + 20 }]}
-          onPress={() => calculateUnifiedRoutes()}
-          disabled={isCalculating}
-        >
-          {isCalculating ? (
-            <ActivityIndicator size="small" color="white" />
-          ) : (
-            <Ionicons name="navigate-circle" size={24} color="white" />
-          )}
-        </TouchableOpacity>
-      )}
 
       {/* VALIDATION PROMPT MODAL */}
       <Modal
@@ -680,166 +641,3 @@ export default function NavigationScreen() {
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#F9FAFB",
-  },
-  map: {
-    flex: 1,
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
-  errorTitle: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: "#1F2937",
-    marginTop: 16,
-    marginBottom: 8,
-    textAlign: "center",
-  },
-  errorMessage: {
-    fontSize: 16,
-    color: "#6B7280",
-    textAlign: "center",
-    lineHeight: 24,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: "#6B7280",
-  },
-  searchContainer: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    zIndex: 10,
-  },
-  searchInputContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "white",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    elevation: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  searchInput: {
-    flex: 1,
-    marginLeft: 12,
-    fontSize: 16,
-    color: "#1F2937",
-  },
-  detectionStatusContainer: {
-    position: "absolute",
-    top: 60,
-    left: 16,
-    right: 16,
-    backgroundColor: "rgba(0, 0, 0, 0.7)",
-    borderRadius: 8,
-    padding: 8,
-    zIndex: 8,
-  },
-  detectionStatus: {
-    color: "white",
-    fontSize: 12,
-    textAlign: "center",
-  },
-  detectionError: {
-    color: "#FCD34D",
-    fontSize: 10,
-    textAlign: "center",
-    marginTop: 4,
-  },
-  userLocationMarker: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "#3B82F6",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 3,
-    borderColor: "white",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-  },
-  destinationMarker: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "#10B981",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 3,
-    borderColor: "white",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-  },
-  poiMarker: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#8B5CF6",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 3,
-    borderColor: "white",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-  },
-  calloutContainer: {
-    width: 200,
-    padding: 8,
-  },
-  calloutTitle: {
-    fontSize: 14,
-    fontWeight: "bold",
-    color: "#1F2937",
-    flex: 1,
-  },
-  calloutType: {
-    fontSize: 12,
-    color: "#6B7280",
-    marginBottom: 4,
-  },
-  calloutAction: {
-    fontSize: 12,
-    color: "#3B82F6",
-    fontStyle: "italic",
-  },
-  fab: {
-    position: "absolute",
-    right: 16,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: "#3B82F6",
-    justifyContent: "center",
-    alignItems: "center",
-    elevation: 6,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-  },
-});
