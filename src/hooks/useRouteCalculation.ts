@@ -1,9 +1,8 @@
 // src/hooks/useRouteCalculation.ts
-// 🔥 BEAST MODE: Complete route calculation logic extracted from NavigationScreen
-// Handles unified route analysis, polyline decoding, and map fitting calculations
-// PWD-optimized with accessibility scoring and intelligent route recommendations
+// SIMPLIFIED: Uses monolith route calculation logic without enhanced services
+// Direct route calculation matching the working micro-reroute branch
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
 import { Alert, Vibration } from "react-native";
 import MapView from "react-native-maps";
 import { UserLocation, UserMobilityProfile } from "../types";
@@ -39,7 +38,7 @@ export function useRouteCalculation({
     destinationName: "",
   });
 
-  // 🔥 UNIFIED ROUTE CALCULATION - THE BEAST FUNCTION
+  // SIMPLIFIED: Direct route calculation matching working monolith version
   const calculateUnifiedRoutes = useCallback(
     async (poi?: any) => {
       if (!location) {
@@ -50,7 +49,6 @@ export function useRouteCalculation({
       let destLocation: UserLocation;
       let destName: string;
 
-      // Handle POI vs manual destination input
       if (poi) {
         destLocation = { latitude: poi.lat, longitude: poi.lng };
         destName = poi.name;
@@ -59,7 +57,6 @@ export function useRouteCalculation({
           Alert.alert("No Destination", "Please enter a destination first.");
           return;
         }
-        // Fallback to first POI for demo purposes
         const firstPOI = SAMPLE_POIS[0];
         destLocation = { latitude: firstPOI.lat, longitude: firstPOI.lng };
         destName = destination;
@@ -70,22 +67,20 @@ export function useRouteCalculation({
         return;
       }
 
-      // Update destination state immediately
-      setState((prev) => ({
-        ...prev,
+      // FIXED: Clear previous state and set new destination
+      setState({
+        routeAnalysis: null, // Clear previous routes
+        isCalculating: true,
         selectedDestination: destLocation,
         destinationName: destName,
-        isCalculating: true,
-      }));
+      });
 
       try {
-        if (__DEV__) {
-          console.log(
-            `🗺️ BEAST MODE: Calculating unified routes from current location to ${destName}...`
-          );
-        }
+        console.log(
+          `🗺️ Calculating unified routes from current location to ${destName}...`
+        );
 
-        // 🚀 PARALLEL ROUTE ANALYSIS - MAXIMUM EFFICIENCY
+        // DIRECT: Call services same as working monolith version
         const [multiRouteResult, sidewalkResult] = await Promise.all([
           routeAnalysisService.analyzeRoutes(location, destLocation, profile),
           sidewalkRouteAnalysisService.analyzeSidewalkRoutes(
@@ -95,43 +90,36 @@ export function useRouteCalculation({
           ),
         ]);
 
-        // 🎯 INTELLIGENT ROUTE PROCESSING WITH FALLBACKS
+        // DIRECT: Simple fallback handling
         const fastestRoute = multiRouteResult?.fastestRoute || {
           polyline: [location, destLocation],
-          duration: 600, // 10 minutes fallback
-          distance: 1000, // 1km fallback
+          duration: 600,
+          distance: 1000,
           accessibilityScore: { overall: 70, grade: "B" },
         };
 
         const accessibleRoute =
           multiRouteResult?.accessibleRoute || fastestRoute;
 
-        // 🔥 SMART POLYLINE HANDLING - HANDLES ALL FORMATS
-        const processPolyline = (route: any): UserLocation[] => {
-          const polylineData = route.googleRoute?.polyline;
-          if (!polylineData) return [location, destLocation];
-
-          if (Array.isArray(polylineData)) {
-            return polylineData; // Already decoded
-          }
-
-          if (typeof polylineData === "string") {
-            return decodePolyline(polylineData); // Decode Google polyline
-          }
-
-          return [location, destLocation]; // Fallback
-        };
-
-        // 🎯 UNIFIED ANALYSIS OBJECT - CLEAN DATA STRUCTURE
+        // DIRECT: Build unified analysis same as monolith
         const unifiedAnalysis = {
           fastestRoute: {
-            polyline: processPolyline(fastestRoute),
+            // Handle both old and new polyline formats
+            polyline: fastestRoute.googleRoute?.polyline
+              ? Array.isArray(fastestRoute.googleRoute.polyline)
+                ? fastestRoute.googleRoute.polyline
+                : decodePolyline(fastestRoute.googleRoute.polyline)
+              : [location, destLocation],
             duration: fastestRoute.googleRoute?.duration || 600,
             distance: fastestRoute.googleRoute?.distance || 1000,
             grade: fastestRoute.accessibilityScore?.grade || "B",
           },
           accessibleRoute: {
-            polyline: processPolyline(accessibleRoute),
+            polyline: accessibleRoute.googleRoute?.polyline
+              ? Array.isArray(accessibleRoute.googleRoute.polyline)
+                ? accessibleRoute.googleRoute.polyline
+                : decodePolyline(accessibleRoute.googleRoute.polyline)
+              : [location, destLocation],
             duration: accessibleRoute.googleRoute?.duration || 600,
             distance: accessibleRoute.googleRoute?.distance || 1000,
             grade: accessibleRoute.accessibilityScore?.grade || "A",
@@ -141,35 +129,43 @@ export function useRouteCalculation({
               (accessibleRoute.googleRoute?.duration || 600) -
               (fastestRoute.googleRoute?.duration || 600),
             gradeDifference: 0,
-            recommendation: generateSmartRecommendation(
-              fastestRoute,
-              accessibleRoute,
-              profile
-            ),
+            recommendation: `Accessible route is ${Math.round(
+              ((accessibleRoute.googleRoute?.duration || 600) -
+                (fastestRoute.googleRoute?.duration || 600)) /
+                60
+            )} minutes longer but better accessibility grade`,
           },
         };
 
-        // 🚀 MAP AUTO-FIT - INTELLIGENT VIEWPORT CALCULATION
-        await fitMapToRoutes(unifiedAnalysis, location, destLocation);
-
         // Update state with results
-        setState((prev) => ({
-          ...prev,
+        setState({
           routeAnalysis: unifiedAnalysis,
           isCalculating: false,
-        }));
+          selectedDestination: destLocation,
+          destinationName: destName,
+        });
 
-        // Success feedback
-        Vibration.vibrate(100);
+        // Auto-fit map same as monolith
+        if (mapRef.current) {
+          const allCoords = [
+            location,
+            destLocation,
+            ...(unifiedAnalysis.fastestRoute.polyline || []),
+            ...(unifiedAnalysis.accessibleRoute.polyline || []),
+          ].filter((coord) => coord.latitude && coord.longitude);
 
-        if (__DEV__) {
-          console.log("✅ BEAST MODE: Unified route calculation complete!", {
-            fastest: unifiedAnalysis.fastestRoute.polyline.length,
-            accessible: unifiedAnalysis.accessibleRoute.polyline.length,
-          });
+          if (allCoords.length > 0) {
+            mapRef.current.fitToCoordinates(allCoords, {
+              edgePadding: { top: 100, right: 50, bottom: 200, left: 50 },
+              animated: true,
+            });
+          }
         }
+
+        Vibration.vibrate(100);
+        console.log("✅ Unified route calculation complete!");
       } catch (error: any) {
-        console.error("❌ BEAST MODE: Route calculation failed:", error);
+        console.error("❌ Route calculation failed:", error);
         Alert.alert(
           "Route Error",
           `Could not calculate routes: ${error.message}`
@@ -184,84 +180,11 @@ export function useRouteCalculation({
     [location, profile, mapRef, destination]
   );
 
-  // 🧠 INTELLIGENT ROUTE RECOMMENDATION GENERATOR
-  const generateSmartRecommendation = useCallback(
-    (fastestRoute: any, accessibleRoute: any, userProfile: any): string => {
-      const timeDiff = Math.round(
-        ((accessibleRoute.googleRoute?.duration || 600) -
-          (fastestRoute.googleRoute?.duration || 600)) /
-          60
-      );
-
-      // PWD-specific recommendations
-      if (userProfile?.mobilityAids?.includes("wheelchair")) {
-        return timeDiff <= 2
-          ? "✅ Accessible route recommended - minimal time difference"
-          : `⚖️ Accessible route is ${timeDiff}min longer but wheelchair-friendly`;
-      }
-
-      if (userProfile?.type === "elderly") {
-        return timeDiff <= 5
-          ? "✅ Accessible route recommended - safer for elderly users"
-          : `🚶‍♂️ Consider accessible route (+${timeDiff}min) for safer walking`;
-      }
-
-      // General accessibility recommendations
-      if (timeDiff <= 3) {
-        return "✅ Accessible route recommended - minimal time trade-off";
-      } else if (timeDiff <= 10) {
-        return `⚖️ Accessible route is ${timeDiff}min longer but better accessibility grade`;
-      } else {
-        return `⏱️ Fastest route saves ${timeDiff}min but check accessibility concerns`;
-      }
-    },
-    []
-  );
-
-  // 🗺️ SMART MAP VIEWPORT FITTING
-  const fitMapToRoutes = useCallback(
-    async (analysis: any, origin: UserLocation, destination: UserLocation) => {
-      if (!mapRef.current) return;
-
-      try {
-        const allCoords = [
-          origin,
-          destination,
-          ...(analysis.fastestRoute.polyline || []),
-          ...(analysis.accessibleRoute.polyline || []),
-        ].filter((coord) => coord?.latitude && coord?.longitude);
-
-        if (allCoords.length > 0) {
-          // Smart timeout to ensure map is ready
-          setTimeout(() => {
-            mapRef.current?.fitToCoordinates(allCoords, {
-              edgePadding: {
-                top: 100,
-                right: 50,
-                bottom: 200,
-                left: 50,
-              },
-              animated: true,
-            });
-          }, 300);
-        }
-      } catch (error) {
-        console.warn("⚠️ Map fitting failed:", error);
-      }
-    },
-    [mapRef]
-  );
-
-  // 🎯 POI SELECTION HANDLER WITH AUTO-CALCULATION
+  // POI handler
   const handlePOIPress = useCallback(
     (poi: any) => {
-      if (__DEV__) {
-        console.log(
-          `🏢 BEAST MODE: Selected POI: ${poi.name} - Auto-calculating routes...`
-        );
-      }
+      console.log(`🏢 Selected POI: ${poi.name} - Auto-calculating routes...`);
 
-      // Animate to POI location first
       if (mapRef.current) {
         mapRef.current.animateToRegion(
           {
@@ -274,13 +197,12 @@ export function useRouteCalculation({
         );
       }
 
-      // Auto-calculate routes
       calculateUnifiedRoutes(poi);
     },
     [calculateUnifiedRoutes, mapRef]
   );
 
-  // 🔄 RESET ROUTE ANALYSIS
+  // Reset routes
   const resetRoutes = useCallback(() => {
     setState({
       routeAnalysis: null,
@@ -290,7 +212,7 @@ export function useRouteCalculation({
     });
   }, []);
 
-  // 📊 ROUTE METRICS CALCULATOR
+  // Route metrics
   const getRouteMetrics = useCallback(() => {
     if (!state.routeAnalysis) return null;
 
@@ -313,7 +235,7 @@ export function useRouteCalculation({
     };
   }, [state.routeAnalysis]);
 
-  // 🔥 UPDATE ROUTE ANALYSIS (for detour system)
+  // Update route analysis for detour system
   const updateRouteAnalysis = useCallback((updater: (prev: any) => any) => {
     setState((prev) => ({
       ...prev,
@@ -332,7 +254,7 @@ export function useRouteCalculation({
     calculateUnifiedRoutes,
     handlePOIPress,
     resetRoutes,
-    updateRouteAnalysis, // 🔥 NEW: For detour system
+    updateRouteAnalysis,
 
     // Computed values
     routeMetrics: getRouteMetrics(),

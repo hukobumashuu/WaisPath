@@ -1,6 +1,6 @@
 // src/screens/NavigationScreen.tsx
-// FIXED: Complete NavigationScreen with Proper Detour State Management + Proximity fixes
-// UPDATED: Added proximity detection reset and enhanced route visualization
+// SIMPLIFIED: NavigationScreen with monolith route calculation logic
+// Keeps micro-rerouting but simplifies the core routing for consistency
 
 import React, {
   useState,
@@ -21,7 +21,6 @@ import {
   Vibration,
   SafeAreaView,
   Platform,
-  InteractionManager,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MapView, { Marker, Callout, Polyline } from "react-native-maps";
@@ -31,38 +30,30 @@ import { useUserProfile } from "../stores/userProfileStore";
 import { firebaseServices } from "../services/firebase";
 import { UserLocation, AccessibilityObstacle, ObstacleType } from "../types";
 
-// 🔥 EXTRACTED PROXIMITY DETECTION HOOK
+// SIMPLIFIED: Only essential imports
 import { useProximityDetection } from "../hooks/useProximityDetection";
 import { useRouteCalculation } from "../hooks/useRouteCalculation";
 
-// 🔥 EXTRACTED COMPONENTS
+// Components
 import { ProximityAlertsOverlay } from "../components/ProximityAlertsOverlay";
 import { EnhancedObstacleMarker } from "../components/EnhancedObstacleMarker";
 import { RouteInfoPanel } from "../components/RouteInfoPanel";
-import { NavigationControls } from "../components/NavigationControls";
 
-// 🔥 EXTRACTED UTILITIES AND CONSTANTS
-import { decodePolyline, getPOIIcon } from "../utils/mapUtils";
-import { SAMPLE_POIS, MAP_STYLES } from "../constants/navigationConstants";
+// Utils
+import { getPOIIcon } from "../utils/mapUtils";
+import { SAMPLE_POIS } from "../constants/navigationConstants";
 
-// Route analysis services
-import { routeAnalysisService } from "../services/routeAnalysisService";
-import { sidewalkRouteAnalysisService } from "../services/sidewalkRouteAnalysisService";
+// Proximity detection
+import { ProximityAlert } from "../services/proximityDetectionService";
 
-// 🔥 Proximity detection imports
-import {
-  proximityDetectionService,
-  ProximityAlert,
-} from "../services/proximityDetectionService";
-
-// 🔥 VALIDATION SYSTEM IMPORTS
+// Validation
 import { ValidationPrompt } from "../components/ValidationPrompt";
 import {
   obstacleValidationService,
   type ValidationPrompt as ValidationPromptType,
 } from "../services/obstacleValidationService";
 
-// 🔥 DETOUR SYSTEM IMPORTS
+// Detour system
 import {
   microReroutingService,
   MicroDetour,
@@ -73,18 +64,15 @@ import {
   DetourStatusIndicator,
 } from "../components/DetourComponents";
 
-// ================================================
-// MAIN NAVIGATION SCREEN COMPONENT
-// ================================================
-
 export default function NavigationScreen() {
   const insets = useSafeAreaInsets();
   const { location, error: locationError } = useLocation();
   const { profile } = useUserProfile();
 
   const mapRef = useRef<MapView | null>(null);
-
   const [destination, setDestination] = useState("");
+
+  // SIMPLIFIED: Use updated hook with monolith logic
   const {
     routeAnalysis,
     isCalculating,
@@ -92,17 +80,15 @@ export default function NavigationScreen() {
     destinationName,
     calculateUnifiedRoutes,
     handlePOIPress,
-    routeMetrics,
     updateRouteAnalysis,
   } = useRouteCalculation({
     location,
     profile,
-    mapRef, // Now mapRef is defined before we use it
+    mapRef,
     destination,
   });
 
   const [isNavigating, setIsNavigating] = useState(false);
-  // Map and UI state
   const [showValidationPrompt, setShowValidationPrompt] = useState(false);
   const [currentValidationPrompt, setCurrentValidationPrompt] =
     useState<ValidationPromptType | null>(null);
@@ -111,7 +97,7 @@ export default function NavigationScreen() {
     AccessibilityObstacle[]
   >([]);
 
-  // 🔥 DETOUR STATE - moved to main component scope
+  // Detour state
   const [showDetourModal, setShowDetourModal] = useState(false);
   const [showObstacleWarning, setShowObstacleWarning] = useState(false);
   const [currentMicroDetour, setCurrentMicroDetour] =
@@ -120,75 +106,27 @@ export default function NavigationScreen() {
     useState<ProximityAlert | null>(null);
   const [isUsingDetour, setIsUsingDetour] = useState(false);
 
-  // === SAFETY / CONCURRENCY REFS ===
-  // Track in-flight obstacle detour computations to avoid duplicates
-  const processingDetourIdsRef = useRef<Set<string>>(new Set());
-  // Snapshot of the original fastest route before applying a detour
-  const originalFastestRouteRef = useRef<any | null>(null);
-  // Mounted flag to avoid state updates after unmount
-  const isMountedRef = useRef(true);
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
-
-  // 🔥 DETOUR HANDLERS - moved to main component scope
+  // SIMPLIFIED: Detour handlers without complex concurrency logic
   const handleCriticalObstacle = useCallback(
     async (alert: ProximityAlert) => {
-      const obstacleId = alert?.obstacle?.id;
-      if (!alert || !obstacleId) return;
-
-      // Prevent duplicate processing for same obstacle while one request is active
-      if (processingDetourIdsRef.current.has(obstacleId)) {
-        if (__DEV__)
-          console.log("🛑 Already processing detour for", obstacleId);
-        return;
-      }
-      processingDetourIdsRef.current.add(obstacleId);
-
       try {
         console.log("🚨 Critical obstacle detected:", alert.obstacle.type);
 
-        // Validate required data
-        if (!location) {
-          Alert.alert(
-            "Location Error",
-            "Cannot compute detour without current location."
-          );
-          return;
-        }
-
-        if (!selectedDestination) {
-          // No destination - show simple warning banner
+        if (!location || !selectedDestination || !profile) {
           setCurrentObstacleAlert(alert);
           setShowObstacleWarning(true);
           return;
         }
 
-        if (!profile) {
-          Alert.alert(
-            "Profile Error",
-            "Please set up your mobility profile first."
-          );
-          return;
-        }
-
-        // Cross-platform vibration feedback
+        // Vibration feedback
         try {
-          if (Platform.OS === "ios") {
-            Vibration.vibrate([100, 50, 100]);
-          } else {
-            Vibration.vibrate(200);
-          }
+          Vibration.vibrate(Platform.OS === "ios" ? [100, 50, 100] : 200);
         } catch (error) {
           console.warn("Vibration failed:", error);
         }
 
         console.log("🔄 Computing micro-detour...");
 
-        // CORE: Attempt to generate a safe street-only micro-detour
         const microDetour = await microReroutingService.createMicroDetour(
           location,
           alert.obstacle,
@@ -196,18 +134,13 @@ export default function NavigationScreen() {
           profile
         );
 
-        // If component unmounted while waiting, ignore results
-        if (!isMountedRef.current) return;
-
         if (!microDetour) {
-          // No safe detour found - show warning banner
           console.log("📍 No safe detour available");
           setCurrentObstacleAlert(alert);
           setShowObstacleWarning(true);
           return;
         }
 
-        // SUCCESS: Safe detour found - show modal
         console.log(
           `✅ Safe detour found: +${Math.round(microDetour.extraTime)}s`
         );
@@ -216,13 +149,8 @@ export default function NavigationScreen() {
         setShowDetourModal(true);
       } catch (error) {
         console.error("❌ Critical obstacle handler error:", error);
-
-        // Fallback to simple warning
         setCurrentObstacleAlert(alert);
         setShowObstacleWarning(true);
-      } finally {
-        // allow reprocessing later
-        processingDetourIdsRef.current.delete(obstacleId);
       }
     },
     [location, selectedDestination, profile]
@@ -234,29 +162,18 @@ export default function NavigationScreen() {
     try {
       console.log("✅ Applying micro-detour:", currentMicroDetour.reason);
 
-      // Close modal first
       setShowDetourModal(false);
 
-      // Update the route analysis to show the detour
       updateRouteAnalysis((prev: any) => {
-        if (!prev) {
-          console.warn("⚠️ No route analysis to update");
-          return prev;
-        }
+        if (!prev) return prev;
 
-        // store original fastest route snapshot once
-        if (!originalFastestRouteRef.current) {
-          originalFastestRouteRef.current = prev.fastestRoute;
-        }
-
-        // Create updated fastest route with detour
         const detourRoute = {
           ...prev.fastestRoute,
-          polyline: currentMicroDetour.route.polyline, // Use decoded polyline for map display
+          polyline: currentMicroDetour.route.polyline,
           duration: currentMicroDetour.route.duration,
           distance: currentMicroDetour.route.distance,
-          grade: prev.fastestRoute.grade, // Keep original grade
-          isDetour: true, // Flag to indicate this is a detour
+          grade: prev.fastestRoute.grade,
+          isDetour: true,
           detourInfo: {
             extraTime: currentMicroDetour.extraTime,
             extraDistance: currentMicroDetour.extraDistance,
@@ -268,7 +185,7 @@ export default function NavigationScreen() {
         return {
           ...prev,
           fastestRoute: detourRoute,
-          activeDetour: currentMicroDetour, // Store detour info for reference
+          activeDetour: currentMicroDetour,
           comparison: {
             ...prev.comparison,
             recommendation: `Using safe detour (+${Math.round(
@@ -278,45 +195,37 @@ export default function NavigationScreen() {
         };
       });
 
-      // Set detour mode
       setIsUsingDetour(true);
 
-      // Auto-fit map to show the detour route
       if (mapRef.current && currentMicroDetour.route.polyline.length > 0) {
         const allCoords = [
           location,
           selectedDestination,
-          ...currentMicroDetour.route.polyline.slice(0, 10), // Limit points for performance
-        ].filter((coord) => coord && coord.latitude && coord.longitude);
+          ...currentMicroDetour.route.polyline.slice(0, 10),
+        ].filter(
+          (coord): coord is UserLocation =>
+            coord?.latitude != null && coord?.longitude != null
+        );
 
         if (allCoords.length > 0) {
-          const validCoords = allCoords.filter(
-            (coord): coord is UserLocation => coord !== null
-          );
-
-          if (validCoords.length > 0) {
-            // Use InteractionManager instead of setTimeout
-            InteractionManager.runAfterInteractions(() => {
-              mapRef.current?.fitToCoordinates(validCoords, {
-                edgePadding: { top: 120, right: 50, bottom: 200, left: 50 },
-                animated: true,
-              });
+          setTimeout(() => {
+            mapRef.current?.fitToCoordinates(allCoords, {
+              edgePadding: { top: 120, right: 50, bottom: 200, left: 50 },
+              animated: true,
             });
-          }
+          }, 500);
         }
       }
 
-      // Log detour usage for analytics
       if (currentObstacleAlert && profile) {
         await microReroutingService.logDetourUsage(
           currentMicroDetour,
           currentObstacleAlert.obstacle.type,
-          true, // User accepted
+          true,
           profile
         );
       }
 
-      // Clear current detour data (UI-only, routeAnalysis still holds activeDetour to track)
       setCurrentMicroDetour(null);
       setCurrentObstacleAlert(null);
 
@@ -325,8 +234,7 @@ export default function NavigationScreen() {
       console.error("❌ Failed to apply micro-detour:", error);
       Alert.alert(
         "Detour Error",
-        "Failed to apply detour. Please try again or navigate manually.",
-        [{ text: "OK" }]
+        "Failed to apply detour. Please try again or navigate manually."
       );
     }
   }, [
@@ -335,7 +243,6 @@ export default function NavigationScreen() {
     location,
     selectedDestination,
     profile,
-    mapRef,
     updateRouteAnalysis,
   ]);
 
@@ -345,17 +252,15 @@ export default function NavigationScreen() {
     try {
       console.log("👤 User declined micro-detour");
 
-      // Log detour usage for analytics
       if (currentObstacleAlert && profile) {
         await microReroutingService.logDetourUsage(
           currentMicroDetour,
           currentObstacleAlert.obstacle.type,
-          false, // User declined
+          false,
           profile
         );
       }
 
-      // Close modal and clear data
       setShowDetourModal(false);
       setCurrentMicroDetour(null);
       setCurrentObstacleAlert(null);
@@ -375,38 +280,6 @@ export default function NavigationScreen() {
     setCurrentObstacleAlert(null);
   }, []);
 
-  const reportObstacleIssue = useCallback(() => {
-    if (!currentObstacleAlert) return;
-
-    Alert.alert(
-      "Report Obstacle Issue",
-      "Help improve WAISPATH by reporting issues with this obstacle.",
-      [
-        {
-          text: "Mark as Resolved",
-          onPress: () => {
-            console.log(
-              "📝 Obstacle marked as resolved:",
-              currentObstacleAlert.obstacle.id
-            );
-            dismissObstacleWarning();
-          },
-        },
-        {
-          text: "Mark as Incorrect",
-          onPress: () => {
-            console.log(
-              "📝 Obstacle marked as incorrect:",
-              currentObstacleAlert.obstacle.id
-            );
-            dismissObstacleWarning();
-          },
-        },
-        { text: "Cancel" },
-      ]
-    );
-  }, [currentObstacleAlert, dismissObstacleWarning]);
-
   const clearDetour = useCallback(() => {
     Alert.alert(
       "Return to Original Route",
@@ -416,42 +289,18 @@ export default function NavigationScreen() {
           text: "Yes, Return",
           onPress: () => {
             setIsUsingDetour(false);
-
-            // Restore the original fastest route snapshot if present
-            updateRouteAnalysis((prev: any) => {
-              if (!prev || !originalFastestRouteRef.current) return prev;
-              const restored = {
-                ...prev,
-                fastestRoute: originalFastestRouteRef.current,
-                activeDetour: undefined,
-                comparison: {
-                  ...prev.comparison,
-                  recommendation: "Returned to original route",
-                },
-              };
-              // clear snapshot after restoring
-              originalFastestRouteRef.current = null;
-              return restored;
-            });
-
+            // Could recalculate routes here if needed
             console.log("🔄 Returned to original route");
           },
         },
         { text: "Keep Detour" },
       ]
     );
-  }, [updateRouteAnalysis]);
+  }, []);
 
   const handleFindAlternative = useCallback(
     async (alert: ProximityAlert) => {
-      if (__DEV__) {
-        console.log(
-          "🔄 Finding alternative route around:",
-          alert.obstacle.type
-        );
-      }
-
-      // This now triggers the same micro-rerouting logic as handleCriticalObstacle
+      console.log("🔄 Finding alternative route around:", alert.obstacle.type);
       await handleCriticalObstacle(alert);
     },
     [handleCriticalObstacle]
@@ -459,9 +308,7 @@ export default function NavigationScreen() {
 
   const handleProximityAlertPress = useCallback(
     (alert: ProximityAlert) => {
-      if (__DEV__) {
-        console.log("📍 User pressed proximity alert:", alert.obstacle.type);
-      }
+      console.log("📍 User pressed proximity alert:", alert.obstacle.type);
 
       if (mapRef.current) {
         mapRef.current.animateToRegion(
@@ -494,101 +341,21 @@ export default function NavigationScreen() {
     [handleFindAlternative]
   );
 
-  // Memoize routePolyline to prefer fastest route but fallback to accessible route
+  // SIMPLIFIED: Route polyline for proximity detection
   const routePolyline = useMemo(() => {
-    if (!routeAnalysis) return [];
-    return (
-      routeAnalysis.fastestRoute?.polyline ||
-      routeAnalysis.accessibleRoute?.polyline ||
-      []
-    );
-  }, [
-    routeAnalysis?.fastestRoute?.polyline,
-    routeAnalysis?.accessibleRoute?.polyline,
-    destinationName, // Force update when destination changes
-  ]);
+    return routeAnalysis?.fastestRoute?.polyline || [];
+  }, [routeAnalysis?.fastestRoute?.polyline]);
 
-  // Start detection automatically when navigating OR when a route exists
-  const shouldDetectProximity = useMemo(() => {
-    const hasValidRoute = routePolyline && routePolyline.length > 0;
-    const shouldDetect = isNavigating || hasValidRoute;
-
-    if (__DEV__ && hasValidRoute) {
-      console.log("🎯 Route detected, enabling proximity detection:", {
-        destination: destinationName,
-        routeLength: routePolyline.length,
-        shouldDetect,
-      });
-    }
-
-    return shouldDetect;
-  }, [isNavigating, routePolyline, destinationName]);
-
-  // 🔥 CRITICAL FIX: Force proximity detection reset when destination changes
-  useEffect(() => {
-    if (destinationName && shouldDetectProximity) {
-      // Force reset proximity detection when destination changes
-      proximityDetectionService.resetDetectionState();
-      console.log(
-        "🔄 Forced proximity detection reset for new destination:",
-        destinationName
-      );
-    }
-  }, [destinationName, shouldDetectProximity]);
-
-  // 🔥 Proximity detection state — uses shouldDetectProximity so selecting POIs restarts detection
+  // SIMPLIFIED: Proximity detection
   const proximityState = useProximityDetection({
-    isNavigating: shouldDetectProximity,
+    isNavigating,
     userLocation: location,
     routePolyline,
     userProfile: profile,
     onCriticalObstacle: handleCriticalObstacle,
   });
 
-  // Debug logging in dev for proximity + route changes
-  useEffect(() => {
-    if (!__DEV__) return;
-    console.log("📍 Proximity Debug:", {
-      isNavigating,
-      shouldDetectProximity,
-      hasRoutePolyline: routePolyline.length > 0,
-      isDetecting: proximityState.isDetecting,
-      alertsCount: proximityState.proximityAlerts.length,
-      destination: destinationName,
-      routeLength: routePolyline.length,
-    });
-  }, [
-    isNavigating,
-    shouldDetectProximity,
-    routePolyline.length,
-    proximityState.isDetecting,
-    proximityState.proximityAlerts.length,
-    destinationName,
-  ]);
-
-  // ENHANCED: Debug route coordinates to verify distinct routes
-  useEffect(() => {
-    if (routeAnalysis && __DEV__) {
-      const fastest = routeAnalysis.fastestRoute?.polyline || [];
-      const accessible = routeAnalysis.accessibleRoute?.polyline || [];
-
-      console.log("🗺️ Route Debug:", {
-        destination: destinationName,
-        fastestPoints: fastest.length,
-        accessiblePoints: accessible.length,
-        firstDifference: fastest.findIndex(
-          (point: UserLocation, i: number) =>
-            !accessible[i] ||
-            Math.abs(point.latitude - accessible[i].latitude) > 0.0001 ||
-            Math.abs(point.longitude - accessible[i].longitude) > 0.0001
-        ),
-        fastestStart: fastest.slice(0, 2),
-        accessibleStart: accessible.slice(0, 2),
-      });
-    }
-  }, [routeAnalysis, destinationName]);
-
-  // Load nearby obstacles when location changes
+  // Load nearby obstacles
   useEffect(() => {
     if (location) {
       loadNearbyObstacles();
@@ -603,7 +370,7 @@ export default function NavigationScreen() {
       const obstacles = await firebaseServices.obstacle.getObstaclesInArea(
         location.latitude,
         location.longitude,
-        1 // 1km radius
+        1
       );
       setNearbyObstacles(obstacles);
     } catch (error) {
@@ -629,7 +396,6 @@ export default function NavigationScreen() {
     }
   };
 
-  // Start navigation
   const startNavigation = (routeType: "fastest" | "accessible") => {
     setIsNavigating(true);
     Vibration.vibrate(100);
@@ -644,7 +410,31 @@ export default function NavigationScreen() {
     );
   };
 
-  // Error state
+  const renderDetectionStatus = useCallback(() => {
+    if (!isNavigating) return null;
+
+    return (
+      <View style={styles.detectionStatusContainer}>
+        <Text style={styles.detectionStatus}>
+          {proximityState.isDetecting
+            ? `🔍 Scanning ahead... (${proximityState.proximityAlerts.length} obstacles)`
+            : "⏸️ Detection paused"}
+        </Text>
+
+        {proximityState.detectionError && (
+          <Text style={styles.detectionError}>
+            ⚠️ {proximityState.detectionError}
+          </Text>
+        )}
+      </View>
+    );
+  }, [
+    isNavigating,
+    proximityState.isDetecting,
+    proximityState.proximityAlerts.length,
+    proximityState.detectionError,
+  ]);
+
   if (locationError) {
     return (
       <SafeAreaView style={styles.container}>
@@ -660,7 +450,6 @@ export default function NavigationScreen() {
     );
   }
 
-  // Loading state
   if (!location) {
     return (
       <SafeAreaView style={styles.container}>
@@ -745,27 +534,27 @@ export default function NavigationScreen() {
           </Marker>
         ))}
 
-        {/* ROUTE VISUALIZATION - ENHANCED DISTINCT STYLING */}
+        {/* ROUTE VISUALIZATION */}
         {routeAnalysis && (
           <>
-            {/* ACCESSIBLE ROUTE - THICK GREEN WITH DASH PATTERN (Render first, lower zIndex) */}
-            {routeAnalysis.accessibleRoute?.polyline && (
+            {/* FASTEST ROUTE */}
+            {routeAnalysis.fastestRoute.polyline && (
               <Polyline
-                coordinates={routeAnalysis.accessibleRoute.polyline}
-                strokeColor="#10B981" // Bright green
-                strokeWidth={8} // Thicker
-                lineDashPattern={[10, 10]} // Dashed pattern to differentiate
+                coordinates={routeAnalysis.fastestRoute.polyline}
+                strokeColor="#EF4444"
+                strokeWidth={5}
+                lineDashPattern={[0]}
                 zIndex={1}
               />
             )}
 
-            {/* FASTEST ROUTE - SOLID RED (Render second, higher zIndex) */}
-            {routeAnalysis.fastestRoute?.polyline && (
+            {/* ACCESSIBLE ROUTE */}
+            {routeAnalysis.accessibleRoute.polyline && (
               <Polyline
-                coordinates={routeAnalysis.fastestRoute.polyline}
-                strokeColor="#DC2626" // Bright red
-                strokeWidth={6} // Thinner to show green underneath
-                lineDashPattern={[0]} // Solid
+                coordinates={routeAnalysis.accessibleRoute.polyline}
+                strokeColor="#22C55E"
+                strokeWidth={5}
+                lineDashPattern={[0]}
                 zIndex={2}
               />
             )}
@@ -773,20 +562,23 @@ export default function NavigationScreen() {
         )}
       </MapView>
 
-      {/* 🔥 NAVIGATION CONTROLS - EXTRACTED COMPONENT */}
-      <NavigationControls
-        destination={destination}
-        onDestinationChange={setDestination}
-        isCalculating={isCalculating}
-        searchContainerStyle={{ top: insets.top + 10 }}
-        showFAB={!routeAnalysis}
-        onFABPress={() => calculateUnifiedRoutes()}
-        fabStyle={{ bottom: insets.bottom + 20 }}
-        isNavigating={isNavigating}
-        isDetecting={proximityState.isDetecting}
-        proximityAlertsCount={proximityState.proximityAlerts.length}
-        detectionError={proximityState.detectionError}
-      />
+      {/* SEARCH BAR */}
+      <View style={[styles.searchContainer, { top: insets.top + 10 }]}>
+        <View style={styles.searchInputContainer}>
+          <Ionicons name="search" size={20} color="#6B7280" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Where do you want to go?"
+            value={destination}
+            onChangeText={setDestination}
+            placeholderTextColor="#6B7280"
+          />
+          {isCalculating && <ActivityIndicator size="small" color="#3B82F6" />}
+        </View>
+      </View>
+
+      {/* PROXIMITY DETECTION STATUS */}
+      {renderDetectionStatus()}
 
       {/* PROXIMITY ALERTS OVERLAY */}
       <ProximityAlertsOverlay
@@ -804,6 +596,21 @@ export default function NavigationScreen() {
         showSidewalks={showSidewalks}
         style={{ bottom: insets.bottom + 100 }}
       />
+
+      {/* FLOATING ACTION BUTTON */}
+      {!routeAnalysis && (
+        <TouchableOpacity
+          style={[styles.fab, { bottom: insets.bottom + 20 }]}
+          onPress={() => calculateUnifiedRoutes()}
+          disabled={isCalculating}
+        >
+          {isCalculating ? (
+            <ActivityIndicator size="small" color="white" />
+          ) : (
+            <Ionicons name="navigate-circle" size={24} color="white" />
+          )}
+        </TouchableOpacity>
+      )}
 
       {/* VALIDATION PROMPT MODAL */}
       <Modal
@@ -833,7 +640,7 @@ export default function NavigationScreen() {
         )}
       </Modal>
 
-      {/* 🔥 DETOUR STATUS INDICATOR - shows when using detour */}
+      {/* DETOUR STATUS INDICATOR */}
       <DetourStatusIndicator
         isActive={isUsingDetour}
         detourDescription={
@@ -842,7 +649,7 @@ export default function NavigationScreen() {
         onCancel={clearDetour}
       />
 
-      {/* 🔥 MICRO-DETOUR MODAL - shows when safe detour is available */}
+      {/* MICRO-DETOUR MODAL */}
       {currentMicroDetour && currentObstacleAlert && (
         <DetourSuggestionModal
           visible={showDetourModal}
@@ -854,7 +661,7 @@ export default function NavigationScreen() {
         />
       )}
 
-      {/* 🔥 OBSTACLE WARNING BANNER - shows when no detour available */}
+      {/* OBSTACLE WARNING BANNER */}
       <CompactObstacleWarning
         visible={showObstacleWarning}
         message={
@@ -874,7 +681,6 @@ export default function NavigationScreen() {
   );
 }
 
-// 🔥 COMPLETE STYLES with new proximity detection styles
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -913,8 +719,52 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#6B7280",
   },
-
-  // Marker styles
+  searchContainer: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    zIndex: 10,
+  },
+  searchInputContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "white",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  searchInput: {
+    flex: 1,
+    marginLeft: 12,
+    fontSize: 16,
+    color: "#1F2937",
+  },
+  detectionStatusContainer: {
+    position: "absolute",
+    top: 60,
+    left: 16,
+    right: 16,
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    borderRadius: 8,
+    padding: 8,
+    zIndex: 8,
+  },
+  detectionStatus: {
+    color: "white",
+    fontSize: 12,
+    textAlign: "center",
+  },
+  detectionError: {
+    color: "#FCD34D",
+    fontSize: 10,
+    textAlign: "center",
+    marginTop: 4,
+  },
   userLocationMarker: {
     width: 32,
     height: 32,
@@ -961,12 +811,6 @@ const styles = StyleSheet.create({
     width: 200,
     padding: 8,
   },
-  calloutHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 4,
-  },
   calloutTitle: {
     fontSize: 14,
     fontWeight: "bold",
@@ -983,23 +827,19 @@ const styles = StyleSheet.create({
     color: "#3B82F6",
     fontStyle: "italic",
   },
-  calloutDescription: {
-    fontSize: 12,
-    color: "#4B5563",
-    marginBottom: 4,
-  },
-  calloutMeta: {
-    fontSize: 10,
-    color: "#9CA3AF",
-  },
-  validationBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  validationBadgeText: {
-    fontSize: 8,
-    fontWeight: "bold",
-    color: "white",
+  fab: {
+    position: "absolute",
+    right: 16,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#3B82F6",
+    justifyContent: "center",
+    alignItems: "center",
+    elevation: 6,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
   },
 });
