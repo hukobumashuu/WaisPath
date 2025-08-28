@@ -17,6 +17,7 @@ interface ScoredRoute {
   googleRoute: GoogleRoute;
   accessibilityScore: AccessibilityScore;
   obstacleCount: number;
+  obstacles: AccessibilityObstacle[]; // include obstacles along route for display
   userWarnings: string[];
   recommendation: "excellent" | "good" | "acceptable" | "difficult" | "avoid";
   alternativeReason?: string;
@@ -226,6 +227,9 @@ class RouteAnalysisService {
 
   /**
    * Create a route optimized for accessibility
+   *
+   * NOTE: minor TypeScript-safe addition: ensure polylineEncoded exists to satisfy GoogleRoute type.
+   * Logic otherwise unchanged.
    */
   private createAccessibilityOptimizedRoute(
     baseRoute: GoogleRoute,
@@ -236,9 +240,14 @@ class RouteAnalysisService {
     const timeMultiplier = userProfile.type === "wheelchair" ? 1.25 : 1.15;
     const distanceMultiplier = 1.1;
 
+    const polylineEncoded =
+      (baseRoute as any).polylineEncoded ??
+      (typeof baseRoute.polyline === "string" ? baseRoute.polyline : "");
+
     return {
       id: "strategic_accessible",
       polyline: baseRoute.polyline, // Keep same for visualization
+      polylineEncoded,
       distance: Math.round(baseRoute.distance * distanceMultiplier),
       duration: Math.round(baseRoute.duration * timeMultiplier),
       steps: baseRoute.steps.map((step) => ({
@@ -255,11 +264,14 @@ class RouteAnalysisService {
         `This route prioritizes accessibility for ${userProfile.type} users`,
       ],
       summary: `Accessible Route (${userProfile.type} optimized)`,
-    };
+    } as GoogleRoute;
   }
 
   /**
    * Create a safer route via main roads
+   *
+   * NOTE: minor TypeScript-safe addition: ensure polylineEncoded exists to satisfy GoogleRoute type.
+   * Logic otherwise unchanged.
    */
   private createSaferRoute(
     baseRoute: GoogleRoute,
@@ -269,9 +281,14 @@ class RouteAnalysisService {
     const timeMultiplier = 1.2;
     const distanceMultiplier = 1.15;
 
+    const polylineEncoded =
+      (baseRoute as any).polylineEncoded ??
+      (typeof baseRoute.polyline === "string" ? baseRoute.polyline : "");
+
     return {
       id: "strategic_safer",
       polyline: baseRoute.polyline,
+      polylineEncoded,
       distance: Math.round(baseRoute.distance * distanceMultiplier),
       duration: Math.round(baseRoute.duration * timeMultiplier),
       steps: baseRoute.steps.map((step) => ({
@@ -283,7 +300,7 @@ class RouteAnalysisService {
       bounds: baseRoute.bounds,
       warnings: ["This route uses main roads for improved safety"],
       summary: "Safer Route (via main roads)",
-    };
+    } as GoogleRoute;
   }
 
   /**
@@ -351,6 +368,7 @@ class RouteAnalysisService {
         googleRoute,
         accessibilityScore,
         obstacleCount: routeObstacles.length,
+        obstacles: routeObstacles, // return obstacles for UI display
         userWarnings,
         recommendation,
         userProfile,
@@ -376,6 +394,7 @@ class RouteAnalysisService {
           userSpecificAdjustment: strategicBonus,
         },
         obstacleCount: Math.max(0, 3 - routeIndex - (isStrategicRoute ? 2 : 0)),
+        obstacles: [], // fallback to empty obstacles array
         userWarnings: [],
         recommendation: this.getRouteRecommendation(finalScore),
         userProfile,
@@ -419,36 +438,103 @@ class RouteAnalysisService {
   }
 
   /**
-   * Get obstacles near a route (simplified approach)
+   * Get obstacles along route polyline (THE FINAL FIX)
+   * Uses polyline + bounds to query upstream and filter to path.
    */
   private async getObstaclesNearRoute(
     googleRoute: GoogleRoute
   ): Promise<AccessibilityObstacle[]> {
     try {
-      // Sample a few points along the route for obstacle detection
-      const samplePoints = this.sampleRoutePoints(googleRoute, 3); // 3 sample points
-      const allObstacles: AccessibilityObstacle[] = [];
+      console.log(
+        `🛣️ Getting obstacles along route polyline: ${googleRoute.summary}`
+      );
 
-      for (const point of samplePoints) {
-        try {
-          const obstacles = await firebaseServices.obstacle.getObstaclesInArea(
-            point.latitude,
-            point.longitude,
-            0.3 // 300m radius
-          );
-          allObstacles.push(...obstacles);
-        } catch (error) {
-          console.warn("⚠️ Could not fetch obstacles for route point:", error);
+      // Build polyline array (UserLocation[])
+      let polyline: UserLocation[] = [];
+
+      // Support multiple shapes: array, string, or encoded field
+      if (Array.isArray(googleRoute.polyline)) {
+        polyline = googleRoute.polyline as UserLocation[];
+      } else if (typeof googleRoute.polyline === "string") {
+        // polyline is an encoded string in the polyline property
+        polyline = this.decodePolylineString(googleRoute.polyline);
+      } else if (
+        (googleRoute as any).polylineEncoded &&
+        typeof (googleRoute as any).polylineEncoded === "string"
+      ) {
+        // compatibility: sometimes the encoded polyline is in polylineEncoded
+        polyline = this.decodePolylineString(
+          (googleRoute as any).polylineEncoded
+        );
+      } else if (
+        googleRoute.steps &&
+        Array.isArray(googleRoute.steps) &&
+        googleRoute.steps.length > 0
+      ) {
+        // Fallback to route steps
+        polyline = googleRoute.steps.map(
+          (step) => step.startLocation as UserLocation
+        );
+        const last = googleRoute.steps[googleRoute.steps.length - 1];
+        if (last && last.endLocation)
+          polyline.push(last.endLocation as UserLocation);
+      }
+
+      if (polyline.length < 2) {
+        console.warn("⚠️ Route polyline too short for obstacle analysis");
+        return [];
+      }
+
+      // Get route bounds + dynamic search radius (in km)
+      const routeBounds = this.calculateRouteBounds(polyline);
+      const searchRadius = Math.max(
+        0.5,
+        this.calculateRouteLength(polyline) / 1000 / 2
+      ); // km
+
+      // Pull upstream obstacles (upstream should ideally filter, but we'll still filter by polyline)
+      console.log(
+        `🔎 Querying Firebase for obstacles around center ${routeBounds.center.latitude}, ${routeBounds.center.longitude} with radius ${searchRadius}km`
+      );
+      const allObstacles = await firebaseServices.obstacle.getObstaclesInArea(
+        routeBounds.center.latitude,
+        routeBounds.center.longitude,
+        searchRadius
+      );
+
+      console.log(`📍 Found ${allObstacles.length} obstacles in route area`);
+
+      // Filter obstacles that are actually near the route path with a 50m buffer
+      const bufferMeters = 50;
+      const routeObstacles: AccessibilityObstacle[] = [];
+
+      for (const ob of allObstacles) {
+        if (!ob.location) continue;
+        const distToRoute = this.calculateDistanceToPolyline(
+          ob.location as UserLocation,
+          polyline
+        );
+        // Debug log: show why obstacles are kept/filtered
+        console.log(
+          `   - Obstacle ${ob.id} (${ob.type}) at ${ob.location.latitude},${
+            ob.location.longitude
+          } -> distanceToRoute=${distToRoute.toFixed(1)}m`
+        );
+        if (distToRoute <= bufferMeters) {
+          routeObstacles.push(ob);
         }
       }
 
-      // Remove duplicates by ID
-      const uniqueObstacles = allObstacles.filter(
-        (obstacle, index, self) =>
-          self.findIndex((o) => o.id === obstacle.id) === index
+      console.log(
+        `🛣️ ${routeObstacles.length} obstacles are along the route polyline (<= ${bufferMeters}m)`
       );
 
-      return uniqueObstacles;
+      // Dedupe by id just in case
+      const unique = routeObstacles.filter(
+        (ob, idx, arr) => arr.findIndex((o) => o.id === ob.id) === idx
+      );
+
+      return unique;
     } catch (error) {
       console.warn("⚠️ Could not fetch obstacles for route:", error);
       return [];
@@ -456,30 +542,200 @@ class RouteAnalysisService {
   }
 
   /**
-   * Sample points along the route for obstacle detection
+   * Filter obstacles that are within buffer distance of route polyline
    */
-  private sampleRoutePoints(
-    googleRoute: GoogleRoute,
-    numPoints: number
-  ): UserLocation[] {
-    const points: UserLocation[] = [];
+  private filterObstaclesAlongPolyline(
+    obstacles: AccessibilityObstacle[],
+    polyline: UserLocation[],
+    bufferMeters: number
+  ): AccessibilityObstacle[] {
+    // kept for backward compat in case other parts call this method
+    return obstacles.filter((obstacle) => {
+      if (!obstacle.location) return false;
 
-    if (googleRoute.steps.length === 0) return points;
+      const distanceToRoute = this.calculateDistanceToPolyline(
+        obstacle.location as UserLocation,
+        polyline
+      );
+      return distanceToRoute <= bufferMeters;
+    });
+  }
 
-    // Add start point
-    points.push(googleRoute.steps[0].startLocation);
+  /**
+   * Calculate minimum distance from point to polyline
+   */
+  private calculateDistanceToPolyline(
+    point: UserLocation,
+    polyline: UserLocation[]
+  ): number {
+    let minDistance = Infinity;
 
-    // Add midpoint(s)
-    if (numPoints > 2 && googleRoute.steps.length > 1) {
-      const midIndex = Math.floor(googleRoute.steps.length / 2);
-      points.push(googleRoute.steps[midIndex].startLocation);
+    for (let i = 0; i < polyline.length - 1; i++) {
+      const segmentStart = polyline[i];
+      const segmentEnd = polyline[i + 1];
+
+      const distanceToSegment = this.pointToLineSegmentDistance(
+        point,
+        segmentStart,
+        segmentEnd
+      );
+      minDistance = Math.min(minDistance, distanceToSegment);
     }
 
-    // Add end point
-    const lastStep = googleRoute.steps[googleRoute.steps.length - 1];
-    points.push(lastStep.endLocation);
+    return minDistance;
+  }
 
-    return points;
+  /**
+   * Perpendicular distance from point to line segment (returns meters)
+   */
+  private pointToLineSegmentDistance(
+    point: UserLocation,
+    lineStart: UserLocation,
+    lineEnd: UserLocation
+  ): number {
+    // Treat lon/lat ~ Cartesian for short distances; result uses haversine for final distance
+    const x = point.longitude;
+    const y = point.latitude;
+    const x1 = lineStart.longitude;
+    const y1 = lineStart.latitude;
+    const x2 = lineEnd.longitude;
+    const y2 = lineEnd.latitude;
+
+    const A = x - x1;
+    const B = y - y1;
+    const C = x2 - x1;
+    const D = y2 - y1;
+
+    const dot = A * C + B * D;
+    const lenSq = C * C + D * D;
+
+    if (lenSq === 0) {
+      // segment is a point
+      return this.calculateDistance(point, lineStart);
+    }
+
+    let param = dot / lenSq;
+
+    let xx: number, yy: number;
+    if (param < 0) {
+      xx = x1;
+      yy = y1;
+    } else if (param > 1) {
+      xx = x2;
+      yy = y2;
+    } else {
+      xx = x1 + param * C;
+      yy = y1 + param * D;
+    }
+
+    // Convert projected point back to lat/lng and compute accurate haversine distance
+    return this.calculateDistance(point, { latitude: yy, longitude: xx });
+  }
+
+  /**
+   * Haversine distance between two points (returns meters)
+   */
+  private calculateDistance(
+    point1: UserLocation,
+    point2: UserLocation
+  ): number {
+    const R = 6371e3; // meters
+    const φ1 = (point1.latitude * Math.PI) / 180;
+    const φ2 = (point2.latitude * Math.PI) / 180;
+    const Δφ = ((point2.latitude - point1.latitude) * Math.PI) / 180;
+    const Δλ = ((point2.longitude - point1.longitude) * Math.PI) / 180;
+
+    const a =
+      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c;
+  }
+
+  /**
+   * Calculate bounding center and box for a polyline
+   */
+  private calculateRouteBounds(polyline: UserLocation[]): {
+    center: UserLocation;
+    bounds: { north: number; south: number; east: number; west: number };
+  } {
+    let minLat = polyline[0].latitude;
+    let maxLat = polyline[0].latitude;
+    let minLng = polyline[0].longitude;
+    let maxLng = polyline[0].longitude;
+
+    polyline.forEach((p) => {
+      minLat = Math.min(minLat, p.latitude);
+      maxLat = Math.max(maxLat, p.latitude);
+      minLng = Math.min(minLng, p.longitude);
+      maxLng = Math.max(maxLng, p.longitude);
+    });
+
+    return {
+      center: {
+        latitude: (minLat + maxLat) / 2,
+        longitude: (minLng + maxLng) / 2,
+      },
+      bounds: {
+        north: maxLat,
+        south: minLat,
+        east: maxLng,
+        west: minLng,
+      },
+    };
+  }
+
+  /**
+   * Calculate approximate route length (meters)
+   */
+  private calculateRouteLength(polyline: UserLocation[]): number {
+    let totalDistance = 0;
+    for (let i = 0; i < polyline.length - 1; i++) {
+      totalDistance += this.calculateDistance(polyline[i], polyline[i + 1]);
+    }
+    return totalDistance;
+  }
+
+  /**
+   * Decode a Google encoded polyline into UserLocation[]
+   * Stable implementation derived from polyline decoding algorithm.
+   */
+  private decodePolylineString(encoded: string): UserLocation[] {
+    const coords: UserLocation[] = [];
+    let index = 0;
+    let lat = 0;
+    let lng = 0;
+
+    while (index < encoded.length) {
+      let b: number;
+      let shift = 0;
+      let result = 0;
+      do {
+        b = encoded.charCodeAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      const deltaLat = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
+      lat += deltaLat;
+
+      shift = 0;
+      result = 0;
+      do {
+        b = encoded.charCodeAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      const deltaLng = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
+      lng += deltaLng;
+
+      coords.push({
+        latitude: lat / 1e5,
+        longitude: lng / 1e5,
+      } as UserLocation);
+    }
+
+    return coords;
   }
 
   /**
@@ -753,7 +1009,9 @@ class RouteAnalysisService {
     const fastestRoute = routesByTime[0];
 
     // Strategy 2: Find most accessible route - no distance constraints
-    console.log("📏 Evaluating all routes for accessibility without distance limits");
+    console.log(
+      "📏 Evaluating all routes for accessibility without distance limits"
+    );
 
     // Sort all routes by accessibility score, prioritizing strategic accessible routes
     const routesByAccessibility = scoredRoutes.sort((a, b) => {
@@ -897,11 +1155,17 @@ class RouteAnalysisService {
     const deviceType = userProfile.type;
 
     // Analyze blocking obstacles for user's specific device
-    const blockingObstacles = this.getBlockingObstaclesForUser(fastestRoute, userProfile);
+    const blockingObstacles = this.getBlockingObstaclesForUser(
+      fastestRoute,
+      userProfile
+    );
     const hasBlockingObstacles = blockingObstacles.length > 0;
 
     // Evaluate severity of accessibility difference
-    const isHighSeverityDifference = this.isHighSeverityAccessibilityGap(fastestGrade, accessibleGrade);
+    const isHighSeverityDifference = this.isHighSeverityAccessibilityGap(
+      fastestGrade,
+      accessibleGrade
+    );
 
     // Device-specific messaging
     const deviceLabel = this.getDeviceLabel(deviceType);
@@ -914,7 +1178,8 @@ class RouteAnalysisService {
 
     // High severity accessibility gap (e.g., Grade A vs C/D/F)
     if (isHighSeverityDifference) {
-      if (timeDifference <= 300) { // 5 minutes or less
+      if (timeDifference <= 300) {
+        // 5 minutes or less
         return `Strongly recommended for ${deviceLabel}: Take the accessible route (${timeMinutes} min longer) - significant safety improvement from Grade ${fastestGrade} to ${accessibleGrade}`;
       } else {
         return `Important for ${deviceLabel}: Consider the ${timeMinutes}-minute accessible route - much safer (Grade ${accessibleGrade} vs ${fastestGrade}) despite extra time`;
@@ -923,9 +1188,11 @@ class RouteAnalysisService {
 
     // Moderate improvements with time context
     if (accessibilityImprovement >= 15) {
-      if (timeDifference <= 120) { // 2 minutes or less
+      if (timeDifference <= 120) {
+        // 2 minutes or less
         return `For ${deviceLabel}: Accessible route recommended (just ${timeMinutes} min longer) with better conditions (Grade ${accessibleGrade})`;
-      } else if (timeDifference <= 600) { // 10 minutes or less
+      } else if (timeDifference <= 600) {
+        // 10 minutes or less
         return `For ${deviceLabel}: Consider the accessible route (${timeMinutes} min longer) - noticeably better accessibility (Grade ${accessibleGrade})`;
       } else {
         return `For ${deviceLabel}: Fastest route acceptable - accessibility improvement (Grade ${accessibleGrade}) requires ${timeMinutes} extra minutes`;
@@ -933,30 +1200,36 @@ class RouteAnalysisService {
     }
 
     // Minimal difference - favor efficiency
-    if (timeDifference <= 180) { // 3 minutes or less
+    if (timeDifference <= 180) {
+      // 3 minutes or less
       return `Either route works for ${deviceLabel} - accessible route is ${timeMinutes} min longer with slightly better conditions (Grade ${accessibleGrade})`;
     } else {
-      return `For ${deviceLabel}: Fastest route recommended - minimal accessibility difference (Grades ${fastestGrade} vs ${accessibleGrade}) saves ${Math.abs(timeMinutes)} minutes`;
+      return `For ${deviceLabel}: Fastest route recommended - minimal accessibility difference (Grades ${fastestGrade} vs ${accessibleGrade}) saves ${Math.abs(
+        timeMinutes
+      )} minutes`;
     }
   }
 
   /**
    * Get blocking obstacles specific to user's mobility device
    */
-  private getBlockingObstaclesForUser(route: ScoredRoute, userProfile: UserMobilityProfile): string[] {
+  private getBlockingObstaclesForUser(
+    route: ScoredRoute,
+    userProfile: UserMobilityProfile
+  ): string[] {
     const blockingObstacleMap: Record<string, string[]> = {
       wheelchair: ["stairs", "narrow passages", "high curbs"],
       walker: ["stairs", "steep slopes", "narrow passages"],
       crutches: ["stairs", "uneven surfaces"],
       cane: ["stairs", "major obstacles"],
-      none: ["blocked paths"]
+      none: ["blocked paths"],
     };
 
     const deviceBlockers = blockingObstacleMap[userProfile.type] || [];
     const routeWarnings = route.userWarnings || [];
 
-    return deviceBlockers.filter(blocker => 
-      routeWarnings.some(warning => 
+    return deviceBlockers.filter((blocker) =>
+      routeWarnings.some((warning) =>
         warning.toLowerCase().includes(blocker.toLowerCase().split(" ")[0])
       )
     );
@@ -965,13 +1238,22 @@ class RouteAnalysisService {
   /**
    * Determine if accessibility grade difference is high severity
    */
-  private isHighSeverityAccessibilityGap(fastestGrade: string, accessibleGrade: string): boolean {
-    const gradeValues: Record<string, number> = { A: 5, B: 4, C: 3, D: 2, F: 1 };
+  private isHighSeverityAccessibilityGap(
+    fastestGrade: string,
+    accessibleGrade: string
+  ): boolean {
+    const gradeValues: Record<string, number> = {
+      A: 5,
+      B: 4,
+      C: 3,
+      D: 2,
+      F: 1,
+    };
     const fastestValue = gradeValues[fastestGrade] || 3;
     const accessibleValue = gradeValues[accessibleGrade] || 3;
-    
+
     // High severity if difference is 2+ grades (e.g., C to A, D to B, F to C)
-    return (accessibleValue - fastestValue) >= 2;
+    return accessibleValue - fastestValue >= 2;
   }
 
   /**
@@ -983,7 +1265,7 @@ class RouteAnalysisService {
       walker: "walker",
       crutches: "crutches",
       cane: "cane",
-      none: "pedestrian"
+      none: "pedestrian",
     };
     return labels[deviceType] || "mobility device";
   }
@@ -991,9 +1273,11 @@ class RouteAnalysisService {
   /**
    * Calculate confidence metrics for route accessibility data
    */
-  private calculateRouteConfidence(obstacles: AccessibilityObstacle[]): RouteConfidence {
+  private calculateRouteConfidence(
+    obstacles: AccessibilityObstacle[]
+  ): RouteConfidence {
     const now = new Date();
-    
+
     // Handle empty obstacle list
     if (obstacles.length === 0) {
       return {
@@ -1012,15 +1296,19 @@ class RouteAnalysisService {
     }
 
     // Calculate data freshness based on obstacle age
-    const obstacleAges = obstacles.map(obstacle => {
-      const reportDate = obstacle.reportedAt instanceof Date 
-        ? obstacle.reportedAt 
-        : new Date(obstacle.reportedAt);
-      return Math.floor((now.getTime() - reportDate.getTime()) / (1000 * 60 * 60 * 24));
+    const obstacleAges = obstacles.map((obstacle) => {
+      const reportDate =
+        obstacle.reportedAt instanceof Date
+          ? obstacle.reportedAt
+          : new Date(obstacle.reportedAt);
+      return Math.floor(
+        (now.getTime() - reportDate.getTime()) / (1000 * 60 * 60 * 24)
+      );
     });
-    
-    const avgObstacleAge = obstacleAges.reduce((sum, age) => sum + age, 0) / obstacleAges.length;
-    
+
+    const avgObstacleAge =
+      obstacleAges.reduce((sum, age) => sum + age, 0) / obstacleAges.length;
+
     // Determine freshness category
     let dataFreshness: "high" | "medium" | "low";
     if (avgObstacleAge <= 7) {
@@ -1032,12 +1320,18 @@ class RouteAnalysisService {
     }
 
     // Calculate community validation metrics
-    const totalUpvotes = obstacles.reduce((sum, obs) => sum + (obs.upvotes || 0), 0);
-    const totalDownvotes = obstacles.reduce((sum, obs) => sum + (obs.downvotes || 0), 0);
+    const totalUpvotes = obstacles.reduce(
+      (sum, obs) => sum + (obs.upvotes || 0),
+      0
+    );
+    const totalDownvotes = obstacles.reduce(
+      (sum, obs) => sum + (obs.downvotes || 0),
+      0
+    );
     const validationCount = totalUpvotes + totalDownvotes;
-    
+
     // Count verified obstacles
-    const verifiedCount = obstacles.filter(obs => obs.verified).length;
+    const verifiedCount = obstacles.filter((obs) => obs.verified).length;
     const verificationRatio = verifiedCount / obstacles.length;
 
     // Determine verification status
@@ -1054,15 +1348,17 @@ class RouteAnalysisService {
     const routePopularity = Math.min(obstacles.length * 2, 100);
 
     // Find most recent verification
-    const verifiedObstacles = obstacles.filter(obs => obs.verified);
-    const lastVerified = verifiedObstacles.length > 0 
-      ? verifiedObstacles.reduce((latest, obs) => {
-          const obsDate = obs.reportedAt instanceof Date 
-            ? obs.reportedAt 
-            : new Date(obs.reportedAt);
-          return obsDate > latest ? obsDate : latest;
-        }, new Date(0))
-      : null;
+    const verifiedObstacles = obstacles.filter((obs) => obs.verified);
+    const lastVerified =
+      verifiedObstacles.length > 0
+        ? verifiedObstacles.reduce((latest, obs) => {
+            const obsDate =
+              obs.reportedAt instanceof Date
+                ? obs.reportedAt
+                : new Date(obs.reportedAt);
+            return obsDate > latest ? obsDate : latest;
+          }, new Date(0))
+        : null;
 
     // Calculate overall confidence score (0-100)
     let overallConfidence = 50; // Base score
@@ -1080,7 +1376,7 @@ class RouteAnalysisService {
     const validationBonus = Math.min(validationCount * 2, 25);
     overallConfidence += validationBonus;
 
-    // Verification status contribution (0-25 points)  
+    // Verification status contribution (0-25 points)
     if (verificationStatus === "verified") {
       overallConfidence += 25;
     } else if (verificationStatus === "estimated") {
@@ -1120,23 +1416,22 @@ class RouteAnalysisService {
     try {
       // Calculate feedback accuracy by comparing predicted vs actual ratings
       const feedbackAccuracy = this.calculateFeedbackAccuracy(feedback);
-      
+
       // Update route-specific learning weights
       await this.updateRouteSpecificWeights(feedback, feedbackAccuracy);
-      
+
       // Update device-specific adjustments
       await this.updateDeviceSpecificAdjustments(feedback);
-      
+
       // Update obstacle severity calibration
       await this.updateObstacleSeverityCalibration(feedback);
-      
+
       console.log("✅ Feedback integrated successfully:", {
         routeType: feedback.routeType,
         deviceType: feedback.userProfile.type,
         accuracy: feedbackAccuracy.overallAccuracy,
-        confidenceBoost: feedback.confidenceContribution
+        confidenceBoost: feedback.confidenceContribution,
       });
-
     } catch (error) {
       console.error("❌ Failed to integrate feedback into AHP:", error);
     }
@@ -1152,49 +1447,64 @@ class RouteAnalysisService {
     comfortAccuracy: number;
   } {
     // Get the route that was taken for comparison
-    const routeScore = feedback.routeType === "fastest" 
-      ? feedback.routeStartLocation // In real implementation, we'd look up the actual route scores
-      : feedback.routeEndLocation;
+    const routeScore =
+      feedback.routeType === "fastest"
+        ? feedback.routeStartLocation // In real implementation, we'd look up the actual route scores
+        : feedback.routeEndLocation;
 
     // For demonstration, we'll simulate the predicted scores
     // In real implementation, these would come from the route that was selected
     const predictedScores = {
       traversability: 75, // This would come from the actual route's accessibility score
       safety: 80,
-      comfort: 70
+      comfort: 70,
     };
 
     // Convert user ratings (1-5) to 0-100 scale for comparison
     const actualScores = {
       traversability: (feedback.traversabilityRating - 1) * 25, // 1->0, 5->100
       safety: (feedback.safetyRating - 1) * 25,
-      comfort: (feedback.comfortRating - 1) * 25
+      comfort: (feedback.comfortRating - 1) * 25,
     };
 
     // Calculate accuracy (how close our predictions were)
-    const traversabilityAccuracy = Math.max(0, 100 - Math.abs(predictedScores.traversability - actualScores.traversability));
-    const safetyAccuracy = Math.max(0, 100 - Math.abs(predictedScores.safety - actualScores.safety));
-    const comfortAccuracy = Math.max(0, 100 - Math.abs(predictedScores.comfort - actualScores.comfort));
-    
-    const overallAccuracy = (traversabilityAccuracy + safetyAccuracy + comfortAccuracy) / 3;
+    const traversabilityAccuracy = Math.max(
+      0,
+      100 -
+        Math.abs(predictedScores.traversability - actualScores.traversability)
+    );
+    const safetyAccuracy = Math.max(
+      0,
+      100 - Math.abs(predictedScores.safety - actualScores.safety)
+    );
+    const comfortAccuracy = Math.max(
+      0,
+      100 - Math.abs(predictedScores.comfort - actualScores.comfort)
+    );
+
+    const overallAccuracy =
+      (traversabilityAccuracy + safetyAccuracy + comfortAccuracy) / 3;
 
     return {
       overallAccuracy,
       traversabilityAccuracy,
       safetyAccuracy,
-      comfortAccuracy
+      comfortAccuracy,
     };
   }
 
   /**
    * Update route-specific learning weights based on feedback
    */
-  private async updateRouteSpecificWeights(feedback: RouteFeedback, accuracy: any): Promise<void> {
+  private async updateRouteSpecificWeights(
+    feedback: RouteFeedback,
+    accuracy: any
+  ): Promise<void> {
     // This would update the AHP weights based on which factors users found most important
     const weightAdjustments = {
       traversability: feedback.traversabilityRating >= 4 ? 0.05 : -0.02,
       safety: feedback.safetyRating >= 4 ? 0.03 : -0.01,
-      comfort: feedback.comfortRating >= 4 ? 0.02 : -0.01
+      comfort: feedback.comfortRating >= 4 ? 0.02 : -0.01,
     };
 
     console.log("📊 Updating AHP weights:", weightAdjustments);
@@ -1208,17 +1518,24 @@ class RouteAnalysisService {
   /**
    * Update device-specific scoring adjustments
    */
-  private async updateDeviceSpecificAdjustments(feedback: RouteFeedback): Promise<void> {
+  private async updateDeviceSpecificAdjustments(
+    feedback: RouteFeedback
+  ): Promise<void> {
     const deviceType = feedback.userProfile.type;
-    const avgRating = (feedback.traversabilityRating + feedback.safetyRating + feedback.comfortRating) / 3;
-    
+    const avgRating =
+      (feedback.traversabilityRating +
+        feedback.safetyRating +
+        feedback.comfortRating) /
+      3;
+
     // Learn device-specific preferences
     const deviceLearning = {
       deviceType,
       routeType: feedback.routeType,
-      preferenceStrength: avgRating >= 4 ? "positive" : avgRating <= 2 ? "negative" : "neutral",
+      preferenceStrength:
+        avgRating >= 4 ? "positive" : avgRating <= 2 ? "negative" : "neutral",
       specificChallenges: feedback.deviceSpecificInsights.specificChallenges,
-      adaptationsUsed: feedback.deviceSpecificInsights.adaptationsUsed
+      adaptationsUsed: feedback.deviceSpecificInsights.adaptationsUsed,
     };
 
     console.log("🦽 Device-specific learning:", deviceLearning);
@@ -1229,12 +1546,15 @@ class RouteAnalysisService {
   /**
    * Update obstacle severity calibration based on real encounters
    */
-  private async updateObstacleSeverityCalibration(feedback: RouteFeedback): Promise<void> {
+  private async updateObstacleSeverityCalibration(
+    feedback: RouteFeedback
+  ): Promise<void> {
     if (feedback.obstaclesEncountered.length === 0) return;
 
     // Learn from actual vs predicted obstacle impact
-    feedback.obstaclesEncountered.forEach(encountered => {
-      const severityAccuracy = encountered.reportedSeverity === encountered.actualSeverity;
+    feedback.obstaclesEncountered.forEach((encountered) => {
+      const severityAccuracy =
+        encountered.reportedSeverity === encountered.actualSeverity;
       const impactLevel = encountered.userImpact;
 
       console.log("🚧 Obstacle learning:", {
@@ -1243,7 +1563,7 @@ class RouteAnalysisService {
         actual: encountered.actualSeverity,
         impact: impactLevel,
         accuracyRating: encountered.accuracyRating,
-        stillPresent: encountered.stillPresent
+        stillPresent: encountered.stillPresent,
       });
 
       // This would update obstacle severity weights and impact predictions
@@ -1259,29 +1579,32 @@ class RouteAnalysisService {
     baseScore: AccessibilityScore
   ): Promise<AccessibilityScore> {
     // This method would apply all the learned adjustments to improve accuracy
-    
+
     // For demonstration, we'll apply a simple learning bonus
     let learningAdjustment = 0;
-    
+
     // Simulate device-specific learning
     const deviceBonuses = {
       wheelchair: 2,
       walker: 1.5,
       crutches: 1,
       cane: 0.5,
-      none: 0
+      none: 0,
     };
-    
+
     learningAdjustment += deviceBonuses[userProfile.type] || 0;
-    
+
     // Apply community validation bonus
-    const communityValidatedObstacles = obstacles.filter(obs => obs.verified).length;
+    const communityValidatedObstacles = obstacles.filter(
+      (obs) => obs.verified
+    ).length;
     learningAdjustment += Math.min(communityValidatedObstacles * 0.5, 5);
 
     return {
       ...baseScore,
       overall: Math.min(100, baseScore.overall + learningAdjustment),
-      userSpecificAdjustment: (baseScore.userSpecificAdjustment || 0) + learningAdjustment
+      userSpecificAdjustment:
+        (baseScore.userSpecificAdjustment || 0) + learningAdjustment,
     };
   }
 
