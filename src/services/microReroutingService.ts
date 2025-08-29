@@ -714,8 +714,13 @@ class MicroReroutingService {
    * Get max search radius based on user profile
    */
   private getMaxSearchRadius(userProfile: UserMobilityProfile): number {
+    // Use maxWalkingDistance if available, otherwise use device defaults
+    if (userProfile.maxWalkingDistance) {
+      return Math.min(userProfile.maxWalkingDistance * 0.2, 150); // 20% of max walking distance
+    }
+
     const radiusMap = {
-      wheelchair: 80, // Smaller radius for wheelchair users
+      wheelchair: 80,
       walker: 100,
       crutches: 90,
       cane: 120,

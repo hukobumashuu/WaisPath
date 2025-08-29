@@ -1,13 +1,17 @@
 // src/hooks/useRouteCalculation.ts
-// SIMPLIFIED: Uses monolith route calculation logic without enhanced services
-// Direct route calculation matching the working micro-reroute branch
+// FINAL FIX: Corrected method names and proper typing
 
 import { useState, useCallback } from "react";
 import { Alert, Vibration } from "react-native";
 import MapView from "react-native-maps";
-import { UserLocation, UserMobilityProfile } from "../types";
+import {
+  UserLocation,
+  UserMobilityProfile,
+  AccessibilityObstacle,
+} from "../types";
 import { routeAnalysisService } from "../services/routeAnalysisService";
 import { sidewalkRouteAnalysisService } from "../services/sidewalkRouteAnalysisService";
+import { routeObstacleService } from "../services/routeObstacleService";
 import { decodePolyline } from "../utils/mapUtils";
 import { SAMPLE_POIS } from "../constants/navigationConstants";
 
@@ -16,6 +20,8 @@ interface RouteCalculationState {
   isCalculating: boolean;
   selectedDestination: UserLocation | null;
   destinationName: string;
+  routeObstacles: AccessibilityObstacle[];
+  nearbyObstacles: AccessibilityObstacle[];
 }
 
 interface UseRouteCalculationOptions {
@@ -36,9 +42,10 @@ export function useRouteCalculation({
     isCalculating: false,
     selectedDestination: null,
     destinationName: "",
+    routeObstacles: [],
+    nearbyObstacles: [],
   });
 
-  // SIMPLIFIED: Direct route calculation matching working monolith version
   const calculateUnifiedRoutes = useCallback(
     async (poi?: any) => {
       if (!location) {
@@ -67,196 +74,175 @@ export function useRouteCalculation({
         return;
       }
 
-      // FIXED: Clear previous state and set new destination
-      setState({
-        routeAnalysis: null, // Clear previous routes
+      setState((prev) => ({
+        ...prev,
         isCalculating: true,
         selectedDestination: destLocation,
         destinationName: destName,
-      });
+        routeObstacles: [],
+        nearbyObstacles: [],
+      }));
 
       try {
         console.log(
-          `🗺️ Calculating unified routes from current location to ${destName}...`
+          "🗺️ Calculating unified routes from current location to",
+          destName + "..."
         );
 
-        // DIRECT: Call services same as working monolith version
-        const [multiRouteResult, sidewalkResult] = await Promise.all([
-          routeAnalysisService.analyzeRoutes(location, destLocation, profile),
-          sidewalkRouteAnalysisService.analyzeSidewalkRoutes(
-            location,
-            destLocation,
-            profile
-          ),
-        ]);
+        // Use the correct method name from RouteAnalysisService
+        const analysis = await routeAnalysisService.analyzeRoutes(
+          location,
+          destLocation,
+          profile
+        );
 
-        // DIRECT: Simple fallback handling
-        const fastestRoute = multiRouteResult?.fastestRoute || {
-          polyline: [location, destLocation],
-          duration: 600,
-          distance: 1000,
-          accessibilityScore: { overall: 70, grade: "B" },
-        };
+        // Vibration feedback on completion
+        Vibration.vibrate([100, 50, 100]);
 
-        const accessibleRoute =
-          multiRouteResult?.accessibleRoute || fastestRoute;
-
-        // DIRECT: Build unified analysis same as monolith
-        const unifiedAnalysis = {
-          fastestRoute: {
-            // Handle both old and new polyline formats
-            polyline: fastestRoute.googleRoute?.polyline
-              ? Array.isArray(fastestRoute.googleRoute.polyline)
-                ? fastestRoute.googleRoute.polyline
-                : decodePolyline(fastestRoute.googleRoute.polyline)
-              : [location, destLocation],
-            duration: fastestRoute.googleRoute?.duration || 600,
-            distance: fastestRoute.googleRoute?.distance || 1000,
-            grade: fastestRoute.accessibilityScore?.grade || "B",
-          },
-          accessibleRoute: {
-            polyline: accessibleRoute.googleRoute?.polyline
-              ? Array.isArray(accessibleRoute.googleRoute.polyline)
-                ? accessibleRoute.googleRoute.polyline
-                : decodePolyline(accessibleRoute.googleRoute.polyline)
-              : [location, destLocation],
-            duration: accessibleRoute.googleRoute?.duration || 600,
-            distance: accessibleRoute.googleRoute?.distance || 1000,
-            grade: accessibleRoute.accessibilityScore?.grade || "A",
-          },
-          comparison: {
-            timeDifference:
-              (accessibleRoute.googleRoute?.duration || 600) -
-              (fastestRoute.googleRoute?.duration || 600),
-            gradeDifference: 0,
-            recommendation: `Accessible route is ${Math.round(
-              ((accessibleRoute.googleRoute?.duration || 600) -
-                (fastestRoute.googleRoute?.duration || 600)) /
-                60
-            )} minutes longer but better accessibility grade`,
-          },
-        };
-
-        // Update state with results
-        setState({
-          routeAnalysis: unifiedAnalysis,
-          isCalculating: false,
-          selectedDestination: destLocation,
-          destinationName: destName,
-        });
-
-        // Auto-fit map same as monolith
-        if (mapRef.current) {
-          const allCoords = [
-            location,
-            destLocation,
-            ...(unifiedAnalysis.fastestRoute.polyline || []),
-            ...(unifiedAnalysis.accessibleRoute.polyline || []),
-          ].filter((coord) => coord.latitude && coord.longitude);
-
-          if (allCoords.length > 0) {
-            mapRef.current.fitToCoordinates(allCoords, {
-              edgePadding: { top: 100, right: 50, bottom: 200, left: 50 },
-              animated: true,
-            });
-          }
+        if (!analysis || !analysis.fastestRoute || !analysis.accessibleRoute) {
+          Alert.alert(
+            "Route Error",
+            "Could not find suitable routes. Please try a different destination."
+          );
+          setState((prev) => ({
+            ...prev,
+            isCalculating: false,
+            routeObstacles: [],
+            nearbyObstacles: [],
+          }));
+          return;
         }
 
-        Vibration.vibrate(100);
-        console.log("✅ Unified route calculation complete!");
-      } catch (error: any) {
-        console.error("❌ Route calculation failed:", error);
-        Alert.alert(
-          "Route Error",
-          `Could not calculate routes: ${error.message}`
-        );
+        // Extract obstacles from the analysis
+        const routeObstacles: AccessibilityObstacle[] = [
+          ...(analysis.fastestRoute.obstacles || []),
+          ...(analysis.accessibleRoute.obstacles || []),
+        ];
+
+        // Get additional nearby obstacles for context
+        let nearbyObstacles: AccessibilityObstacle[] = [];
+        try {
+          // Build polylines from google routes
+          const fastestPolyline =
+            analysis.fastestRoute.googleRoute?.polyline || [];
+          const accessiblePolyline =
+            analysis.accessibleRoute.googleRoute?.polyline || [];
+
+          nearbyObstacles = await routeObstacleService.getRelevantObstacles(
+            location,
+            {
+              fastestRoute: { polyline: fastestPolyline },
+              accessibleRoute: { polyline: accessiblePolyline },
+            }
+          );
+        } catch (obstacleError) {
+          console.warn("Could not load nearby obstacles:", obstacleError);
+        }
+
+        // Convert the analysis to the format expected by the UI
+        const unifiedAnalysis = {
+          fastestRoute: {
+            polyline: Array.isArray(analysis.fastestRoute.googleRoute?.polyline)
+              ? analysis.fastestRoute.googleRoute.polyline
+              : typeof analysis.fastestRoute.googleRoute?.polyline === "string"
+              ? decodePolyline(analysis.fastestRoute.googleRoute.polyline)
+              : [location, destLocation],
+            duration: analysis.fastestRoute.googleRoute?.duration || 600,
+            distance: analysis.fastestRoute.googleRoute?.distance || 1000,
+            grade: analysis.fastestRoute.accessibilityScore?.grade || "B",
+            obstacles: analysis.fastestRoute.obstacles || [],
+          },
+          accessibleRoute: {
+            polyline: Array.isArray(
+              analysis.accessibleRoute.googleRoute?.polyline
+            )
+              ? analysis.accessibleRoute.googleRoute.polyline
+              : typeof analysis.accessibleRoute.googleRoute?.polyline ===
+                "string"
+              ? decodePolyline(analysis.accessibleRoute.googleRoute.polyline)
+              : [location, destLocation],
+            duration: analysis.accessibleRoute.googleRoute?.duration || 600,
+            distance: analysis.accessibleRoute.googleRoute?.distance || 1000,
+            grade: analysis.accessibleRoute.accessibilityScore?.grade || "A",
+            obstacles: analysis.accessibleRoute.obstacles || [],
+          },
+          comparison: analysis.routeComparison || {
+            timeDifference: 300,
+            distanceDifference: 500,
+            accessibilityImprovement: 20,
+            recommendation: "Use accessible route for better accessibility",
+          },
+        };
+
+        // Center map on the route
+        if (
+          mapRef.current &&
+          unifiedAnalysis.accessibleRoute.polyline?.length > 0
+        ) {
+          const polyline = unifiedAnalysis.accessibleRoute.polyline;
+          const coordinates = polyline.map((point: UserLocation) => ({
+            latitude: point.latitude,
+            longitude: point.longitude,
+          }));
+
+          mapRef.current.fitToCoordinates(coordinates, {
+            edgePadding: { top: 100, right: 50, bottom: 300, left: 50 },
+            animated: true,
+          });
+        }
 
         setState((prev) => ({
           ...prev,
+          routeAnalysis: unifiedAnalysis,
+          routeObstacles: routeObstacles,
+          nearbyObstacles: nearbyObstacles,
+          selectedDestination: destLocation,
+          destinationName: destName,
           isCalculating: false,
+        }));
+
+        console.log("✅ Route calculation complete!");
+      } catch (error) {
+        console.error("❌ Error calculating routes:", error);
+        Alert.alert(
+          "Route Calculation Failed",
+          "Unable to calculate routes. Please check your connection and try again."
+        );
+        setState((prev) => ({
+          ...prev,
+          isCalculating: false,
+          routeObstacles: [],
+          nearbyObstacles: [],
         }));
       }
     },
-    [location, profile, mapRef, destination]
+    [location, profile, destination, mapRef]
   );
 
-  // POI handler
   const handlePOIPress = useCallback(
     (poi: any) => {
-      console.log(`🏢 Selected POI: ${poi.name} - Auto-calculating routes...`);
-
-      if (mapRef.current) {
-        mapRef.current.animateToRegion(
-          {
-            latitude: poi.lat,
-            longitude: poi.lng,
-            latitudeDelta: 0.01,
-            longitudeDelta: 0.01,
-          },
-          1000
-        );
-      }
-
+      console.log("🏢 Selected POI:", poi.name, "- Auto-calculating routes...");
       calculateUnifiedRoutes(poi);
     },
-    [calculateUnifiedRoutes, mapRef]
+    [calculateUnifiedRoutes]
   );
 
-  // Reset routes
-  const resetRoutes = useCallback(() => {
-    setState({
-      routeAnalysis: null,
-      isCalculating: false,
-      selectedDestination: null,
-      destinationName: "",
-    });
-  }, []);
-
-  // Route metrics
-  const getRouteMetrics = useCallback(() => {
-    if (!state.routeAnalysis) return null;
-
-    const { fastestRoute, accessibleRoute } = state.routeAnalysis;
-
-    return {
-      fastest: {
-        time: Math.round((fastestRoute.duration || 600) / 60),
-        distance: ((fastestRoute.distance || 1000) / 1000).toFixed(1),
-        grade: fastestRoute.grade || "B",
-      },
-      accessible: {
-        time: Math.round((accessibleRoute.duration || 600) / 60),
-        distance: ((accessibleRoute.distance || 1000) / 1000).toFixed(1),
-        grade: accessibleRoute.grade || "A",
-      },
-      timeSavings: Math.round(
-        (fastestRoute.duration - accessibleRoute.duration) / 60
-      ),
-    };
-  }, [state.routeAnalysis]);
-
-  // Update route analysis for detour system
-  const updateRouteAnalysis = useCallback((updater: (prev: any) => any) => {
+  const updateRouteAnalysis = useCallback((newAnalysis: any) => {
     setState((prev) => ({
       ...prev,
-      routeAnalysis: updater(prev.routeAnalysis),
+      routeAnalysis: newAnalysis,
     }));
   }, []);
 
   return {
-    // State
     routeAnalysis: state.routeAnalysis,
     isCalculating: state.isCalculating,
     selectedDestination: state.selectedDestination,
     destinationName: state.destinationName,
-
-    // Actions
+    routeObstacles: state.routeObstacles,
+    nearbyObstacles: state.nearbyObstacles,
     calculateUnifiedRoutes,
     handlePOIPress,
-    resetRoutes,
     updateRouteAnalysis,
-
-    // Computed values
-    routeMetrics: getRouteMetrics(),
   };
 }

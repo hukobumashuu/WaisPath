@@ -1,6 +1,5 @@
 // src/screens/NavigationScreen.tsx
-// SIMPLIFIED: NavigationScreen with monolith route calculation logic
-// Keeps micro-rerouting but simplifies the core routing for consistency
+// COMPLETE FILE with debug logging and duplicate key fix
 
 import React, {
   useState,
@@ -79,12 +78,41 @@ export default function NavigationScreen() {
   const mapRef = useRef<MapView | null>(null);
   const [destination, setDestination] = useState("");
 
+  // Helper function for obstacle route type detection
+  function getObstacleRouteType(
+    obstacle: AccessibilityObstacle,
+    routeAnalysis: any
+  ): "fastest" | "accessible" | "both" | undefined {
+    if (!routeAnalysis) return undefined;
+
+    const onFastest = routeAnalysis.fastestRoute?.obstacles?.some(
+      (obs: any) => obs.id === obstacle.id
+    );
+    const onAccessible = routeAnalysis.accessibleRoute?.obstacles?.some(
+      (obs: any) => obs.id === obstacle.id
+    );
+
+    if (onFastest && onAccessible) return "both";
+    if (onFastest) return "fastest";
+    if (onAccessible) return "accessible";
+    return undefined;
+  }
+
+  // Helper function for deduplication by ID
+  const dedupeById = (arr: AccessibilityObstacle[] = []) => {
+    const map = new Map<string, AccessibilityObstacle>();
+    arr.forEach((o) => map.set(String(o.id), o));
+    return Array.from(map.values());
+  };
+
   // SIMPLIFIED: Use updated hook with monolith logic
   const {
     routeAnalysis,
     isCalculating,
     selectedDestination,
     destinationName,
+    routeObstacles,
+    nearbyObstacles,
     calculateUnifiedRoutes,
     handlePOIPress,
     updateRouteAnalysis,
@@ -100,9 +128,6 @@ export default function NavigationScreen() {
   const [currentValidationPrompt, setCurrentValidationPrompt] =
     useState<ValidationPromptType | null>(null);
   const [showSidewalks, setShowSidewalks] = useState(true);
-  const [nearbyObstacles, setNearbyObstacles] = useState<
-    AccessibilityObstacle[]
-  >([]);
 
   // Detour state
   const [showDetourModal, setShowDetourModal] = useState(false);
@@ -296,7 +321,6 @@ export default function NavigationScreen() {
           text: "Yes, Return",
           onPress: () => {
             setIsUsingDetour(false);
-            // Could recalculate routes here if needed
             console.log("🔄 Returned to original route");
           },
         },
@@ -372,7 +396,6 @@ export default function NavigationScreen() {
 
   useEffect(() => {
     if (destinationName && proximityState.isDetecting) {
-      // Reset proximity detection service internal state
       proximityDetectionService.resetDetectionState();
       console.log(
         "🔄 Forced proximity detection reset for new destination:",
@@ -390,7 +413,7 @@ export default function NavigationScreen() {
         location.longitude,
         1
       );
-      setNearbyObstacles(obstacles);
+      console.log(`Loaded ${obstacles.length} area obstacles`);
     } catch (error) {
       console.error("Failed to load obstacles:", error);
     }
@@ -406,6 +429,7 @@ export default function NavigationScreen() {
       );
 
       if (prompts.length > 0) {
+        console.log(`🔍 Found ${prompts.length} validation prompts`);
         setCurrentValidationPrompt(prompts[0]);
         setShowValidationPrompt(true);
       }
@@ -425,6 +449,79 @@ export default function NavigationScreen() {
           : routeAnalysis?.accessibleRoute.grade
       }\n\nProximity detection enabled.`,
       [{ text: "Let's Go!" }]
+    );
+  };
+
+  // DEBUG: Prepare obstacle rendering with deduplication and logging
+  const renderObstacles = () => {
+    console.log("=== OBSTACLE RENDERING DEBUG ===");
+    console.log(
+      "routeObstacles ids:",
+      (routeObstacles || []).map((o) => String(o.id))
+    );
+    console.log(
+      "nearbyObstacles ids:",
+      (nearbyObstacles || []).map((o) => String(o.id))
+    );
+
+    const combined = [
+      ...(routeObstacles || [])
+        .map((o) => String(o.id))
+        .map((id) => `route-${id}`),
+      ...(nearbyObstacles || [])
+        .map((o) => String(o.id))
+        .map((id) => `nearby-${id}`),
+    ];
+    const duplicates = combined.filter((x, i, a) => a.indexOf(x) !== i);
+    console.log("duplicate keys (if any):", duplicates);
+
+    // Robust deduplication
+    const uniqueRouteObstacles = dedupeById(routeObstacles);
+    const routeIds = new Set(
+      (uniqueRouteObstacles || []).map((o) => String(o.id))
+    );
+
+    console.log("Filtering nearby obstacles:", {
+      routeObstacles: uniqueRouteObstacles?.length || 0,
+      nearbyObstacles: nearbyObstacles?.length || 0,
+      duplicateIds: nearbyObstacles
+        ?.filter((obs) => routeIds.has(String(obs.id)))
+        .map((obs) => obs.id),
+    });
+    console.log("=== END OBSTACLE DEBUG ===");
+
+    return (
+      <>
+        {/* ROUTE-SPECIFIC OBSTACLES */}
+        {uniqueRouteObstacles &&
+          uniqueRouteObstacles.map((obstacle) => (
+            <EnhancedObstacleMarker
+              key={`route-${obstacle.id}`}
+              obstacle={obstacle}
+              isOnRoute={true}
+              routeType={getObstacleRouteType(obstacle, routeAnalysis)}
+              onPress={() => {
+                console.log("Route obstacle pressed:", obstacle.type);
+              }}
+            />
+          ))}
+
+        {/* NEARBY OBSTACLES with robust filtering */}
+        {nearbyObstacles &&
+          nearbyObstacles
+            .filter((obstacle) => !routeIds.has(String(obstacle.id)))
+            .map((obstacle, index) => (
+              <EnhancedObstacleMarker
+                key={`nearby-${obstacle.id}-${index}`}
+                obstacle={obstacle}
+                isOnRoute={false}
+                opacity={0.6}
+                onPress={() => {
+                  console.log("Nearby obstacle pressed:", obstacle.type);
+                }}
+              />
+            ))}
+      </>
     );
   };
 
@@ -494,14 +591,8 @@ export default function NavigationScreen() {
           </Marker>
         )}
 
-        {/* OBSTACLE MARKERS */}
-        {nearbyObstacles.map((obstacle) => (
-          <EnhancedObstacleMarker
-            key={obstacle.id}
-            obstacle={obstacle}
-            onPress={() => console.log("Obstacle pressed:", obstacle.type)}
-          />
-        ))}
+        {/* OBSTACLE MARKERS with debug and deduplication */}
+        {renderObstacles()}
 
         {/* POI MARKERS */}
         {SAMPLE_POIS.map((poi) => (
@@ -530,7 +621,6 @@ export default function NavigationScreen() {
         {/* ROUTE VISUALIZATION */}
         {routeAnalysis && (
           <>
-            {/* FASTEST ROUTE */}
             {routeAnalysis.fastestRoute.polyline && (
               <Polyline
                 coordinates={routeAnalysis.fastestRoute.polyline}
@@ -541,7 +631,6 @@ export default function NavigationScreen() {
               />
             )}
 
-            {/* ACCESSIBLE ROUTE */}
             {routeAnalysis.accessibleRoute.polyline && (
               <Polyline
                 coordinates={routeAnalysis.accessibleRoute.polyline}
@@ -555,7 +644,7 @@ export default function NavigationScreen() {
         )}
       </MapView>
 
-      {/* 🔥 NAVIGATION CONTROLS - EXTRACTED COMPONENT */}
+      {/* NAVIGATION CONTROLS */}
       <NavigationControls
         destination={destination}
         onDestinationChange={setDestination}

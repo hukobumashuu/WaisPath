@@ -63,7 +63,7 @@ export interface UserMobilityProfile {
 
   // Filipino context preferences
   preferShade: boolean; // Important in Philippine heat
-  maxWalkingDistance: number; // meters before rest needed
+  maxWalkingDistance?: number; // meters before rest needed
 
   // Profile metadata
   createdAt?: Date;

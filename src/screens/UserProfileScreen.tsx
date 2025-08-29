@@ -1,4 +1,4 @@
-// src/screens/UserProfileScreen.tsx
+// src/screens/UserProfileScreen.tsx - FIXED VERSION
 import React, { useState } from "react";
 import { View, Text, TouchableOpacity, ScrollView, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -29,6 +29,7 @@ export default function UserProfileScreen({
     stairPreference: "avoid" as "avoid" | "ok",
     shadePreference: true,
     restNeeds: false,
+    walkingDistance: "default" as "short" | "default" | "long", // NEW: Walking distance preference
   });
 
   // Mobility device options with Filipino context
@@ -39,6 +40,7 @@ export default function UserProfileScreen({
       title: "Wheelchair",
       subtitle: "Manual or electric wheelchair",
       description: "Needs ramps, wide paths, smooth surfaces",
+      defaultDistance: "800m typical range",
     },
     {
       type: "walker" as const,
@@ -46,6 +48,7 @@ export default function UserProfileScreen({
       title: "Walker/Rollator",
       subtitle: "Walking frame with wheels",
       description: "Needs level surfaces, gentle slopes",
+      defaultDistance: "400m comfortable range",
     },
     {
       type: "cane" as const,
@@ -53,6 +56,7 @@ export default function UserProfileScreen({
       title: "Walking Cane/Stick",
       subtitle: "Single or quad cane",
       description: "Needs stable surfaces, can handle stairs",
+      defaultDistance: "600m typical range",
     },
     {
       type: "crutches" as const,
@@ -60,6 +64,7 @@ export default function UserProfileScreen({
       title: "Crutches",
       subtitle: "Underarm or forearm crutches",
       description: "Needs space to maneuver, can handle stairs",
+      defaultDistance: "300m comfortable range",
     },
     {
       type: "none" as const,
@@ -67,6 +72,7 @@ export default function UserProfileScreen({
       title: "Walking Difficulties",
       subtitle: "No mobility aid but limited walking",
       description: "May need shorter routes, frequent rests",
+      defaultDistance: "1000m+ possible",
     },
   ];
 
@@ -75,6 +81,7 @@ export default function UserProfileScreen({
     setCurrentStep(2);
   };
 
+  // FIX: Enhanced handleComplete with proper maxWalkingDistance logic
   const handleComplete = () => {
     if (!selectedDevice) {
       Alert.alert(
@@ -85,7 +92,7 @@ export default function UserProfileScreen({
     }
 
     // Convert UI preferences to profile settings
-    const profilePreferences = {
+    const profilePreferences: Partial<UserMobilityProfile> = {
       maxRampSlope:
         preferences.rampTolerance === "conservative"
           ? 5
@@ -94,14 +101,51 @@ export default function UserProfileScreen({
           : 15,
       avoidStairs: preferences.stairPreference === "avoid",
       preferShade: preferences.shadePreference,
-      maxWalkingDistance: preferences.restNeeds ? 300 : undefined, // Override default if frequent rests needed
     };
+
+    // FIX: Handle maxWalkingDistance based on user preferences
+    if (preferences.restNeeds) {
+      // User needs frequent rests - use shorter distance
+      profilePreferences.maxWalkingDistance = 200;
+    } else if (preferences.walkingDistance !== "default") {
+      // User specified a preference - override device defaults
+      const distanceMultipliers = {
+        short: 0.5, // 50% of device default
+        long: 1.5, // 150% of device default
+      };
+
+      // Get the device default first
+      const deviceDefaults = {
+        wheelchair: 800,
+        walker: 400,
+        cane: 600,
+        crutches: 300,
+        none: 1000,
+      };
+
+      const baseDistance = deviceDefaults[selectedDevice];
+      const multiplier = distanceMultipliers[preferences.walkingDistance];
+
+      profilePreferences.maxWalkingDistance = Math.round(
+        baseDistance * multiplier
+      );
+    }
+    // If "default" or no preference, don't set maxWalkingDistance - let createProfileWithDefaults handle it
 
     // Create profile with smart defaults + user preferences
     const newProfile = createProfileWithDefaults(
       selectedDevice,
       profilePreferences
     );
+
+    // FIX: Debug logging to verify profile is complete
+    console.log("🔍 Profile created with:", {
+      type: newProfile.type,
+      maxWalkingDistance: newProfile.maxWalkingDistance,
+      maxRampSlope: newProfile.maxRampSlope,
+      avoidStairs: newProfile.avoidStairs,
+      preferShade: newProfile.preferShade,
+    });
 
     setProfile(newProfile);
     completeOnboarding();
@@ -169,8 +213,12 @@ export default function UserProfileScreen({
                 <Text className="text-sm text-gray-600 mb-1">
                   {device.subtitle}
                 </Text>
-                <Text className="text-xs text-accessible-gray">
+                <Text className="text-xs text-accessible-gray mb-1">
                   {device.description}
+                </Text>
+                {/* FIX: Show default walking distance for each device */}
+                <Text className="text-xs text-blue-600 font-medium">
+                  {device.defaultDistance}
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#6B7280" />
@@ -311,6 +359,63 @@ export default function UserProfileScreen({
           </View>
         </View>
 
+        {/* NEW: Walking Distance Preference */}
+        <View className="mb-8">
+          <Text className="text-lg font-semibold text-gray-900 mb-3">
+            How far can you comfortably walk?
+          </Text>
+          <View className="space-y-3">
+            {[
+              {
+                key: "short",
+                label: "Shorter distances preferred",
+                desc: "I prefer shorter routes with rest stops",
+              },
+              {
+                key: "default",
+                label: `Standard for ${selectedDevice || "your device"}`,
+                desc: "Use recommended distance for my mobility type",
+              },
+              {
+                key: "long",
+                label: "I can walk longer distances",
+                desc: "Longer routes are fine if more accessible",
+              },
+            ].map((option) => (
+              <TouchableOpacity
+                key={option.key}
+                className={`p-4 rounded-lg border ${
+                  preferences.walkingDistance === option.key
+                    ? "border-accessible-blue bg-blue-50"
+                    : "border-gray-200 bg-white"
+                }`}
+                onPress={() =>
+                  setPreferences((prev) => ({
+                    ...prev,
+                    walkingDistance: option.key as any,
+                  }))
+                }
+              >
+                <View className="flex-row items-center">
+                  <View
+                    className={`w-4 h-4 rounded-full border-2 mr-3 ${
+                      preferences.walkingDistance === option.key
+                        ? "border-accessible-blue bg-accessible-blue"
+                        : "border-gray-300"
+                    }`}
+                  />
+                  <View className="flex-1">
+                    <Text className="font-medium text-gray-900">
+                      {option.label}
+                    </Text>
+                    <Text className="text-sm text-gray-600">{option.desc}</Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
         {/* Philippine Context Preferences */}
         <View className="mb-8">
           <Text className="text-lg font-semibold text-gray-900 mb-3">
@@ -380,7 +485,7 @@ export default function UserProfileScreen({
                 I need frequent rest stops
               </Text>
               <Text className="text-sm text-gray-600">
-                Find shorter routes with benches or rest areas
+                Override distance settings for very short routes (200m max)
               </Text>
             </View>
           </TouchableOpacity>
@@ -404,11 +509,11 @@ export default function UserProfileScreen({
 
   return (
     <View className="flex-1 bg-gray-50">
-      <View 
-        className="flex-1 px-6" 
-        style={{ 
+      <View
+        className="flex-1 px-6"
+        style={{
           paddingTop: Math.max(insets.top, 12) + 12,
-          paddingBottom: Math.max(insets.bottom, 12) + 12
+          paddingBottom: Math.max(insets.bottom, 12) + 12,
         }}
       >
         {currentStep === 1 ? renderStep1() : renderStep2()}

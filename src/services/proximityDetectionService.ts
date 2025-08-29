@@ -331,81 +331,10 @@ export class ProximityDetectionService {
     obstacle: AccessibilityObstacle,
     userProfile: UserMobilityProfile
   ): boolean {
-    const relevanceMatrix = {
-      wheelchair: {
-        stairs_no_ramp: true,
-        narrow_passage: true,
-        parked_vehicles: true,
-        broken_pavement: true,
-        steep_slope: true,
-        construction: true,
-        flooding: true,
-        vendor_blocking: true,
-        electrical_post: true,
-        tree_roots: true,
-        no_sidewalk: true,
-        other: false,
-      },
-      walker: {
-        stairs_no_ramp: true,
-        narrow_passage: false,
-        parked_vehicles: true,
-        broken_pavement: true,
-        steep_slope: true,
-        construction: true,
-        flooding: true,
-        vendor_blocking: true,
-        electrical_post: false,
-        tree_roots: true,
-        no_sidewalk: true,
-        other: false,
-      },
-      crutches: {
-        stairs_no_ramp: true,
-        narrow_passage: true,
-        parked_vehicles: true,
-        broken_pavement: true,
-        steep_slope: true,
-        construction: true,
-        flooding: true,
-        vendor_blocking: true,
-        electrical_post: false,
-        tree_roots: true,
-        no_sidewalk: true,
-        other: false,
-      },
-      cane: {
-        stairs_no_ramp: true,
-        narrow_passage: false,
-        parked_vehicles: false,
-        broken_pavement: true,
-        steep_slope: true,
-        construction: true,
-        flooding: true,
-        vendor_blocking: false,
-        electrical_post: false,
-        tree_roots: true,
-        no_sidewalk: false,
-        other: false,
-      },
-      none: {
-        stairs_no_ramp: false,
-        narrow_passage: false,
-        parked_vehicles: false,
-        broken_pavement: true,
-        steep_slope: false,
-        construction: true,
-        flooding: true,
-        vendor_blocking: false,
-        electrical_post: false,
-        tree_roots: false,
-        no_sidewalk: false,
-        other: false,
-      },
-    };
-
-    const userRelevance = relevanceMatrix[userProfile.type];
-    return userRelevance ? userRelevance[obstacle.type] || false : false;
+    // SIMPLIFIED: Show ALL obstacles regardless of user type
+    // Users benefit from seeing complete accessibility picture
+    console.log(`👤 All obstacles are relevant to all users: ${obstacle.type}`);
+    return true;
   }
 
   /**
