@@ -1,5 +1,5 @@
 // src/screens/NavigationScreen.tsx
-// COMPLETE FILE with debug logging and duplicate key fix
+// UPDATED: Added hybrid obstacle visibility system to existing refactored structure
 
 import React, {
   useState,
@@ -29,14 +29,14 @@ import { useUserProfile } from "../stores/userProfileStore";
 import { firebaseServices } from "../services/firebase";
 import { UserLocation, AccessibilityObstacle, ObstacleType } from "../types";
 
-// 🔥 EXTRACTED STYLES
+// EXTRACTED STYLES
 import { navigationStyles as styles } from "../styles/navigationStyles";
 
-// SIMPLIFIED: Only essential imports
+// IMPORTS
 import { useProximityDetection } from "../hooks/useProximityDetection";
 import { useRouteCalculation } from "../hooks/useRouteCalculation";
 
-// 🔥 EXTRACTED COMPONENTS
+// EXTRACTED COMPONENTS
 import { ProximityAlertsOverlay } from "../components/ProximityAlertsOverlay";
 import { EnhancedObstacleMarker } from "../components/EnhancedObstacleMarker";
 import { RouteInfoPanel } from "../components/RouteInfoPanel";
@@ -77,6 +77,12 @@ export default function NavigationScreen() {
 
   const mapRef = useRef<MapView | null>(null);
   const [destination, setDestination] = useState("");
+
+  // NEW: Persistent obstacle visibility state
+  const [showAllObstacles, setShowAllObstacles] = useState(false);
+  const [validationRadiusObstacles, setValidationRadiusObstacles] = useState<
+    AccessibilityObstacle[]
+  >([]);
 
   // Helper function for obstacle route type detection
   function getObstacleRouteType(
@@ -137,6 +143,58 @@ export default function NavigationScreen() {
   const [currentObstacleAlert, setCurrentObstacleAlert] =
     useState<ProximityAlert | null>(null);
   const [isUsingDetour, setIsUsingDetour] = useState(false);
+
+  // NEW: Load persistent validation-radius obstacles
+  const loadValidationRadiusObstacles = async () => {
+    if (!location) return;
+
+    try {
+      const obstacles = await firebaseServices.obstacle.getObstaclesInArea(
+        location.latitude,
+        location.longitude,
+        0.05 // 50m radius - same as validation prompt radius
+      );
+
+      console.log(`📍 Loaded ${obstacles.length} validation-radius obstacles`);
+      setValidationRadiusObstacles(obstacles);
+    } catch (error) {
+      console.error("Failed to load validation obstacles:", error);
+    }
+  };
+
+  // Toggle obstacle visibility handler
+  const handleToggleObstacles = useCallback(() => {
+    const newState = !showAllObstacles;
+    setShowAllObstacles(newState);
+    console.log(`🔄 Obstacle visibility toggled: ${newState ? "ON" : "OFF"}`);
+  }, [showAllObstacles]);
+
+  // Enhanced validation prompt with obstacle highlight
+  const handleValidationPromptWithHighlight = useCallback(
+    (prompt: ValidationPromptType) => {
+      // Find the obstacle being validated
+      const obstacle = validationRadiusObstacles.find(
+        (obs) => obs.id === prompt.obstacleId
+      );
+
+      if (obstacle && mapRef.current) {
+        // Animate to obstacle location
+        mapRef.current.animateToRegion(
+          {
+            latitude: obstacle.location.latitude,
+            longitude: obstacle.location.longitude,
+            latitudeDelta: 0.005,
+            longitudeDelta: 0.005,
+          },
+          1000
+        );
+      }
+
+      setCurrentValidationPrompt(prompt);
+      setShowValidationPrompt(true);
+    },
+    [validationRadiusObstacles]
+  );
 
   // SIMPLIFIED: Detour handlers without complex concurrency logic
   const handleCriticalObstacle = useCallback(
@@ -386,13 +444,24 @@ export default function NavigationScreen() {
     onCriticalObstacle: handleCriticalObstacle,
   });
 
-  // Load nearby obstacles
+  // UPDATED: Enhanced location effect - load validation obstacles always
   useEffect(() => {
+    console.log("📍 Location/Profile effect triggered:", {
+      hasLocation: !!location,
+      hasProfile: !!profile,
+      locationAccuracy: location?.accuracy,
+    });
+
     if (location) {
-      loadNearbyObstacles();
-      checkForValidationPrompts();
+      // Always load validation-radius obstacles for prompts
+      loadValidationRadiusObstacles();
+
+      if (profile) {
+        console.log("🔍 Loading obstacles and checking validation prompts...");
+        checkForValidationPrompts();
+      }
     }
-  }, [location]);
+  }, [location, profile, showAllObstacles]);
 
   useEffect(() => {
     if (destinationName && proximityState.isDetecting) {
@@ -404,37 +473,43 @@ export default function NavigationScreen() {
     }
   }, [destinationName, proximityState.isDetecting]);
 
-  const loadNearbyObstacles = async () => {
-    if (!location) return;
-
-    try {
-      const obstacles = await firebaseServices.obstacle.getObstaclesInArea(
-        location.latitude,
-        location.longitude,
-        1
-      );
-      console.log(`Loaded ${obstacles.length} area obstacles`);
-    } catch (error) {
-      console.error("Failed to load obstacles:", error);
-    }
-  };
-
   const checkForValidationPrompts = async () => {
-    if (!location || !profile) return;
+    console.log("🎯 checkForValidationPrompts called:", {
+      hasLocation: !!location,
+      hasProfile: !!profile,
+      locationAccuracy: location?.accuracy,
+    });
+
+    if (!location || !profile) {
+      console.log("❌ Skipping validation - missing location or profile");
+      return;
+    }
 
     try {
+      console.log(
+        "📋 Calling obstacleValidationService.checkForValidationPrompts..."
+      );
       const prompts = await obstacleValidationService.checkForValidationPrompts(
         location,
         profile
       );
 
+      console.log("📝 Validation prompts result:", {
+        promptCount: prompts.length,
+        prompts: prompts.map((p) => ({
+          id: p.obstacleId,
+          type: p.obstacleType,
+        })),
+      });
+
       if (prompts.length > 0) {
-        console.log(`🔍 Found ${prompts.length} validation prompts`);
-        setCurrentValidationPrompt(prompts[0]);
-        setShowValidationPrompt(true);
+        console.log("✅ Setting validation prompt:", prompts[0].obstacleId);
+        handleValidationPromptWithHighlight(prompts[0]);
+      } else {
+        console.log("📭 No validation prompts needed");
       }
     } catch (error) {
-      console.error("Validation prompt check failed:", error);
+      console.error("❌ Validation prompt check failed:", error);
     }
   };
 
@@ -452,77 +527,81 @@ export default function NavigationScreen() {
     );
   };
 
-  // DEBUG: Prepare obstacle rendering with deduplication and logging
+  // UPDATED: Enhanced obstacle rendering with hybrid visibility
   const renderObstacles = () => {
-    console.log("=== OBSTACLE RENDERING DEBUG ===");
-    console.log(
-      "routeObstacles ids:",
-      (routeObstacles || []).map((o) => String(o.id))
-    );
-    console.log(
-      "nearbyObstacles ids:",
-      (nearbyObstacles || []).map((o) => String(o.id))
-    );
+    console.log("=== ENHANCED OBSTACLE RENDERING ===");
 
-    const combined = [
-      ...(routeObstacles || [])
-        .map((o) => String(o.id))
-        .map((id) => `route-${id}`),
-      ...(nearbyObstacles || [])
-        .map((o) => String(o.id))
-        .map((id) => `nearby-${id}`),
-    ];
-    const duplicates = combined.filter((x, i, a) => a.indexOf(x) !== i);
-    console.log("duplicate keys (if any):", duplicates);
+    // Collect all obstacle types and create comprehensive deduplication
+    const allObstacleIds = new Set<string>();
+    const renderedObstacles: JSX.Element[] = [];
 
-    // Robust deduplication
-    const uniqueRouteObstacles = dedupeById(routeObstacles);
-    const routeIds = new Set(
-      (uniqueRouteObstacles || []).map((o) => String(o.id))
-    );
+    // Helper function to safely add obstacle if not already rendered
+    const addObstacleIfUnique = (
+      obstacle: AccessibilityObstacle,
+      keyPrefix: string,
+      isOnRoute: boolean,
+      routeType?: "fastest" | "accessible" | "both" | undefined,
+      opacity: number = 1.0
+    ) => {
+      const obstacleId = String(obstacle.id);
+      if (!allObstacleIds.has(obstacleId)) {
+        allObstacleIds.add(obstacleId);
+        renderedObstacles.push(
+          <EnhancedObstacleMarker
+            key={`${keyPrefix}-${obstacleId}`}
+            obstacle={obstacle}
+            isOnRoute={isOnRoute}
+            routeType={routeType}
+            opacity={opacity}
+            onPress={() => {
+              console.log(`${keyPrefix} obstacle pressed:`, obstacle.type);
+            }}
+          />
+        );
+      }
+    };
 
-    console.log("Filtering nearby obstacles:", {
-      routeObstacles: uniqueRouteObstacles?.length || 0,
-      nearbyObstacles: nearbyObstacles?.length || 0,
-      duplicateIds: nearbyObstacles
-        ?.filter((obs) => routeIds.has(String(obs.id)))
-        .map((obs) => obs.id),
+    console.log("Obstacle visibility:", {
+      route: routeObstacles?.length || 0,
+      validation: validationRadiusObstacles.length,
+      nearby: nearbyObstacles?.length || 0,
+      showAllToggle: showAllObstacles,
+      isNavigating,
     });
-    console.log("=== END OBSTACLE DEBUG ===");
 
-    return (
-      <>
-        {/* ROUTE-SPECIFIC OBSTACLES */}
-        {uniqueRouteObstacles &&
-          uniqueRouteObstacles.map((obstacle) => (
-            <EnhancedObstacleMarker
-              key={`route-${obstacle.id}`}
-              obstacle={obstacle}
-              isOnRoute={true}
-              routeType={getObstacleRouteType(obstacle, routeAnalysis)}
-              onPress={() => {
-                console.log("Route obstacle pressed:", obstacle.type);
-              }}
-            />
-          ))}
+    // 1. ROUTE-SPECIFIC OBSTACLES (highest priority - during navigation)
+    if (routeObstacles) {
+      routeObstacles.forEach((obstacle) => {
+        addObstacleIfUnique(
+          obstacle,
+          "route",
+          true,
+          getObstacleRouteType(obstacle, routeAnalysis),
+          1.0
+        );
+      });
+    }
 
-        {/* NEARBY OBSTACLES with robust filtering */}
-        {nearbyObstacles &&
-          nearbyObstacles
-            .filter((obstacle) => !routeIds.has(String(obstacle.id)))
-            .map((obstacle, index) => (
-              <EnhancedObstacleMarker
-                key={`nearby-${obstacle.id}-${index}`}
-                obstacle={obstacle}
-                isOnRoute={false}
-                opacity={0.6}
-                onPress={() => {
-                  console.log("Nearby obstacle pressed:", obstacle.type);
-                }}
-              />
-            ))}
-      </>
-    );
+    // 2. VALIDATION-RADIUS OBSTACLES (always visible for validation prompts)
+    validationRadiusObstacles.forEach((obstacle) => {
+      addObstacleIfUnique(obstacle, "validation", false, undefined, 0.8);
+    });
+
+    // 3. EXTENDED OBSTACLES (visible when toggle is on or during navigation)
+    if ((showAllObstacles || isNavigating) && nearbyObstacles) {
+      nearbyObstacles.forEach((obstacle) => {
+        addObstacleIfUnique(
+          obstacle,
+          "extended",
+          false,
+          undefined,
+          showAllObstacles ? 0.7 : 0.5
+        );
+      });
+    }
+
+    console.log(`Total unique obstacles rendered: ${renderedObstacles.length}`);
+    return <>{renderedObstacles}</>;
   };
 
   if (locationError) {
@@ -591,7 +670,7 @@ export default function NavigationScreen() {
           </Marker>
         )}
 
-        {/* OBSTACLE MARKERS with debug and deduplication */}
+        {/* ENHANCED OBSTACLE MARKERS with hybrid visibility */}
         {renderObstacles()}
 
         {/* POI MARKERS */}
@@ -644,7 +723,7 @@ export default function NavigationScreen() {
         )}
       </MapView>
 
-      {/* NAVIGATION CONTROLS */}
+      {/* NAVIGATION CONTROLS - UPDATED: Added obstacle toggle props */}
       <NavigationControls
         destination={destination}
         onDestinationChange={setDestination}
@@ -656,7 +735,10 @@ export default function NavigationScreen() {
         isNavigating={isNavigating}
         isDetecting={proximityState.isDetecting}
         proximityAlertsCount={proximityState.proximityAlerts.length}
-        detectionError={proximityState.detectionError}
+        detectionError={proximityState.detectionError || undefined} // FIXED: Convert null to undefined
+        showAllObstacles={showAllObstacles}
+        onToggleObstacles={handleToggleObstacles}
+        validationObstacleCount={validationRadiusObstacles.length}
       />
 
       {/* PROXIMITY ALERTS OVERLAY */}
@@ -676,7 +758,7 @@ export default function NavigationScreen() {
         style={{ bottom: insets.bottom + 100 }}
       />
 
-      {/* VALIDATION PROMPT MODAL */}
+      {/* VALIDATION PROMPT MODAL - Enhanced with obstacle highlighting */}
       <Modal
         visible={showValidationPrompt}
         transparent={true}
@@ -692,6 +774,9 @@ export default function NavigationScreen() {
                   currentValidationPrompt.obstacleId,
                   response
                 );
+
+                // Reload validation obstacles to reflect changes
+                await loadValidationRadiusObstacles();
               }
               setShowValidationPrompt(false);
               setCurrentValidationPrompt(null);
