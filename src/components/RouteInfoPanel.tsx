@@ -1,9 +1,7 @@
 // src/components/RouteInfoPanel.tsx
-// 🔥 BEAST MODE: Complete Route Information Display Panel
-// Extracted from NavigationScreen for better reusability and organization
-// PWD-optimized with accessibility features and smart route recommendations
+// CLEAN VERSION: Minimizable panel with obstacle counts instead of grades
 
-import React from "react";
+import React, { useState } from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -13,12 +11,14 @@ interface RouteInfo {
     distance: number;
     grade: string;
     polyline: any[];
+    obstacles?: any[];
   };
   accessibleRoute: {
     duration: number;
     distance: number;
     grade: string;
     polyline: any[];
+    obstacles?: any[];
   };
   comparison: {
     recommendation: string;
@@ -32,7 +32,7 @@ interface RouteInfoPanelProps {
   onToggleSidewalks: () => void;
   onRecalculate: () => void;
   showSidewalks: boolean;
-  style?: any; // For positioning from parent
+  style?: any;
 }
 
 export const RouteInfoPanel = React.memo<RouteInfoPanelProps>(
@@ -45,17 +45,73 @@ export const RouteInfoPanel = React.memo<RouteInfoPanelProps>(
     showSidewalks,
     style,
   }) {
+    const [isMinimized, setIsMinimized] = useState(false);
+
     if (!routeAnalysis) return null;
 
+    const fastestObstacles = routeAnalysis.fastestRoute.obstacles?.length || 0;
+    const accessibleObstacles =
+      routeAnalysis.accessibleRoute.obstacles?.length || 0;
+
+    // Minimized view - just the essential info
+    if (isMinimized) {
+      return (
+        <View style={[styles.routeInfoContainer, style]}>
+          <View style={styles.routeInfoMinimized}>
+            <TouchableOpacity
+              style={styles.minimizedContent}
+              onPress={() => setIsMinimized(false)}
+            >
+              <Text style={styles.minimizedTitle}>
+                Routes to {destinationName}
+              </Text>
+              <View style={styles.minimizedRoutes}>
+                <Text style={styles.minimizedRoute}>
+                  🔴{" "}
+                  {Math.round(
+                    (routeAnalysis.fastestRoute.duration || 600) / 60
+                  )}
+                  min • {fastestObstacles} obstacles
+                </Text>
+                <Text style={styles.minimizedRoute}>
+                  🟢{" "}
+                  {Math.round(
+                    (routeAnalysis.accessibleRoute.duration || 600) / 60
+                  )}
+                  min • {accessibleObstacles} obstacles
+                </Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.minimizedButton}
+              onPress={() => onStartNavigation("accessible")}
+            >
+              <Ionicons name="navigate" size={20} color="#22C55E" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
+
+    // Full view
     return (
       <View style={[styles.routeInfoContainer, style]}>
         <View style={styles.routeInfo}>
-          {/* 🎯 ROUTE TITLE */}
-          <Text style={styles.routeTitle}>🗺️ Routes to {destinationName}</Text>
+          {/* Header with minimize button */}
+          <View style={styles.routeHeader}>
+            <Text style={styles.routeTitle}>Routes to {destinationName}</Text>
+            <TouchableOpacity
+              style={styles.minimizeButton}
+              onPress={() => setIsMinimized(true)}
+            >
+              <Ionicons name="chevron-down" size={20} color="#6B7280" />
+            </TouchableOpacity>
+          </View>
 
-          {/* 🔥 ROUTE COMPARISON DISPLAY */}
+          {/* Route Comparison */}
           <View style={styles.routeComparison}>
-            {/* FASTEST ROUTE ROW */}
+            {/* Fastest Route */}
             <View style={styles.routeRow}>
               <View style={styles.routeIndicator}>
                 <View
@@ -69,22 +125,17 @@ export const RouteInfoPanel = React.memo<RouteInfoPanelProps>(
                 {((routeAnalysis.fastestRoute.distance || 1000) / 1000).toFixed(
                   1
                 )}
-                km • Grade {routeAnalysis.fastestRoute.grade || "B"}
+                km • {fastestObstacles} obstacles
               </Text>
               <TouchableOpacity
                 style={styles.navigateBtn}
                 onPress={() => onStartNavigation("fastest")}
-                accessible={true}
-                accessibilityRole="button"
-                accessibilityLabel={`Start fastest route navigation, ${Math.round(
-                  (routeAnalysis.fastestRoute.duration || 600) / 60
-                )} minutes, grade ${routeAnalysis.fastestRoute.grade || "B"}`}
               >
                 <Ionicons name="navigate" size={16} color="#EF4444" />
               </TouchableOpacity>
             </View>
 
-            {/* ACCESSIBLE ROUTE ROW */}
+            {/* Accessible Route */}
             <View style={styles.routeRow}>
               <View style={styles.routeIndicator}>
                 <View
@@ -100,58 +151,22 @@ export const RouteInfoPanel = React.memo<RouteInfoPanelProps>(
                 {(
                   (routeAnalysis.accessibleRoute.distance || 1000) / 1000
                 ).toFixed(1)}
-                km • Grade {routeAnalysis.accessibleRoute.grade || "A"}
+                km • {accessibleObstacles} obstacles
               </Text>
               <TouchableOpacity
                 style={styles.navigateBtn}
                 onPress={() => onStartNavigation("accessible")}
-                accessible={true}
-                accessibilityRole="button"
-                accessibilityLabel={`Start accessible route navigation, ${Math.round(
-                  (routeAnalysis.accessibleRoute.duration || 600) / 60
-                )} minutes, grade ${
-                  routeAnalysis.accessibleRoute.grade || "A"
-                }`}
               >
                 <Ionicons name="navigate" size={16} color="#22C55E" />
               </TouchableOpacity>
             </View>
           </View>
 
-          {/* 🧠 INTELLIGENT RECOMMENDATION */}
-          <Text style={styles.recommendation}>
-            💡 {routeAnalysis.comparison.recommendation}
-          </Text>
-
-          {/* 🎮 CONTROL BUTTONS */}
+          {/* Quick Controls */}
           <View style={styles.controlsRow}>
             <TouchableOpacity
               style={styles.controlButton}
-              onPress={onToggleSidewalks}
-              accessible={true}
-              accessibilityRole="button"
-              accessibilityLabel={
-                showSidewalks
-                  ? "Hide sidewalks on map"
-                  : "Show sidewalks on map"
-              }
-            >
-              <Ionicons
-                name={showSidewalks ? "eye" : "eye-off"}
-                size={16}
-                color="#6B7280"
-              />
-              <Text style={styles.controlButtonText}>
-                {showSidewalks ? "Hide" : "Show"} Sidewalks
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.controlButton}
               onPress={onRecalculate}
-              accessible={true}
-              accessibilityRole="button"
-              accessibilityLabel="Recalculate routes"
             >
               <Ionicons name="refresh" size={16} color="#6B7280" />
               <Text style={styles.controlButtonText}>Recalculate</Text>
@@ -180,28 +195,71 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
   },
+  routeInfoMinimized: {
+    backgroundColor: "white",
+    borderRadius: 12,
+    padding: 12,
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  routeHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
   routeTitle: {
     fontSize: 16,
     fontWeight: "bold",
     color: "#1F2937",
-    marginBottom: 12,
-    textAlign: "center",
+  },
+  minimizeButton: {
+    padding: 4,
+    borderRadius: 4,
+    backgroundColor: "#F9FAFB",
+  },
+  minimizedContent: {
+    flex: 1,
+  },
+  minimizedTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#1F2937",
+    marginBottom: 4,
+  },
+  minimizedRoutes: {
+    gap: 2,
+  },
+  minimizedRoute: {
+    fontSize: 12,
+    color: "#6B7280",
+  },
+  minimizedButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: "#F0FDF4",
+    marginLeft: 12,
   },
   routeComparison: {
-    marginBottom: 12,
+    marginBottom: 16,
   },
   routeRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 8,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: "#F3F4F6",
-    minHeight: 44, // PWD accessibility - minimum touch target
+    minHeight: 48,
   },
   routeIndicator: {
     flexDirection: "row",
     alignItems: "center",
-    width: 90,
+    width: 80,
   },
   routeColor: {
     width: 12,
@@ -216,42 +274,35 @@ const styles = StyleSheet.create({
   },
   routeDetails: {
     flex: 1,
-    fontSize: 12,
+    fontSize: 13,
     color: "#1F2937",
-    marginLeft: 8,
+    marginLeft: 12,
   },
   navigateBtn: {
     padding: 8,
     borderRadius: 6,
     backgroundColor: "#F9FAFB",
-    minWidth: 44, // PWD accessibility - minimum touch target
-    minHeight: 44,
+    minWidth: 40,
+    minHeight: 40,
     justifyContent: "center",
     alignItems: "center",
   },
-  recommendation: {
-    fontSize: 12,
-    color: "#059669",
-    fontStyle: "italic",
-    marginBottom: 12,
-    textAlign: "center",
-  },
   controlsRow: {
     flexDirection: "row",
-    justifyContent: "space-around",
+    justifyContent: "center",
   },
   controlButton: {
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     backgroundColor: "#F3F4F6",
     borderRadius: 8,
-    minHeight: 44, // PWD accessibility - minimum touch target
+    minHeight: 40,
   },
   controlButtonText: {
     fontSize: 12,
     color: "#6B7280",
-    marginLeft: 4,
+    marginLeft: 6,
   },
 });

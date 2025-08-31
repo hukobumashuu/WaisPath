@@ -101,4 +101,20 @@ export const navigationStyles = StyleSheet.create({
     color: "#3B82F6",
     fontStyle: "italic",
   },
+  // NEW: Search toggle button style
+  searchToggleButton: {
+    position: "absolute",
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "white",
+    justifyContent: "center",
+    alignItems: "center",
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    zIndex: 999,
+  },
 });

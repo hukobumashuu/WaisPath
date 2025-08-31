@@ -1,5 +1,5 @@
 // src/components/NavigationControls.tsx
-// FIXED: UI overlap issue with proximity alerts
+// UPDATED: Fixed obstacle toggle positioning behind search bar
 
 import React from "react";
 import {
@@ -13,16 +13,11 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 
 interface NavigationControlsProps {
-  // Search props
-  destination: string;
-  onDestinationChange: (text: string) => void;
-  isCalculating: boolean;
-  searchContainerStyle?: any;
-
   // FAB props
   showFAB: boolean;
   onFABPress: () => void;
   fabStyle?: any;
+  isCalculating: boolean;
 
   // Detection status props
   isNavigating: boolean;
@@ -35,17 +30,17 @@ interface NavigationControlsProps {
   showAllObstacles?: boolean;
   onToggleObstacles?: () => void;
   validationObstacleCount?: number;
+
+  // NEW: Custom obstacle toggle positioning
+  obstacleToggleStyle?: any;
 }
 
 export const NavigationControls = React.memo<NavigationControlsProps>(
   function NavigationControls({
-    destination,
-    onDestinationChange,
-    isCalculating,
-    searchContainerStyle,
     showFAB,
     onFABPress,
     fabStyle,
+    isCalculating,
     isNavigating,
     isDetecting,
     proximityAlertsCount,
@@ -54,36 +49,17 @@ export const NavigationControls = React.memo<NavigationControlsProps>(
     showAllObstacles = false,
     onToggleObstacles,
     validationObstacleCount = 0,
+    obstacleToggleStyle,
   }) {
-    // Calculate base top position from searchContainer
-    const baseTop = searchContainerStyle?.top || 0;
-
     return (
       <>
-        {/* SEARCH BAR */}
-        <View style={[styles.searchContainer, searchContainerStyle]}>
-          <View style={styles.searchInputContainer}>
-            <Ionicons name="search" size={20} color="#6B7280" />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Where do you want to go?"
-              value={destination}
-              onChangeText={onDestinationChange}
-              placeholderTextColor="#6B7280"
-              accessible={true}
-              accessibilityLabel="Destination search input"
-              accessibilityHint="Enter where you want to navigate to"
-            />
-            {isCalculating && (
-              <ActivityIndicator size="small" color="#3B82F6" />
-            )}
-          </View>
-        </View>
-
-        {/* OBSTACLE VISIBILITY CONTROLS - FIXED: Only show when NOT navigating to avoid overlap */}
+        {/* OBSTACLE VISIBILITY CONTROLS - FIXED: Use custom positioning */}
         {onToggleObstacles && !isNavigating && (
           <View
-            style={[styles.obstacleControlsContainer, { top: baseTop + 70 }]}
+            style={[
+              styles.obstacleControlsContainer,
+              obstacleToggleStyle || { top: 70 }, // Default to 70 if no custom style
+            ]}
           >
             <TouchableOpacity
               style={[
@@ -123,15 +99,13 @@ export const NavigationControls = React.memo<NavigationControlsProps>(
           </View>
         )}
 
-        {/* PROXIMITY DETECTION STATUS - FIXED: Position based on whether obstacle controls are visible */}
+        {/* PROXIMITY DETECTION STATUS - FIXED: Simplified positioning */}
         {isNavigating && (
           <View
             style={[
               styles.detectionStatusContainer,
               detectionStatusStyle,
-              {
-                top: baseTop + (onToggleObstacles && !isNavigating ? 120 : 70),
-              },
+              { top: 70 },
             ]}
           >
             <Text style={styles.detectionStatus}>
