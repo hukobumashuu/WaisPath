@@ -74,9 +74,9 @@ export default {
     userInterfaceStyle: "light",
 
     // App icon and splash screen
-    icon: "./assets/icon.png",
+    icon: "./assets/waispath-splash.jpg",
     splash: {
-      image: "./assets/splash.png",
+      image: "./assets/waispath-splash.jpg",
       resizeMode: "contain",
       backgroundColor: "#ffffff",
     },
@@ -340,17 +340,17 @@ export default {
   },
 };
 
-// Log configuration summary (without exposing keys)
-console.log(`\n🚀 WAISPATH Configuration Summary:`);
-console.log(`   Environment: ${envConfig.env}`);
-console.log(`   Bundle ID: ${envConfig.bundleIdentifier}`);
-console.log(
-  `   Google Maps: ${process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ? "✅" : "❌"}`
-);
-console.log(
-  `   Firebase: ${process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID ? "✅" : "❌"}`
-);
-console.log(
-  `   Features: Crowdsourcing=${process.env.EXPO_PUBLIC_CROWDSOURCING_ENABLED}, Voice=${process.env.EXPO_PUBLIC_VOICE_GUIDANCE_ENABLED}`
-);
-console.log("=".repeat(50));
+// // Log configuration summary (without exposing keys)
+// console.log(`\n🚀 WAISPATH Configuration Summary:`);
+// console.log(`   Environment: ${envConfig.env}`);
+// console.log(`   Bundle ID: ${envConfig.bundleIdentifier}`);
+// console.log(
+//   `   Google Maps: ${process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ? "✅" : "❌"}`
+// );
+// console.log(
+//   `   Firebase: ${process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID ? "✅" : "❌"}`
+// );
+// console.log(
+//   `   Features: Crowdsourcing=${process.env.EXPO_PUBLIC_CROWDSOURCING_ENABLED}, Voice=${process.env.EXPO_PUBLIC_VOICE_GUIDANCE_ENABLED}`
+// );
+// console.log("=".repeat(50));
