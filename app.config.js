@@ -74,9 +74,9 @@ export default {
     userInterfaceStyle: "light",
 
     // App icon and splash screen
-    icon: "./assets/waispath-splash.jpg",
+    icon: "./assets/waispath-icon.png",
     splash: {
-      image: "./assets/waispath-splash.jpg",
+      image: "./assets/waispath-splash.png",
       resizeMode: "contain",
       backgroundColor: "#ffffff",
     },
