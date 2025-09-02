@@ -1,243 +1,186 @@
 // src/screens/ReportScreen.tsx
-// Complete Obstacle Reporting Screen - Filipino-First with Camera Integration
-// PWD Accessibility Optimized with Offline-First Architecture
+// MODERN CLEAN VERSION: Pasig colors + simplified flow + accessibility focused
+// FIX: progress bar now lights previous steps correctly
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
+  SafeAreaView,
   View,
   Text,
   TouchableOpacity,
   ScrollView,
-  Alert,
-  SafeAreaView,
   TextInput,
   Modal,
+  Alert,
   Vibration,
+  StyleSheet,
+  useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import {
-  firebaseServices,
-  checkFirebaseHealth,
-  saveObstacleLocally,
-} from "../services/firebase";
-import {
-  createProfileWithDefaults,
-  useUserProfile,
-} from "../stores/userProfileStore";
+import { firebaseServices, saveObstacleLocally } from "../services/firebase";
+import { useUserProfile } from "../stores/userProfileStore";
 import { useLocation } from "../hooks/useLocation";
 import { ObstacleType } from "../types";
 import { CameraInterface } from "../components/CameraInterface";
 import { CompressedPhoto } from "../services/cameraService";
 
-const OBSTACLE_TYPES: Array<{
-  key: ObstacleType;
+/* Pasig City color scheme - matching HomeScreen */
+const COLORS = {
+  white: "#FFFFFF",
+  softBlue: "#2BA4FF",
+  navy: "#08345A",
+  slate: "#0F172A",
+  muted: "#6B7280",
+  chipBg: "#EFF8FF",
+  success: "#10B981",
+  warning: "#F59E0B",
+  error: "#EF4444",
+  lightGray: "#F8FAFC",
+};
+
+const OBSTACLE_TYPES = [
+  {
+    key: "vendor_blocking" as ObstacleType,
+    labelFil: "May Nagtitinda",
+    labelEn: "Vendor Blocking",
+    icon: "storefront" as keyof typeof Ionicons.glyphMap,
+    color: COLORS.warning,
+    description: "Sari-sari store o vendor na nakahirang sa daan",
+  },
+  {
+    key: "parked_vehicles" as ObstacleType,
+    labelFil: "Nakaharang na Sasakyan",
+    labelEn: "Parked Vehicles",
+    icon: "car" as keyof typeof Ionicons.glyphMap,
+    color: COLORS.error,
+    description: "Motor o kotse na nakaharang sa sidewalk",
+  },
+  {
+    key: "flooding" as ObstacleType,
+    labelFil: "Baha",
+    labelEn: "Flooding",
+    icon: "water" as keyof typeof Ionicons.glyphMap,
+    color: COLORS.softBlue,
+    description: "Tubig sa daan na nakakasagabal",
+  },
+  {
+    key: "broken_pavement" as ObstacleType,
+    labelFil: "Sirang Bangketa",
+    labelEn: "Broken Pavement",
+    icon: "warning" as keyof typeof Ionicons.glyphMap,
+    color: COLORS.error,
+    description: "Butas o sira sa sahig",
+  },
+  {
+    key: "stairs_no_ramp" as ObstacleType,
+    labelFil: "Walang Ramp",
+    labelEn: "No Ramp Available",
+    icon: "layers" as keyof typeof Ionicons.glyphMap,
+    color: COLORS.navy,
+    description: "Steps na walang ramp alternative",
+  },
+  {
+    key: "construction" as ObstacleType,
+    labelFil: "Under Construction",
+    labelEn: "Construction Work",
+    icon: "construct" as keyof typeof Ionicons.glyphMap,
+    color: COLORS.warning,
+    description: "Ongoing construction na nakakasagabal",
+  },
+];
+
+type SeverityType = "low" | "medium" | "high" | "blocking";
+
+const SEVERITY_LEVELS: Array<{
+  key: SeverityType;
   labelFil: string;
   labelEn: string;
-  icon: keyof typeof Ionicons.glyphMap;
   color: string;
   description: string;
 }> = [
   {
-    key: "vendor_blocking",
-    labelFil: "May Nagtitinda",
-    labelEn: "Vendor Blocking",
-    icon: "storefront",
-    color: "#F59E0B",
-    description: "Sari-sari store o vendor na nakahirang sa daan",
+    key: "low",
+    labelFil: "Kaya pa",
+    labelEn: "Passable",
+    color: COLORS.success,
+    description: "Medyo hirap pero kaya pa",
   },
   {
-    key: "parked_vehicles",
-    labelFil: "Nakaharang na Sasakyan",
-    labelEn: "Parked Vehicles",
-    icon: "car",
-    color: "#EF4444",
-    description: "Motor o kotse na nakaharang sa sidewalk",
+    key: "medium",
+    labelFil: "Mahirap",
+    labelEn: "Difficult",
+    color: COLORS.warning,
+    description: "Kelangan ng extra effort",
   },
   {
-    key: "flooding",
-    labelFil: "Baha",
-    labelEn: "Flooding",
-    icon: "water",
-    color: "#3B82F6",
-    description: "Tubig sa daan na nakakasagabal",
+    key: "high",
+    labelFil: "Sobrang Hirap",
+    labelEn: "Very Difficult",
+    color: COLORS.error,
+    description: "Halos hindi na makakadaan",
   },
   {
-    key: "broken_pavement",
-    labelFil: "Sirang Bangketa",
-    labelEn: "Broken Pavement",
-    icon: "warning",
-    color: "#DC2626",
-    description: "Butas o sira sa sahig",
-  },
-  {
-    key: "stairs_no_ramp",
-    labelFil: "Walang Ramp",
-    labelEn: "No Ramp Available",
-    icon: "arrow-up",
-    color: "#7C2D12",
-    description: "May hagdan pero walang ramp para sa wheelchair",
-  },
-  {
-    key: "narrow_passage",
-    labelFil: "Masyadong Makitid",
-    labelEn: "Too Narrow",
-    icon: "resize",
-    color: "#059669",
-    description: "Hindi kasya ang wheelchair o walker",
+    key: "blocking",
+    labelFil: "Hindi Makakadaan",
+    labelEn: "Completely Blocked",
+    color: COLORS.slate,
+    description: "Totally impassable",
   },
 ];
 
-const SEVERITY_LEVELS = [
-  {
-    key: "low" as const,
-    labelFil: "Mababa",
-    labelEn: "Low",
-    description: "Medyo nakakasagabal pero pwede pa",
-    color: "#10B981",
-  },
-  {
-    key: "medium" as const,
-    labelFil: "Katamtaman",
-    labelEn: "Medium",
-    description: "Nakakahirap, kailangan mag-ingat",
-    color: "#F59E0B",
-  },
-  {
-    key: "high" as const,
-    labelFil: "Mataas",
-    labelEn: "High",
-    description: "Delikado, mahirap dumaan",
-    color: "#EF4444",
-  },
-  {
-    key: "blocking" as const,
-    labelFil: "Nakaharang",
-    labelEn: "Blocking",
-    description: "Hindi makatawid, hanap ng ibang daan",
-    color: "#DC2626",
-  },
-];
+interface ReportScreenProps {
+  navigation: any;
+}
 
-const TIME_PATTERNS = [
-  {
-    key: "permanent" as const,
-    labelFil: "Laging Nandoon",
-    labelEn: "Always There",
-  },
-  { key: "morning" as const, labelFil: "Umaga Lang", labelEn: "Morning Only" },
-  {
-    key: "afternoon" as const,
-    labelFil: "Hapon Lang",
-    labelEn: "Afternoon Only",
-  },
-  { key: "evening" as const, labelFil: "Gabi Lang", labelEn: "Evening Only" },
-  {
-    key: "weekend" as const,
-    labelFil: "Weekend Lang",
-    labelEn: "Weekend Only",
-  },
-];
-
-const ReportScreen: React.FC = () => {
-  const { location, getCurrentLocation } = useLocation();
+export default function ReportScreen({ navigation }: ReportScreenProps) {
   const { profile } = useUserProfile();
   const insets = useSafeAreaInsets();
-
-  // Camera and photo state
-  const [showCamera, setShowCamera] = useState(false);
-  const [capturedPhoto, setCapturedPhoto] = useState<CompressedPhoto | null>(
-    null
-  );
+  const dims = useWindowDimensions();
+  const isSmallScreen = dims.width < 380;
 
   // Form state
+  const [currentStep, setCurrentStep] = useState<
+    "select" | "photo" | "details"
+  >("select");
   const [selectedObstacle, setSelectedObstacle] = useState<ObstacleType | null>(
     null
   );
-  const [selectedSeverity, setSelectedSeverity] = useState<
-    "low" | "medium" | "high" | "blocking" | null
-  >(null);
-  const [selectedTimePattern, setSelectedTimePattern] = useState<
-    "permanent" | "morning" | "afternoon" | "evening" | "weekend"
-  >("permanent");
+  const [selectedSeverity, setSelectedSeverity] = useState<SeverityType | null>(
+    null
+  );
   const [description, setDescription] = useState("");
-
-  // UI state
+  const [capturedPhoto, setCapturedPhoto] = useState<CompressedPhoto | null>(
+    null
+  );
+  const [showCamera, setShowCamera] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showFirebaseTest, setShowFirebaseTest] = useState(false);
-  const [testResults, setTestResults] = useState<string[]>([]);
-  const [isTestLoading, setIsTestLoading] = useState(false);
-  const [currentStep, setCurrentStep] = useState<
-    "select" | "photo" | "details" | "submit"
-  >("select");
 
-  // Get location on component mount
-  useEffect(() => {
-    getCurrentLocation();
-  }, []);
+  // Location
+  const { location, getCurrentLocation } = useLocation();
 
-  const addTestResult = (result: string) => {
-    setTestResults((prev) => [
-      ...prev,
-      `${new Date().toLocaleTimeString()}: ${result}`,
-    ]);
-  };
+  const selectedObstacleData = useMemo(
+    () => OBSTACLE_TYPES.find((o) => o.key === selectedObstacle),
+    [selectedObstacle]
+  );
 
-  const runFirebaseTest = async () => {
-    setIsTestLoading(true);
-    setTestResults([]);
-
-    try {
-      addTestResult("🔥 Checking Firebase health...");
-      const health = await checkFirebaseHealth();
-      addTestResult(`✅ Firebase Health: ${health}`);
-
-      if (health === "failed") {
-        addTestResult("❌ Firebase health check failed");
-        return;
-      }
-
-      addTestResult("📝 Creating test profile...");
-      const testProfile = createProfileWithDefaults("wheelchair", {
-        preferShade: true,
-        maxWalkingDistance: 500,
-      });
-      addTestResult(`✅ Test profile created: ${testProfile.id}`);
-
-      addTestResult("☁️ Testing profile save to Firebase...");
-      await firebaseServices.profile.saveProfile(testProfile);
-      addTestResult("✅ Profile saved to Firebase successfully!");
-
-      addTestResult("🚧 Testing obstacle service...");
-      const mockObstacles = await firebaseServices.obstacle.getObstaclesInArea(
-        14.5547,
-        121.0244,
-        5
-      );
-      addTestResult(`✅ Retrieved ${mockObstacles.length} obstacles from area`);
-
-      Alert.alert(
-        "🎉 Firebase Test Complete!",
-        `Firebase ${health} service is working perfectly!`,
-        [{ text: "Salamat! (Thanks!)" }]
-      );
-    } catch (error: any) {
-      const errorMsg = error.message || "Unknown error";
-      addTestResult(`❌ Error: ${errorMsg}`);
-      Alert.alert("Firebase Test Failed", errorMsg);
-    } finally {
-      setIsTestLoading(false);
+  const stepProgress = useMemo(() => {
+    switch (currentStep) {
+      case "select":
+        return { current: 1, total: 3, label: "Uri ng Hadlang" };
+      case "photo":
+        return { current: 2, total: 3, label: "Kumuha ng Photo" };
+      case "details":
+        return { current: 3, total: 3, label: "Mga Detalye" };
+      default:
+        return { current: 1, total: 3, label: "Uri ng Hadlang" };
     }
-  };
+  }, [currentStep]);
 
   const handleObstacleSelect = (obstacleType: ObstacleType) => {
     setSelectedObstacle(obstacleType);
     setCurrentStep("photo");
-
-    // Haptic feedback for accessibility
     Vibration.vibrate(50);
-
-    // Get current location
     getCurrentLocation();
   };
 
@@ -245,8 +188,6 @@ const ReportScreen: React.FC = () => {
     setCapturedPhoto(photo);
     setShowCamera(false);
     setCurrentStep("details");
-
-    // Success haptic feedback
     Vibration.vibrate([50, 100, 50]);
   };
 
@@ -259,7 +200,7 @@ const ReportScreen: React.FC = () => {
     if (!selectedObstacle || !selectedSeverity || !location) {
       Alert.alert(
         "Kulang ang Detalye",
-        "Kailangan ng obstacle type, severity level, at location para mag-report.\n\n(Missing details needed for reporting.)",
+        "Kailangan ng obstacle type, severity level, at location para mag-report.",
         [{ text: "OK" }]
       );
       return;
@@ -268,55 +209,43 @@ const ReportScreen: React.FC = () => {
     setIsSubmitting(true);
 
     try {
-      console.log("📝 Submitting obstacle report...");
-
       const obstacleData = {
         location,
         type: selectedObstacle,
         severity: selectedSeverity,
         description: description.trim() || "No additional description provided",
-        photoBase64: capturedPhoto?.base64, // Use Base64 instead of URI
-        timePattern: selectedTimePattern,
+        photoBase64: capturedPhoto?.base64,
+        timePattern: "permanent" as const,
       };
 
-      // Always save locally first (offline-first approach)
+      // Save locally first (offline-first)
       await saveObstacleLocally(obstacleData);
 
-      // Try to report to Firebase
+      // Try cloud sync
       try {
         const obstacleId = await firebaseServices.obstacle.reportObstacle(
           obstacleData
         );
 
-        // Success!
         Alert.alert(
           "✅ Na-report na!",
-          `Salamat sa pag-report! Obstacle ID: ${obstacleId}\n\nNa-save na sa cloud at makikita ng iba sa community.\n\n(Thank you for reporting! Saved to cloud and visible to community.)`,
+          `Salamat sa pag-report! Na-save na sa cloud at makikita ng community.`,
           [
-            {
-              text: "Mag-report pa (Report More)",
-              onPress: resetForm,
-            },
-            {
-              text: "Tapos na (Done)",
-              style: "default",
-              onPress: resetForm,
-            },
+            { text: "Mag-report pa", onPress: resetForm },
+            { text: "Tapos na", onPress: resetForm },
           ]
         );
       } catch (cloudError: any) {
-        // Saved locally but cloud failed
         Alert.alert(
           "📱 Na-save Locally",
-          `Na-save na ang report sa device mo. Kapag may internet, automatic na isesend sa cloud.\n\n(Report saved on your device. Will auto-sync when online.)\n\nError: ${cloudError.message}`,
+          `Na-save na ang report sa device mo. Kapag may internet, automatic na isesend sa cloud.`,
           [{ text: "OK", onPress: resetForm }]
         );
       }
     } catch (error: any) {
-      console.error("Failed to submit report:", error);
       Alert.alert(
         "❌ Hindi Ma-report",
-        `May problema sa pag-report. Subukan ulit.\n\n(Problem reporting. Please try again.)\n\nError: ${error.message}`,
+        `May problema sa pag-report. Subukan ulit.`,
         [{ text: "OK" }]
       );
     } finally {
@@ -327,426 +256,400 @@ const ReportScreen: React.FC = () => {
   const resetForm = () => {
     setSelectedObstacle(null);
     setSelectedSeverity(null);
-    setSelectedTimePattern("permanent");
     setDescription("");
     setCapturedPhoto(null);
     setCurrentStep("select");
   };
 
-  const getStepProgress = () => {
-    switch (currentStep) {
-      case "select":
-        return "1/4";
-      case "photo":
-        return "2/4";
-      case "details":
-        return "3/4";
-      case "submit":
-        return "4/4";
-      default:
-        return "1/4";
-    }
-  };
-
-  const selectedObstacleData = OBSTACLE_TYPES.find(
-    (o) => o.key === selectedObstacle
-  );
-
   return (
-    <SafeAreaView className="flex-1 bg-gray-50">
+    <SafeAreaView style={styles.container}>
       <ScrollView
-        className="flex-1 p-4"
-        contentContainerStyle={{ paddingBottom: insets.bottom + 60 + 16 }}
+        style={{ flex: 1 }}
+        contentContainerStyle={{
+          paddingBottom: Math.max(insets.bottom, 60) + 16,
+        }}
+        showsVerticalScrollIndicator={false}
       >
-        {/* Header with Progress */}
-        <View className="mb-6">
-          <View className="flex-row justify-between items-center mb-2">
-            <Text className="text-3xl font-bold text-gray-900">
+        {/* Clean Header */}
+        <View
+          style={[
+            styles.header,
+            {
+              paddingTop: Math.max(insets.top, 20) + 16,
+              paddingHorizontal: 20,
+              paddingBottom: 20,
+            },
+          ]}
+        >
+          <View style={styles.headerContent}>
+            <Text
+              style={[
+                styles.headerTitle,
+                { fontSize: isSmallScreen ? 22 : 26 },
+              ]}
+            >
               I-report ang Hadlang
             </Text>
-            <Text className="text-sm text-gray-500 bg-blue-100 px-3 py-1 rounded-full">
-              {getStepProgress()}
-            </Text>
-          </View>
-          <Text className="text-base text-gray-600">
-            Report Accessibility Obstacles
-          </Text>
-          <Text className="text-sm text-blue-600 mt-1">
-            Tumulong sa PWD community sa pag-navigate ng Pasig
-          </Text>
-        </View>
-
-        {/* Firebase Test Section (Collapsible) */}
-        <View className="bg-white rounded-xl p-4 mb-6 border border-gray-200">
-          <TouchableOpacity
-            onPress={() => setShowFirebaseTest(!showFirebaseTest)}
-            className="flex-row items-center justify-between"
-          >
-            <Text className="text-lg font-semibold text-gray-800">
-              🔥 Firebase Storage Test
-            </Text>
-            <Ionicons
-              name={showFirebaseTest ? "chevron-up" : "chevron-down"}
-              size={20}
-              color="#6B7280"
-            />
-          </TouchableOpacity>
-
-          {showFirebaseTest && (
-            <View className="mt-4">
-              <TouchableOpacity
-                onPress={runFirebaseTest}
-                disabled={isTestLoading}
-                className={`p-4 rounded-lg mb-4 ${
-                  isTestLoading
-                    ? "bg-gray-400"
-                    : "bg-blue-500 active:bg-blue-600"
-                }`}
-              >
-                <Text className="text-white text-center font-semibold text-lg">
-                  {isTestLoading ? "⏳ Testing..." : "🚀 Test Firebase Storage"}
-                </Text>
-              </TouchableOpacity>
-
-              {testResults.length > 0 && (
-                <View className="bg-gray-50 p-3 rounded-lg max-h-40">
-                  <ScrollView>
-                    <Text className="font-semibold mb-2">Test Results:</Text>
-                    {testResults.map((result, index) => (
-                      <Text key={index} className="text-sm text-gray-700 mb-1">
-                        {result}
-                      </Text>
-                    ))}
-                  </ScrollView>
-                </View>
-              )}
-            </View>
-          )}
-        </View>
-
-        {/* Current Location Status */}
-        <View className="bg-blue-50 rounded-xl p-4 mb-6 flex-row items-center">
-          <Ionicons name="location" size={24} color="#3B82F6" />
-          <View className="flex-1 ml-3">
-            <Text className="font-semibold text-blue-900">
-              Kasalukuyang Lokasyon (Current Location)
-            </Text>
-            <Text className="text-blue-700 text-sm">
-              {location
-                ? `📍 ${location.latitude.toFixed(
-                    4
-                  )}, ${location.longitude.toFixed(4)}`
-                : "Hinahanap ang lokasyon... (Finding location...)"}
-            </Text>
-          </View>
-          {!location && (
-            <TouchableOpacity
-              onPress={getCurrentLocation}
-              className="bg-blue-500 px-4 py-2 rounded-lg"
-              style={{ minWidth: 80, minHeight: 44 }} // PWD accessibility
+            <Text
+              style={[
+                styles.headerSubtitle,
+                { fontSize: isSmallScreen ? 14 : 16 },
+              ]}
             >
-              <Text className="text-white font-semibold text-center">
-                Hanap
-              </Text>
-            </TouchableOpacity>
-          )}
+              Help the PWD community navigate Pasig
+            </Text>
+          </View>
         </View>
 
-        {/* Step 1: Obstacle Type Selection */}
-        {currentStep === "select" && (
-          <View className="mb-6">
-            <Text className="text-xl font-semibold text-gray-900 mb-4">
-              1. Anong uri ng hadlang? (What type of obstacle?)
-            </Text>
+        {/* Modern Progress Bar - Below Hero Section */}
+        <View style={[styles.progressSection, { paddingHorizontal: 20 }]}>
+          <View style={styles.progressBarContainer}>
+            {/* Render bars dynamically and light them when stepProgress.current >= index */}
+            {[1, 2, 3].map((i) => (
+              <View
+                key={i}
+                style={[
+                  styles.progressBar,
+                  {
+                    backgroundColor:
+                      stepProgress.current >= i ? COLORS.softBlue : "#E5E7EB",
+                  },
+                ]}
+              />
+            ))}
+          </View>
+          <Text style={[styles.progressLabel, { color: COLORS.muted }]}>
+            {stepProgress.label}
+          </Text>
+        </View>
 
-            <View className="space-y-3">
-              {OBSTACLE_TYPES.map((obstacle) => (
-                <TouchableOpacity
-                  key={obstacle.key}
-                  onPress={() => handleObstacleSelect(obstacle.key)}
-                  className="bg-white border border-gray-200 rounded-xl p-4 flex-row items-center"
-                  style={{ minHeight: 72 }} // PWD accessibility
-                >
-                  <View
-                    className="w-12 h-12 rounded-full flex items-center justify-center mr-4"
-                    style={{ backgroundColor: obstacle.color + "20" }}
+        <View style={{ paddingHorizontal: 20 }}>
+          {/* Step 1: Select Obstacle Type */}
+          {currentStep === "select" && (
+            <View style={{ marginBottom: 24 }}>
+              <Text
+                style={[
+                  styles.stepTitle,
+                  { fontSize: isSmallScreen ? 18 : 20 },
+                ]}
+              >
+                Ano ang nakita mong hadlang?
+              </Text>
+              <Text style={styles.stepSubtitle}>
+                Choose the type of accessibility obstacle
+              </Text>
+
+              <View style={styles.obstacleGrid}>
+                {OBSTACLE_TYPES.map((obstacle) => (
+                  <TouchableOpacity
+                    key={obstacle.key}
+                    style={[
+                      styles.obstacleCard,
+                      { borderColor: obstacle.color },
+                      isSmallScreen && { minHeight: 100 },
+                    ]}
+                    onPress={() => handleObstacleSelect(obstacle.key)}
+                    activeOpacity={0.8}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${obstacle.labelFil}. ${obstacle.description}`}
                   >
-                    <Ionicons
-                      name={obstacle.icon}
-                      size={24}
-                      color={obstacle.color}
-                    />
-                  </View>
-
-                  <View className="flex-1">
-                    <Text className="text-lg font-semibold text-gray-900">
+                    <View
+                      style={[
+                        styles.obstacleIcon,
+                        { backgroundColor: obstacle.color },
+                      ]}
+                    >
+                      <Ionicons
+                        name={obstacle.icon}
+                        size={24}
+                        color={COLORS.white}
+                      />
+                    </View>
+                    <Text
+                      style={[
+                        styles.obstacleTitle,
+                        { fontSize: isSmallScreen ? 14 : 16 },
+                      ]}
+                    >
                       {obstacle.labelFil}
                     </Text>
-                    <Text className="text-sm text-gray-500">
-                      {obstacle.labelEn}
-                    </Text>
-                    <Text className="text-sm text-gray-600 mt-1">
+                    <Text
+                      style={[
+                        styles.obstacleDescription,
+                        { fontSize: isSmallScreen ? 11 : 12 },
+                      ]}
+                    >
                       {obstacle.description}
                     </Text>
-                  </View>
-
-                  <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
-                </TouchableOpacity>
-              ))}
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
-          </View>
-        )}
+          )}
 
-        {/* Step 2: Photo Capture */}
-        {currentStep === "photo" && selectedObstacleData && (
-          <View className="mb-6">
-            <Text className="text-xl font-semibold text-gray-900 mb-2">
-              2. Kumuha ng Larawan (Take Photo)
-            </Text>
-            <Text className="text-gray-600 mb-4">
-              Selected: {selectedObstacleData.labelFil} (
-              {selectedObstacleData.labelEn})
-            </Text>
+          {/* Step 2: Photo Capture */}
+          {currentStep === "photo" && selectedObstacleData && (
+            <View style={{ marginBottom: 24 }}>
+              <Text
+                style={[
+                  styles.stepTitle,
+                  { fontSize: isSmallScreen ? 18 : 20 },
+                ]}
+              >
+                Kumuha ng Larawan
+              </Text>
+              <Text style={styles.stepSubtitle}>
+                Take a photo so others can understand the obstacle
+              </Text>
 
-            <View className="bg-white rounded-xl p-6 border border-gray-200">
-              <View className="items-center">
+              <View style={styles.photoSection}>
                 <View
-                  className="w-20 h-20 rounded-full flex items-center justify-center mb-4"
-                  style={{ backgroundColor: selectedObstacleData.color + "20" }}
+                  style={[
+                    styles.photoCard,
+                    { backgroundColor: selectedObstacleData.color + "15" },
+                  ]}
                 >
                   <Ionicons
-                    name="camera"
-                    size={40}
+                    name={selectedObstacleData.icon}
+                    size={32}
                     color={selectedObstacleData.color}
                   />
+                  <Text
+                    style={[
+                      styles.photoCardTitle,
+                      { color: selectedObstacleData.color },
+                    ]}
+                  >
+                    {selectedObstacleData.labelFil}
+                  </Text>
+                  <Text style={styles.photoCardDescription}>
+                    {selectedObstacleData.description}
+                  </Text>
                 </View>
 
-                <Text className="text-center text-gray-700 mb-6">
-                  Kumuha ng larawan ng hadlang para mas madaling maintindihan ng
-                  iba.
-                  {"\n\n"}
-                  Take a photo of the obstacle so others can easily understand
-                  it.
-                </Text>
-
-                <View className="w-full space-y-3">
+                <View style={styles.photoActions}>
                   <TouchableOpacity
+                    style={[
+                      styles.primaryButton,
+                      { backgroundColor: COLORS.softBlue },
+                    ]}
                     onPress={() => setShowCamera(true)}
-                    className="bg-blue-500 py-4 px-6 rounded-lg flex-row items-center justify-center"
-                    style={{ minHeight: 56 }} // PWD accessibility
+                    activeOpacity={0.8}
                   >
-                    <Ionicons name="camera" size={24} color="white" />
-                    <Text className="text-white font-semibold text-lg ml-2">
+                    <Ionicons name="camera" size={20} color={COLORS.white} />
+                    <Text style={styles.primaryButtonText}>
                       Kumuha ng Larawan
                     </Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
+                    style={[
+                      styles.secondaryButton,
+                      { backgroundColor: COLORS.muted },
+                    ]}
                     onPress={handleSkipPhoto}
-                    className="bg-gray-300 py-3 px-6 rounded-lg"
-                    style={{ minHeight: 48 }} // PWD accessibility
+                    activeOpacity={0.8}
                   >
-                    <Text className="text-gray-700 font-semibold text-center">
-                      Laktawan (Skip) - Walang Larawan
+                    <Text style={styles.secondaryButtonText}>
+                      Laktawan (Skip)
                     </Text>
                   </TouchableOpacity>
                 </View>
               </View>
             </View>
-          </View>
-        )}
+          )}
 
-        {/* Step 3: Details Form */}
-        {currentStep === "details" && selectedObstacleData && (
-          <View className="mb-6">
-            <Text className="text-xl font-semibold text-gray-900 mb-4">
-              3. Mga Detalye (Details)
-            </Text>
-
-            {/* Photo Preview */}
-            {capturedPhoto && (
-              <View className="bg-white rounded-xl p-4 mb-4 border border-gray-200">
-                <View className="flex-row items-center">
-                  <Ionicons name="image" size={24} color="#10B981" />
-                  <View className="flex-1 ml-3">
-                    <Text className="font-semibold text-green-800">
-                      ✅ May Larawan (Photo Captured)
-                    </Text>
-                    <Text className="text-sm text-green-600">
-                      Size: {(capturedPhoto.compressedSize / 1024).toFixed(1)}KB
-                      ({(capturedPhoto.compressionRatio * 100).toFixed(0)}% ng
-                      original)
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => setShowCamera(true)}
-                    className="bg-blue-100 px-3 py-2 rounded-lg"
-                  >
-                    <Text className="text-blue-600 font-semibold">Palitan</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-
-            {/* Severity Selection */}
-            <View className="bg-white rounded-xl p-4 mb-4 border border-gray-200">
-              <Text className="font-semibold text-gray-900 mb-3">
-                Gaano kalala? (How severe?)
+          {/* Step 3: Details */}
+          {currentStep === "details" && selectedObstacleData && (
+            <View style={{ marginBottom: 24 }}>
+              <Text
+                style={[
+                  styles.stepTitle,
+                  { fontSize: isSmallScreen ? 18 : 20 },
+                ]}
+              >
+                Mga Detalye
               </Text>
-              <View className="space-y-2">
-                {SEVERITY_LEVELS.map((severity) => (
-                  <TouchableOpacity
-                    key={severity.key}
-                    onPress={() => setSelectedSeverity(severity.key)}
-                    className={`p-3 rounded-lg border-2 flex-row items-center ${
-                      selectedSeverity === severity.key
-                        ? "border-blue-500 bg-blue-50"
-                        : "border-gray-200 bg-white"
-                    }`}
-                    style={{ minHeight: 56 }} // PWD accessibility
-                  >
-                    <View
-                      className="w-4 h-4 rounded-full mr-3"
-                      style={{ backgroundColor: severity.color }}
-                    />
-                    <View className="flex-1">
-                      <Text className="font-semibold text-gray-900">
-                        {severity.labelFil} ({severity.labelEn})
+              <Text style={styles.stepSubtitle}>
+                Provide details about the obstacle severity
+              </Text>
+
+              {/* Photo Preview */}
+              {capturedPhoto && (
+                <View style={[styles.photoPreview, { marginBottom: 20 }]}>
+                  <View style={styles.photoPreviewContent}>
+                    <Ionicons name="image" size={20} color={COLORS.success} />
+                    <View style={{ flex: 1, marginLeft: 12 }}>
+                      <Text style={styles.photoPreviewTitle}>
+                        ✅ Photo Captured
                       </Text>
-                      <Text className="text-sm text-gray-600">
-                        {severity.description}
+                      <Text style={styles.photoPreviewSubtitle}>
+                        {(capturedPhoto.compressedSize / 1024).toFixed(1)}KB
                       </Text>
                     </View>
-                    {selectedSeverity === severity.key && (
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={24}
-                        color="#3B82F6"
-                      />
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            {/* Time Pattern */}
-            <View className="bg-white rounded-xl p-4 mb-4 border border-gray-200">
-              <Text className="font-semibold text-gray-900 mb-3">
-                Kailan nandoon? (When is it there?)
-              </Text>
-              <View className="flex-row flex-wrap gap-2">
-                {TIME_PATTERNS.map((pattern) => (
-                  <TouchableOpacity
-                    key={pattern.key}
-                    onPress={() => setSelectedTimePattern(pattern.key)}
-                    className={`px-4 py-2 rounded-full border-2 ${
-                      selectedTimePattern === pattern.key
-                        ? "border-blue-500 bg-blue-50"
-                        : "border-gray-300 bg-white"
-                    }`}
-                    style={{ minHeight: 44 }} // PWD accessibility
-                  >
-                    <Text
-                      className={`font-semibold ${
-                        selectedTimePattern === pattern.key
-                          ? "text-blue-600"
-                          : "text-gray-600"
-                      }`}
+                    <TouchableOpacity
+                      style={styles.photoEditButton}
+                      onPress={() => setShowCamera(true)}
                     >
-                      {pattern.labelFil}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                      <Text style={styles.photoEditText}>Edit</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
+              {/* Severity Selection */}
+              <View style={[styles.card, { marginBottom: 20 }]}>
+                <Text style={styles.cardTitle}>Gaano kalala?</Text>
+                <Text style={styles.cardSubtitle}>
+                  How severe is this obstacle?
+                </Text>
+
+                <View style={styles.severityGrid}>
+                  {SEVERITY_LEVELS.map((severity) => (
+                    <TouchableOpacity
+                      key={severity.key}
+                      style={[
+                        styles.severityOption,
+                        {
+                          borderColor:
+                            selectedSeverity === severity.key
+                              ? severity.color
+                              : "#E5E7EB",
+                          backgroundColor:
+                            selectedSeverity === severity.key
+                              ? severity.color + "15"
+                              : COLORS.white,
+                        },
+                      ]}
+                      onPress={() => setSelectedSeverity(severity.key)}
+                      activeOpacity={0.8}
+                    >
+                      <View
+                        style={[
+                          styles.severityDot,
+                          { backgroundColor: severity.color },
+                        ]}
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={[
+                            styles.severityTitle,
+                            {
+                              color:
+                                selectedSeverity === severity.key
+                                  ? severity.color
+                                  : COLORS.slate,
+                            },
+                          ]}
+                        >
+                          {severity.labelFil}
+                        </Text>
+                        <Text style={styles.severityDescription}>
+                          {severity.description}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Description Input */}
+              <View style={[styles.card, { marginBottom: 20 }]}>
+                <Text style={styles.cardTitle}>Dagdag na paliwanag</Text>
+                <Text style={styles.cardSubtitle}>
+                  Additional description (optional)
+                </Text>
+
+                <TextInput
+                  value={description}
+                  onChangeText={setDescription}
+                  placeholder="Halimbawa: Laging may jeep na nakapark dito tuwing umaga..."
+                  placeholderTextColor={COLORS.muted}
+                  multiline
+                  numberOfLines={4}
+                  style={styles.textInput}
+                />
+              </View>
+
+              {/* Action Buttons */}
+              <View style={styles.actionButtons}>
+                <TouchableOpacity
+                  style={[
+                    styles.submitButton,
+                    {
+                      backgroundColor:
+                        selectedSeverity && !isSubmitting
+                          ? COLORS.success
+                          : COLORS.muted,
+                    },
+                  ]}
+                  onPress={handleSubmitReport}
+                  disabled={!selectedSeverity || isSubmitting}
+                  activeOpacity={0.8}
+                >
+                  {isSubmitting ? (
+                    <Ionicons name="hourglass" size={20} color={COLORS.white} />
+                  ) : (
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={20}
+                      color={COLORS.white}
+                    />
+                  )}
+                  <Text style={styles.submitButtonText}>
+                    {isSubmitting ? "Nire-report..." : "I-submit ang Report"}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.backButton}
+                  onPress={() => setCurrentStep("photo")}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons
+                    name="chevron-back"
+                    size={16}
+                    color={COLORS.muted}
+                  />
+                  <Text style={styles.backButtonText}>Bumalik</Text>
+                </TouchableOpacity>
               </View>
             </View>
+          )}
 
-            {/* Description */}
-            <View className="bg-white rounded-xl p-4 mb-6 border border-gray-200">
-              <Text className="font-semibold text-gray-900 mb-3">
-                Dagdag na paliwanag (Additional description) - Optional
+          {/* Profile Info Card */}
+          {profile && (
+            <View style={styles.profileCard}>
+              <View style={styles.profileHeader}>
+                <Ionicons
+                  name="information-circle"
+                  size={20}
+                  color={COLORS.softBlue}
+                />
+                <Text style={styles.profileTitle}>Iyong Profile</Text>
+              </View>
+              <Text style={styles.profileText}>
+                Device: {profile.type} •{" "}
+                {profile.avoidStairs ? "Iwas stairs" : "OK sa stairs"}
               </Text>
-              <TextInput
-                value={description}
-                onChangeText={setDescription}
-                placeholder="Halimbawa: Laging may jeep na nakapark dito tuwing umaga..."
-                placeholderTextColor="#9CA3AF"
-                multiline
-                numberOfLines={4}
-                className="border border-gray-300 rounded-lg p-4 text-gray-900 text-base"
-                style={{
-                  minHeight: 100,
-                  textAlignVertical: "top",
-                  fontSize: 16, // PWD accessibility
-                }}
-              />
-              <Text className="text-sm text-gray-500 mt-2">
-                Voice input feature coming soon / Darating na ang voice input
+              <Text style={styles.profileSubtext}>
+                Ang reports mo ay makikita ng mga kapareho mong user type
               </Text>
             </View>
+          )}
 
-            {/* Submit Button */}
+          {/* Reset Button */}
+          {currentStep !== "select" && (
             <TouchableOpacity
-              onPress={handleSubmitReport}
-              disabled={!selectedSeverity || isSubmitting}
-              className={`py-4 px-6 rounded-xl flex-row items-center justify-center ${
-                selectedSeverity && !isSubmitting
-                  ? "bg-green-500 active:bg-green-600"
-                  : "bg-gray-400"
-              }`}
-              style={{ minHeight: 64 }} // PWD accessibility
-              accessibilityRole="button"
-              accessibilityLabel="Submit obstacle report"
+              style={styles.resetButton}
+              onPress={resetForm}
+              activeOpacity={0.8}
             >
-              {isSubmitting ? (
-                <Ionicons name="hourglass" size={24} color="white" />
-              ) : (
-                <Ionicons name="checkmark-circle" size={24} color="white" />
-              )}
-              <Text className="text-white font-bold text-lg ml-2">
-                {isSubmitting ? "Nire-report..." : "I-submit ang Report"}
-              </Text>
+              <Ionicons name="refresh" size={16} color={COLORS.navy} />
+              <Text style={styles.resetButtonText}>Simula Ulit</Text>
             </TouchableOpacity>
-
-            {/* Back Button */}
-            <TouchableOpacity
-              onPress={() => setCurrentStep("photo")}
-              className="mt-3 py-3 px-6 rounded-lg bg-gray-200"
-              style={{ minHeight: 48 }} // PWD accessibility
-            >
-              <Text className="text-gray-700 font-semibold text-center">
-                ← Bumalik sa Photo
-              </Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Reset Button (always visible) */}
-        {currentStep !== "select" && (
-          <TouchableOpacity
-            onPress={resetForm}
-            className="mb-6 py-3 px-6 rounded-lg border border-gray-300"
-            style={{ minHeight: 48 }} // PWD accessibility
-          >
-            <Text className="text-gray-600 font-semibold text-center">
-              🔄 Simula Ulit (Start Over)
-            </Text>
-          </TouchableOpacity>
-        )}
-
-        {/* User Profile Info */}
-        {profile && (
-          <View className="bg-yellow-50 rounded-xl p-4 mb-6 border border-yellow-200">
-            <Text className="font-semibold text-yellow-800 mb-2">
-              📋 Iyong Profile (Your Profile)
-            </Text>
-            <Text className="text-yellow-700">
-              Device: {profile.type} | Max ramp: {profile.maxRampSlope}°
-            </Text>
-            <Text className="text-sm text-yellow-600 mt-1">
-              Ang reports mo ay makikita ng mga kapareho mong user type
-            </Text>
-          </View>
-        )}
+          )}
+        </View>
       </ScrollView>
 
       {/* Camera Modal */}
@@ -761,6 +664,345 @@ const ReportScreen: React.FC = () => {
       </Modal>
     </SafeAreaView>
   );
-};
+}
 
-export default ReportScreen;
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: COLORS.lightGray,
+  },
+
+  // Header
+  header: {
+    backgroundColor: COLORS.navy,
+    marginBottom: 0,
+  },
+  headerContent: {
+    alignItems: "flex-start",
+  },
+  headerTitle: {
+    fontWeight: "700",
+    color: COLORS.white,
+    marginBottom: 4,
+  },
+  headerSubtitle: {
+    color: COLORS.white,
+    opacity: 0.85,
+  },
+
+  // Progress Section - Below Hero
+  progressSection: {
+    backgroundColor: COLORS.white,
+    paddingVertical: 16,
+    marginBottom: 24,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
+  },
+  progressBarContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
+    gap: 8,
+  },
+  progressBar: {
+    flex: 1,
+    height: 4,
+    borderRadius: 2,
+    minWidth: 40,
+  },
+  progressLabel: {
+    fontSize: 14,
+    fontWeight: "500",
+    textAlign: "center",
+  },
+
+  // Steps
+  stepTitle: {
+    fontWeight: "700",
+    color: COLORS.slate,
+    marginBottom: 8,
+  },
+  stepSubtitle: {
+    color: COLORS.muted,
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+
+  // Cards
+  card: {
+    backgroundColor: COLORS.white,
+    borderRadius: 12,
+    padding: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: COLORS.slate,
+    marginBottom: 4,
+  },
+  cardSubtitle: {
+    fontSize: 14,
+    color: COLORS.muted,
+    marginBottom: 16,
+  },
+
+  // Obstacle Selection
+  obstacleGrid: {
+    gap: 12,
+  },
+  obstacleCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: "#E5E7EB",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  obstacleIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  obstacleTitle: {
+    fontWeight: "600",
+    color: COLORS.slate,
+    marginBottom: 4,
+  },
+  obstacleDescription: {
+    color: COLORS.muted,
+    lineHeight: 16,
+  },
+
+  // Photo Section
+  photoSection: {
+    alignItems: "center",
+  },
+  photoCard: {
+    width: "100%",
+    borderRadius: 12,
+    padding: 20,
+    alignItems: "center",
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  photoCardTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  photoCardDescription: {
+    color: COLORS.muted,
+    textAlign: "center",
+    lineHeight: 18,
+  },
+  photoActions: {
+    width: "100%",
+    gap: 12,
+  },
+
+  // Buttons
+  primaryButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+    borderRadius: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  primaryButtonText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: COLORS.white,
+    marginLeft: 8,
+  },
+  secondaryButton: {
+    padding: 14,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  secondaryButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: COLORS.white,
+  },
+
+  // Photo Preview
+  photoPreview: {
+    backgroundColor: COLORS.success + "15",
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: COLORS.success + "30",
+  },
+  photoPreviewContent: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  photoPreviewTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: COLORS.success,
+  },
+  photoPreviewSubtitle: {
+    fontSize: 12,
+    color: COLORS.success,
+    opacity: 0.8,
+  },
+  photoEditButton: {
+    backgroundColor: COLORS.softBlue,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  photoEditText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: COLORS.white,
+  },
+
+  // Severity Selection
+  severityGrid: {
+    gap: 12,
+  },
+  severityOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 2,
+  },
+  severityDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: 16,
+  },
+  severityTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    marginBottom: 2,
+  },
+  severityDescription: {
+    fontSize: 13,
+    color: COLORS.muted,
+  },
+
+  // Text Input
+  textInput: {
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 16,
+    color: COLORS.slate,
+    minHeight: 100,
+    textAlignVertical: "top",
+    backgroundColor: COLORS.white,
+  },
+
+  // Action Buttons
+  actionButtons: {
+    gap: 12,
+  },
+  submitButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+    borderRadius: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  submitButtonText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: COLORS.white,
+    marginLeft: 8,
+  },
+  backButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 14,
+    borderRadius: 10,
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  backButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: COLORS.muted,
+    marginLeft: 4,
+  },
+
+  // Profile Card
+  profileCard: {
+    backgroundColor: COLORS.chipBg,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#E0F2FE",
+  },
+  profileHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  profileTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: COLORS.softBlue,
+    marginLeft: 8,
+  },
+  profileText: {
+    fontSize: 14,
+    color: COLORS.slate,
+    marginBottom: 4,
+  },
+  profileSubtext: {
+    fontSize: 12,
+    color: COLORS.muted,
+  },
+
+  // Reset Button
+  resetButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 14,
+    borderRadius: 10,
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    marginTop: 8,
+  },
+  resetButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: COLORS.navy,
+    marginLeft: 8,
+  },
+});

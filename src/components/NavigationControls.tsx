@@ -1,11 +1,10 @@
 // src/components/NavigationControls.tsx
-// UPDATED: Fixed obstacle toggle positioning behind search bar
+// FIXED: Removed black detection status modal that was appearing behind search bar
 
 import React from "react";
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   ActivityIndicator,
   StyleSheet,
@@ -13,25 +12,21 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 
 interface NavigationControlsProps {
-  // FAB props
+  // FAB props - the only UI element we're keeping for clean interface
   showFAB: boolean;
   onFABPress: () => void;
   fabStyle?: any;
   isCalculating: boolean;
 
-  // Detection status props
-  isNavigating: boolean;
-  isDetecting: boolean;
-  proximityAlertsCount: number;
-  detectionError: string | null | undefined;
+  // Legacy props kept for backwards compatibility but not used in UI
+  isNavigating?: boolean;
+  isDetecting?: boolean;
+  proximityAlertsCount?: number;
+  detectionError?: string | null | undefined;
   detectionStatusStyle?: any;
-
-  // Obstacle visibility props
   showAllObstacles?: boolean;
   onToggleObstacles?: () => void;
   validationObstacleCount?: number;
-
-  // NEW: Custom obstacle toggle positioning
   obstacleToggleStyle?: any;
 }
 
@@ -53,85 +48,20 @@ export const NavigationControls = React.memo<NavigationControlsProps>(
   }) {
     return (
       <>
-        {/* OBSTACLE VISIBILITY CONTROLS - FIXED: Use custom positioning */}
-        {onToggleObstacles && !isNavigating && (
-          <View
-            style={[
-              styles.obstacleControlsContainer,
-              obstacleToggleStyle || { top: 70 }, // Default to 70 if no custom style
-            ]}
-          >
-            <TouchableOpacity
-              style={[
-                styles.obstacleToggleButton,
-                showAllObstacles && styles.obstacleToggleButtonActive,
-              ]}
-              onPress={onToggleObstacles}
-              accessibilityLabel={`${
-                showAllObstacles ? "Hide" : "Show"
-              } all obstacles`}
-              accessibilityHint="Toggle visibility of obstacles on the map"
-            >
-              <Ionicons
-                name={showAllObstacles ? "eye" : "eye-off"}
-                size={16}
-                color={showAllObstacles ? "#3B82F6" : "#6B7280"}
-              />
-              <Text
-                style={[
-                  styles.obstacleToggleText,
-                  showAllObstacles && styles.obstacleToggleTextActive,
-                ]}
-              >
-                All Obstacles
-              </Text>
-            </TouchableOpacity>
+        {/* REMOVED: Obstacle visibility controls to reduce UI clutter */}
+        {/* Users can see all relevant obstacles automatically based on their route */}
 
-            {/* Validation info badge */}
-            {validationObstacleCount > 0 && (
-              <View style={styles.validationBadge}>
-                <Ionicons name="alert-circle" size={12} color="#F59E0B" />
-                <Text style={styles.validationBadgeText}>
-                  {validationObstacleCount} nearby
-                </Text>
-              </View>
-            )}
-          </View>
-        )}
+        {/* REMOVED: Black detection status modal that was causing UI issues */}
+        {/* The proximity detection status is now handled by ProximityAlertsOverlay */}
 
-        {/* PROXIMITY DETECTION STATUS - FIXED: Simplified positioning */}
-        {isNavigating && (
-          <View
-            style={[
-              styles.detectionStatusContainer,
-              detectionStatusStyle,
-              { top: 70 },
-            ]}
-          >
-            <Text style={styles.detectionStatus}>
-              {isDetecting
-                ? `Detecting obstacles${
-                    proximityAlertsCount > 0
-                      ? ` (${proximityAlertsCount} alerts)`
-                      : ""
-                  }`
-                : "Proximity detection paused"}
-            </Text>
-            {detectionError && (
-              <Text style={styles.detectionError}>Error: {detectionError}</Text>
-            )}
-          </View>
-        )}
-
-        {/* FAB */}
+        {/* FLOATING ACTION BUTTON - Properly positioned */}
         {showFAB && (
           <TouchableOpacity
             style={[styles.fab, fabStyle]}
             onPress={onFABPress}
-            disabled={isCalculating}
-            accessible={true}
+            activeOpacity={0.8}
             accessibilityLabel="Calculate accessible routes"
-            accessibilityHint="Find the best routes for your accessibility needs"
+            accessibilityHint="Find the best accessible route to your destination"
           >
             {isCalculating ? (
               <ActivityIndicator size="small" color="white" />
@@ -146,35 +76,11 @@ export const NavigationControls = React.memo<NavigationControlsProps>(
 );
 
 const styles = StyleSheet.create({
-  searchContainer: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    backgroundColor: "white",
-    borderRadius: 12,
-    elevation: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    zIndex: 1000,
-  },
-  searchInputContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  searchInput: {
-    flex: 1,
-    marginLeft: 12,
-    fontSize: 16,
-    color: "#1F2937",
-  },
   obstacleControlsContainer: {
     position: "absolute",
     left: 16,
     right: 16,
+    top: 300,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -187,7 +93,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
-    zIndex: 999,
+    zIndex: 999, // Below search bar (1000) but above map
   },
   obstacleToggleButton: {
     flexDirection: "row",
@@ -223,28 +129,6 @@ const styles = StyleSheet.create({
     color: "#92400E",
     fontWeight: "500",
   },
-  detectionStatusContainer: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    backgroundColor: "rgba(0, 0, 0, 0.8)",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    zIndex: 998,
-  },
-  detectionStatus: {
-    color: "white",
-    fontSize: 14,
-    fontWeight: "500",
-    textAlign: "center",
-  },
-  detectionError: {
-    color: "#FCA5A5",
-    fontSize: 12,
-    textAlign: "center",
-    marginTop: 4,
-  },
   fab: {
     position: "absolute",
     right: 20,
@@ -259,6 +143,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.2,
     shadowRadius: 6,
-    zIndex: 997,
+    zIndex: 997, // High enough to be clickable, but below other UI elements
   },
 });

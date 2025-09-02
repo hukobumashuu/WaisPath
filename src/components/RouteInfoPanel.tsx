@@ -1,5 +1,5 @@
 // src/components/RouteInfoPanel.tsx
-// CLEAN VERSION: Minimizable panel with obstacle counts instead of grades
+// CLEAN UX VERSION: Spacious design with proper button layout
 
 import React, { useState } from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
@@ -53,52 +53,63 @@ export const RouteInfoPanel = React.memo<RouteInfoPanelProps>(
     const accessibleObstacles =
       routeAnalysis.accessibleRoute.obstacles?.length || 0;
 
-    // Minimized view - just the essential info
+    // Minimized view - compact with essential info
     if (isMinimized) {
       return (
         <View style={[styles.routeInfoContainer, style]}>
           <View style={styles.routeInfoMinimized}>
             <TouchableOpacity
-              style={styles.minimizedContent}
+              style={styles.minimizedHeader}
               onPress={() => setIsMinimized(false)}
             >
               <Text style={styles.minimizedTitle}>
                 Routes to {destinationName}
               </Text>
-              <View style={styles.minimizedRoutes}>
-                <Text style={styles.minimizedRoute}>
-                  🔴{" "}
-                  {Math.round(
-                    (routeAnalysis.fastestRoute.duration || 600) / 60
-                  )}
-                  min • {fastestObstacles} obstacles
-                </Text>
-                <Text style={styles.minimizedRoute}>
-                  🟢{" "}
-                  {Math.round(
-                    (routeAnalysis.accessibleRoute.duration || 600) / 60
-                  )}
-                  min • {accessibleObstacles} obstacles
-                </Text>
-              </View>
+              <Ionicons name="chevron-up" size={16} color="#6B7280" />
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.minimizedButton}
-              onPress={() => onStartNavigation("accessible")}
-            >
-              <Ionicons name="navigate" size={20} color="#22C55E" />
-            </TouchableOpacity>
+            {/* Compact navigation buttons */}
+            <View style={styles.minimizedButtons}>
+              <TouchableOpacity
+                style={[styles.navigationButton, styles.fastestButton]}
+                onPress={() => onStartNavigation("fastest")}
+              >
+                <View style={styles.buttonContent}>
+                  <Text style={styles.buttonLabel}>Fastest</Text>
+                  <Text style={styles.buttonDetails}>
+                    {Math.round(
+                      (routeAnalysis.fastestRoute.duration || 600) / 60
+                    )}
+                    min • {fastestObstacles} obstacles
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.navigationButton, styles.accessibleButton]}
+                onPress={() => onStartNavigation("accessible")}
+              >
+                <View style={styles.buttonContent}>
+                  <Text style={styles.buttonLabel}>Accessible</Text>
+                  <Text style={styles.buttonDetails}>
+                    {Math.round(
+                      (routeAnalysis.accessibleRoute.duration || 600) / 60
+                    )}
+                    min • {accessibleObstacles} obstacles
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       );
     }
 
-    // Full view
+    // Expanded view - no recalculate button for cleaner interface
     return (
       <View style={[styles.routeInfoContainer, style]}>
         <View style={styles.routeInfo}>
-          {/* Header with minimize button */}
+          {/* Clean header */}
           <View style={styles.routeHeader}>
             <Text style={styles.routeTitle}>Routes to {destinationName}</Text>
             <TouchableOpacity
@@ -109,67 +120,74 @@ export const RouteInfoPanel = React.memo<RouteInfoPanelProps>(
             </TouchableOpacity>
           </View>
 
-          {/* Route Comparison */}
+          {/* Spacious route comparison */}
           <View style={styles.routeComparison}>
             {/* Fastest Route */}
-            <View style={styles.routeRow}>
-              <View style={styles.routeIndicator}>
-                <View
-                  style={[styles.routeColor, { backgroundColor: "#EF4444" }]}
-                />
-                <Text style={styles.routeLabel}>Fastest</Text>
+            <TouchableOpacity
+              style={styles.routeCard}
+              onPress={() => onStartNavigation("fastest")}
+            >
+              <View style={styles.routeCardHeader}>
+                <View style={styles.routeIndicator}>
+                  <Ionicons name="flash" size={20} color="#EF4444" />
+                  <Text style={[styles.routeLabel, { color: "#EF4444" }]}>
+                    Fastest Route
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#EF4444" />
               </View>
-              <Text style={styles.routeDetails}>
-                {Math.round((routeAnalysis.fastestRoute.duration || 600) / 60)}
-                min •{" "}
-                {((routeAnalysis.fastestRoute.distance || 1000) / 1000).toFixed(
-                  1
-                )}
-                km • {fastestObstacles} obstacles
-              </Text>
-              <TouchableOpacity
-                style={styles.navigateBtn}
-                onPress={() => onStartNavigation("fastest")}
-              >
-                <Ionicons name="navigate" size={16} color="#EF4444" />
-              </TouchableOpacity>
-            </View>
+
+              <View style={styles.routeStats}>
+                <Text style={styles.primaryStat}>
+                  {Math.round(
+                    (routeAnalysis.fastestRoute.duration || 600) / 60
+                  )}{" "}
+                  min
+                </Text>
+                <Text style={styles.secondaryStat}>
+                  {(
+                    (routeAnalysis.fastestRoute.distance || 1000) / 1000
+                  ).toFixed(1)}{" "}
+                  km
+                </Text>
+                <Text style={styles.secondaryStat}>
+                  {fastestObstacles} obstacles
+                </Text>
+              </View>
+            </TouchableOpacity>
 
             {/* Accessible Route */}
-            <View style={styles.routeRow}>
-              <View style={styles.routeIndicator}>
-                <View
-                  style={[styles.routeColor, { backgroundColor: "#22C55E" }]}
-                />
-                <Text style={styles.routeLabel}>Accessible</Text>
-              </View>
-              <Text style={styles.routeDetails}>
-                {Math.round(
-                  (routeAnalysis.accessibleRoute.duration || 600) / 60
-                )}
-                min •{" "}
-                {(
-                  (routeAnalysis.accessibleRoute.distance || 1000) / 1000
-                ).toFixed(1)}
-                km • {accessibleObstacles} obstacles
-              </Text>
-              <TouchableOpacity
-                style={styles.navigateBtn}
-                onPress={() => onStartNavigation("accessible")}
-              >
-                <Ionicons name="navigate" size={16} color="#22C55E" />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Quick Controls */}
-          <View style={styles.controlsRow}>
             <TouchableOpacity
-              style={styles.controlButton}
-              onPress={onRecalculate}
+              style={styles.routeCard}
+              onPress={() => onStartNavigation("accessible")}
             >
-              <Ionicons name="refresh" size={16} color="#6B7280" />
-              <Text style={styles.controlButtonText}>Recalculate</Text>
+              <View style={styles.routeCardHeader}>
+                <View style={styles.routeIndicator}>
+                  <Ionicons name="accessibility" size={20} color="#22C55E" />
+                  <Text style={[styles.routeLabel, { color: "#22C55E" }]}>
+                    Accessible Route
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#22C55E" />
+              </View>
+
+              <View style={styles.routeStats}>
+                <Text style={styles.primaryStat}>
+                  {Math.round(
+                    (routeAnalysis.accessibleRoute.duration || 600) / 60
+                  )}{" "}
+                  min
+                </Text>
+                <Text style={styles.secondaryStat}>
+                  {(
+                    (routeAnalysis.accessibleRoute.distance || 1000) / 1000
+                  ).toFixed(1)}{" "}
+                  km
+                </Text>
+                <Text style={styles.secondaryStat}>
+                  {accessibleObstacles} obstacles
+                </Text>
+              </View>
             </TouchableOpacity>
           </View>
         </View>
@@ -185,124 +203,130 @@ const styles = StyleSheet.create({
     right: 16,
     zIndex: 10,
   },
+
+  // Expanded view styles
   routeInfo: {
     backgroundColor: "white",
-    borderRadius: 12,
-    padding: 16,
-    elevation: 4,
+    borderRadius: 16,
+    padding: 20,
+    elevation: 6,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  routeInfoMinimized: {
-    backgroundColor: "white",
-    borderRadius: 12,
-    padding: 12,
-    elevation: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    flexDirection: "row",
-    alignItems: "center",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
   },
   routeHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 16,
+    marginBottom: 20,
   },
   routeTitle: {
-    fontSize: 16,
-    fontWeight: "bold",
+    fontSize: 18,
+    fontWeight: "700",
     color: "#1F2937",
   },
   minimizeButton: {
-    padding: 4,
-    borderRadius: 4,
+    padding: 8,
+    borderRadius: 8,
     backgroundColor: "#F9FAFB",
   },
-  minimizedContent: {
-    flex: 1,
+  routeComparison: {
+    gap: 16,
+  },
+  routeCard: {
+    backgroundColor: "#F9FAFB",
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  routeCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  routeIndicator: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  routeLabel: {
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  routeStats: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+  },
+  primaryStat: {
+    fontSize: 24,
+    fontWeight: "700",
+    color: "#1F2937",
+  },
+  secondaryStat: {
+    fontSize: 14,
+    color: "#6B7280",
+    fontWeight: "500",
+  },
+
+  // Minimized view styles - more compact
+  routeInfoMinimized: {
+    backgroundColor: "white",
+    borderRadius: 12,
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    overflow: "hidden",
+  },
+  minimizedHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 12,
+    backgroundColor: "#FAFAFA",
   },
   minimizedTitle: {
     fontSize: 14,
     fontWeight: "600",
     color: "#1F2937",
-    marginBottom: 4,
   },
-  minimizedRoutes: {
-    gap: 2,
-  },
-  minimizedRoute: {
-    fontSize: 12,
-    color: "#6B7280",
-  },
-  minimizedButton: {
-    padding: 8,
-    borderRadius: 8,
-    backgroundColor: "#F0FDF4",
-    marginLeft: 12,
-  },
-  routeComparison: {
-    marginBottom: 16,
-  },
-  routeRow: {
+  minimizedButtons: {
     flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F3F4F6",
-    minHeight: 48,
+    padding: 12,
+    gap: 8,
   },
-  routeIndicator: {
-    flexDirection: "row",
-    alignItems: "center",
-    width: 80,
-  },
-  routeColor: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginRight: 8,
-  },
-  routeLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#6B7280",
-  },
-  routeDetails: {
+  navigationButton: {
     flex: 1,
-    fontSize: 13,
-    color: "#1F2937",
-    marginLeft: 12,
-  },
-  navigateBtn: {
-    padding: 8,
-    borderRadius: 6,
-    backgroundColor: "#F9FAFB",
-    minWidth: 40,
-    minHeight: 40,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  controlsRow: {
-    flexDirection: "row",
-    justifyContent: "center",
-  },
-  controlButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    backgroundColor: "#F3F4F6",
+    paddingVertical: 12,
+    paddingHorizontal: 10,
     borderRadius: 8,
-    minHeight: 40,
+    borderWidth: 1,
   },
-  controlButtonText: {
-    fontSize: 12,
+  fastestButton: {
+    borderColor: "#FEE2E2",
+    backgroundColor: "#FEF2F2",
+  },
+  accessibleButton: {
+    borderColor: "#DCFCE7",
+    backgroundColor: "#F0FDF4",
+  },
+  buttonContent: {
+    alignItems: "center",
+  },
+  buttonLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#1F2937",
+    marginBottom: 2,
+  },
+  buttonDetails: {
+    fontSize: 11,
     color: "#6B7280",
-    marginLeft: 6,
+    textAlign: "center",
   },
 });

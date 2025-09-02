@@ -1,8 +1,8 @@
 // src/components/EnhancedSearchBar.tsx
 // Enhanced search component with Google Places integration
-// Designed specifically for PWD users with accessibility prioritization
+// Fixed: prevents keyboard flashing by deferring modal/popular open until keyboard state is settled.
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -13,6 +13,11 @@ import {
   StyleSheet,
   Keyboard,
   Alert,
+  TouchableWithoutFeedback,
+  Modal,
+  Platform,
+  findNodeHandle,
+  UIManager,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -45,11 +50,56 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showPopularDestinations, setShowPopularDestinations] = useState(false);
 
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInput | null>(null);
+  const inputWrapperRef = useRef<View | null>(null);
   const suggestionTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  // layout for anchoring dropdown
+  const [inputLayout, setInputLayout] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+
+  // track keyboard visibility to decide modal vs inline
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const keyboardVisibleRef = useRef(false); // immediate-ref to avoid stale closures
 
   // Popular destinations for quick access
   const popularDestinations = googlePlacesService.getPopularDestinations();
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener("keyboardDidShow", () => {
+      keyboardVisibleRef.current = true;
+      setIsKeyboardVisible(true);
+    });
+    const hideSub = Keyboard.addListener("keyboardDidHide", () => {
+      keyboardVisibleRef.current = false;
+      setIsKeyboardVisible(false);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  /**
+   * Measure input position in window coordinates so we can anchor the modal dropdown
+   */
+  const measureInput = useCallback(() => {
+    const node = findNodeHandle(inputWrapperRef.current as any);
+    if (!node) {
+      setInputLayout(null);
+      return;
+    }
+    UIManager.measureInWindow(
+      node,
+      (x: number, y: number, width: number, height: number) => {
+        setInputLayout({ x, y, width, height });
+      }
+    );
+  }, []);
 
   /**
    * Debounced autocomplete suggestions
@@ -71,50 +121,52 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
         );
         setSuggestions(results);
         setShowSuggestions(true);
+        setShowPopularDestinations(false);
+        // measure when opening so modal anchor is correct
+        setTimeout(measureInput, 80);
       } catch (error) {
         console.error("Autocomplete error:", error);
-        // Show popular destinations as fallback
-        setShowPopularDestinations(true);
+        // Show popular destinations as fallback (but only inline if keyboard visible)
+        if (keyboardVisibleRef.current) {
+          setShowPopularDestinations(true);
+        } else {
+          // if keyboard not visible, don't immediately open modal — measure & set after a short delay
+          setTimeout(() => {
+            measureInput();
+            setShowPopularDestinations(true);
+          }, 180);
+        }
+        setShowSuggestions(false);
       } finally {
         setIsLoadingSuggestions(false);
       }
     },
-    [userLocation]
+    [userLocation, measureInput]
   );
 
-  /**
-   * Handle text input changes with debouncing
-   */
   const handleTextChange = (text: string) => {
     setQuery(text);
 
-    // Clear existing timeout
     if (suggestionTimeout.current) {
       clearTimeout(suggestionTimeout.current);
     }
 
-    // Debounce suggestions request
     suggestionTimeout.current = setTimeout(() => {
       getSuggestions(text);
     }, 300);
   };
 
-  /**
-   * Handle suggestion selection
-   */
   const handleSuggestionPress = async (suggestion: AutocompleteResult) => {
     try {
       setIsLoadingResults(true);
       setShowSuggestions(false);
       setQuery(suggestion.mainText);
 
-      // Get detailed place information
       const placeDetails = await googlePlacesService.getPlaceDetails(
         suggestion.placeId
       );
 
       if (placeDetails) {
-        console.log(`✅ Selected: ${placeDetails.name}`);
         onDestinationSelect(placeDetails);
         Keyboard.dismiss();
       } else {
@@ -134,9 +186,6 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
     }
   };
 
-  /**
-   * Handle popular destination selection
-   */
   const handlePopularDestinationPress = async (destination: {
     name: string;
     query: string;
@@ -154,7 +203,6 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
 
       if (results.length > 0) {
         onDestinationSelect(results[0]);
-        console.log(`✅ Selected popular destination: ${destination.name}`);
         Keyboard.dismiss();
       } else {
         Alert.alert(
@@ -173,9 +221,6 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
     }
   };
 
-  /**
-   * Perform text search when user presses search
-   */
   const handleSearch = async () => {
     if (!query.trim()) return;
 
@@ -187,21 +232,18 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
       const results = await googlePlacesService.searchPlaces(
         query,
         userLocation,
-        10000 // 10km radius for text search
+        10000
       );
 
       if (results.length > 0) {
         setSearchResults(results);
-        // Auto-select first result if there's a clear match
         if (
           results.length === 1 ||
           query.toLowerCase().includes(results[0].name.toLowerCase())
         ) {
           onDestinationSelect(results[0]);
-          console.log(`✅ Auto-selected: ${results[0].name}`);
           Keyboard.dismiss();
         } else {
-          // Show multiple results for user selection
           setShowSuggestions(true);
           setSuggestions(
             results.map((result) => ({
@@ -209,13 +251,14 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
               description: `${result.name} - ${result.address}`,
               mainText: result.name,
               secondaryText: result.address,
-              types: result.types,
+              types: result.types ?? [],
               structured: {
                 mainText: result.name,
                 secondaryText: result.address,
               },
             }))
           );
+          setTimeout(measureInput, 80);
         }
       } else {
         Alert.alert(
@@ -225,7 +268,17 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
             { text: "Try Again" },
             {
               text: "Browse Popular",
-              onPress: () => setShowPopularDestinations(true),
+              onPress: () => {
+                // prefer inline if typing
+                if (keyboardVisibleRef.current) {
+                  setShowPopularDestinations(true);
+                } else {
+                  setTimeout(() => {
+                    measureInput();
+                    setShowPopularDestinations(true);
+                  }, 180);
+                }
+              },
             },
           ]
         );
@@ -242,39 +295,69 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
   };
 
   /**
-   * Clear search and show popular destinations
+   * Clear search and show popular destinations:
+   * - focus input
+   * - wait shortly to let keyboard show, then open inline popular
+   * - if keyboard won't show, open modal after measure
    */
   const handleClearAndShowPopular = () => {
     setQuery("");
     setSuggestions([]);
     setShowSuggestions(false);
-    setShowPopularDestinations(true);
+
+    // focus the input — keyboard should come up
     inputRef.current?.focus();
+
+    // small delay so keyboardDidShow can fire and update keyboardVisibleRef
+    setTimeout(() => {
+      if (keyboardVisibleRef.current) {
+        setShowPopularDestinations(true);
+        setTimeout(measureInput, 80);
+      } else {
+        // keyboard didn't appear — show modal dropdown anchored
+        setTimeout(() => {
+          measureInput();
+          setShowPopularDestinations(true);
+        }, 120);
+      }
+    }, 260);
   };
 
   /**
-   * Hide suggestions when input loses focus
+   * onFocus: don't immediately open modal/popular (avoids modal stealing focus).
+   * Wait briefly and open inline popular only if keyboard actually visible.
    */
+  const handleInputFocus = () => {
+    // let the keyboard event arrive; after small delay, open popular inline if keyboard is visible
+    setTimeout(() => {
+      if (keyboardVisibleRef.current) {
+        setShowPopularDestinations(true);
+        setTimeout(measureInput, 80);
+      }
+    }, 260);
+  };
+
   const handleInputBlur = () => {
     // Delay hiding to allow suggestion tap
     setTimeout(() => {
       setShowSuggestions(false);
       setShowPopularDestinations(false);
-    }, 200);
+    }, 160);
   };
 
-  /**
-   * Show popular destinations when input gains focus and is empty
-   */
-  const handleInputFocus = () => {
-    if (!query.trim()) {
-      setShowPopularDestinations(true);
+  // keep measurement updated while visible (small interval)
+  useEffect(() => {
+    let tid: number | undefined;
+    if (showSuggestions || showPopularDestinations) {
+      tid = setInterval(() => {
+        measureInput();
+      }, 700) as unknown as number;
     }
-  };
+    return () => {
+      if (tid) clearInterval(tid);
+    };
+  }, [showSuggestions, showPopularDestinations, measureInput]);
 
-  /**
-   * Render suggestion item with accessibility info
-   */
   const renderSuggestionItem = ({ item }: { item: AutocompleteResult }) => (
     <TouchableOpacity
       style={styles.suggestionItem}
@@ -294,7 +377,7 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
           <Text style={styles.suggestionSecondaryText}>
             {item.secondaryText}
           </Text>
-          {item.types.some((type) =>
+          {item.types?.some((type) =>
             ["hospital", "pharmacy", "government_office"].includes(type)
           ) && (
             <View style={styles.accessibilityBadge}>
@@ -311,9 +394,6 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
     </TouchableOpacity>
   );
 
-  /**
-   * Render popular destination item
-   */
   const renderPopularDestinationItem = ({
     item,
   }: {
@@ -342,76 +422,22 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
     </TouchableOpacity>
   );
 
-  return (
-    <View style={[styles.container, style]}>
-      {/* Search Input */}
-      <View style={styles.searchInputContainer}>
-        <Ionicons
-          name="search"
-          size={20}
-          color="#6B7280"
-          style={styles.searchIcon}
-        />
-        <TextInput
-          ref={inputRef}
-          style={styles.searchInput}
-          placeholder={placeholder}
-          value={query}
-          onChangeText={handleTextChange}
-          onFocus={handleInputFocus}
-          onBlur={handleInputBlur}
-          onSubmitEditing={handleSearch}
-          placeholderTextColor="#9CA3AF"
-          returnKeyType="search"
-          accessibilityLabel="Destination search input"
-          accessibilityHint="Enter where you want to navigate to for accessible routes"
-        />
-
-        {/* Clear/Popular button */}
-        {query ? (
-          <TouchableOpacity
-            onPress={() => setQuery("")}
-            style={styles.actionButton}
-            accessibilityLabel="Clear search"
-          >
-            <Ionicons name="close" size={20} color="#6B7280" />
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            onPress={handleClearAndShowPopular}
-            style={styles.actionButton}
-            accessibilityLabel="Show popular destinations"
-          >
-            <Ionicons name="star-outline" size={20} color="#6B7280" />
-          </TouchableOpacity>
-        )}
-
-        {/* Loading indicator */}
-        {(isLoadingSuggestions || isLoadingResults) && (
-          <ActivityIndicator
-            size="small"
-            color="#3B82F6"
-            style={styles.loadingIndicator}
-          />
-        )}
-      </View>
-
-      {/* Suggestions List */}
+  // Dropdown content wrapper (shared for modal & inline)
+  const DropdownContent = (
+    <>
       {showSuggestions && suggestions.length > 0 && (
-        <View style={styles.suggestionsContainer}>
-          <FlatList
-            data={suggestions}
-            keyExtractor={(item) => item.placeId}
-            renderItem={renderSuggestionItem}
-            style={styles.suggestionsList}
-            keyboardShouldPersistTaps="handled"
-          />
-        </View>
+        <FlatList
+          data={suggestions}
+          keyExtractor={(item) => item.placeId}
+          renderItem={renderSuggestionItem}
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+          style={styles.suggestionsList}
+        />
       )}
 
-      {/* Popular Destinations */}
-      {showPopularDestinations && (
-        <View style={styles.popularDestinationsContainer}>
+      {showPopularDestinations && popularDestinations.length > 0 && (
+        <>
           <Text style={styles.popularDestinationsTitle}>
             Popular PWD Destinations
           </Text>
@@ -419,18 +445,181 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
             data={popularDestinations}
             keyExtractor={(item) => item.name}
             renderItem={renderPopularDestinationItem}
-            style={styles.popularDestinationsList}
             keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+            style={styles.popularDestinationsList}
           />
-        </View>
+        </>
       )}
-    </View>
+    </>
+  );
+
+  return (
+    <TouchableWithoutFeedback
+      onPress={() => {
+        setShowSuggestions(false);
+        setShowPopularDestinations(false);
+        Keyboard.dismiss();
+      }}
+    >
+      <View style={[styles.container, style]}>
+        {/* Input wrapper for measurement */}
+        <View ref={inputWrapperRef} style={styles.inputWrapper}>
+          <View style={styles.searchInputContainer}>
+            <Ionicons
+              name="search"
+              size={20}
+              color="#6B7280"
+              style={styles.searchIcon}
+            />
+            <TextInput
+              ref={inputRef}
+              style={styles.searchInput}
+              placeholder={placeholder}
+              value={query}
+              onChangeText={handleTextChange}
+              onFocus={handleInputFocus}
+              onBlur={handleInputBlur}
+              onSubmitEditing={handleSearch}
+              placeholderTextColor="#9CA3AF"
+              returnKeyType="search"
+              accessibilityLabel="Destination search input"
+              accessibilityHint="Enter where you want to navigate to for accessible routes"
+            />
+
+            {query ? (
+              <TouchableOpacity
+                onPress={() => {
+                  setQuery("");
+                  setSuggestions([]);
+                  setShowSuggestions(false);
+                  // focus and then allow keyboardDidShow handler to decide showing popular
+                  inputRef.current?.focus();
+                  setTimeout(() => {
+                    if (keyboardVisibleRef.current) {
+                      setShowPopularDestinations(true);
+                      setTimeout(measureInput, 80);
+                    }
+                  }, 260);
+                }}
+                style={styles.actionButton}
+                accessibilityLabel="Clear search"
+              >
+                <Ionicons name="close" size={20} color="#6B7280" />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                onPress={handleClearAndShowPopular}
+                style={styles.actionButton}
+                accessibilityLabel="Show popular destinations"
+              >
+                <Ionicons name="star-outline" size={20} color="#6B7280" />
+              </TouchableOpacity>
+            )}
+
+            {(isLoadingSuggestions || isLoadingResults) && (
+              <ActivityIndicator
+                size="small"
+                color="#3B82F6"
+                style={styles.loadingIndicator}
+              />
+            )}
+          </View>
+
+          {/* Inline dropdown: render when keyboard visible so typing & keyboard remain functional */}
+          {isKeyboardVisible &&
+            (showSuggestions || showPopularDestinations) && (
+              <View
+                style={[styles.dropdownInner, { marginTop: 8 }]}
+                pointerEvents="box-none"
+              >
+                {DropdownContent}
+              </View>
+            )}
+        </View>
+
+        {/* Modal-backed dropdown: only when keyboard is NOT visible (prevents touch-through to map) */}
+        {!isKeyboardVisible && (showSuggestions || showPopularDestinations) && (
+          <Modal
+            visible
+            transparent
+            animationType="fade"
+            onRequestClose={() => {
+              setShowSuggestions(false);
+              setShowPopularDestinations(false);
+            }}
+          >
+            <TouchableWithoutFeedback
+              onPress={() => {
+                setShowSuggestions(false);
+                setShowPopularDestinations(false);
+                Keyboard.dismiss();
+              }}
+            >
+              <View style={styles.modalOverlay}>
+                <View
+                  style={[
+                    styles.modalDropdownContainer,
+                    inputLayout
+                      ? {
+                          left: Math.max(8, inputLayout.x - 8),
+                          top: Math.max(
+                            Platform.OS === "android" ? 20 : 44,
+                            inputLayout.y + inputLayout.height + 8
+                          ),
+                          width: Math.max(280, inputLayout.width + 16),
+                        }
+                      : { marginTop: 80, marginHorizontal: 16 },
+                  ]}
+                >
+                  <View style={styles.dropdownInner}>{DropdownContent}</View>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </Modal>
+        )}
+
+        {/* Compact searchResults (if you still want to show under input without modal) */}
+        {searchResults.length > 0 &&
+          !showSuggestions &&
+          !showPopularDestinations && (
+            <View style={styles.resultsContainer}>
+              <FlatList
+                data={searchResults}
+                keyExtractor={(item) => item.placeId}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.suggestionItem}
+                    onPress={() => onDestinationSelect(item)}
+                  >
+                    <View style={styles.suggestionContent}>
+                      <Ionicons
+                        name="location-outline"
+                        size={20}
+                        color="#6B7280"
+                        style={styles.suggestionIcon}
+                      />
+                      <View style={styles.suggestionText}>
+                        <Text style={styles.suggestionMainText}>
+                          {item.name}
+                        </Text>
+                        <Text style={styles.suggestionSecondaryText}>
+                          {item.address}
+                        </Text>
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                )}
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled
+              />
+            </View>
+          )}
+      </View>
+    </TouchableWithoutFeedback>
   );
 };
 
-/**
- * Get appropriate icon for destination category
- */
 const getIconForCategory = (
   category: string
 ): keyof typeof Ionicons.glyphMap => {
@@ -448,56 +637,62 @@ const getIconForCategory = (
 const styles = StyleSheet.create({
   container: {
     position: "relative",
-    zIndex: 1000,
+    zIndex: Platform.OS === "android" ? 9999 : 1000,
+  },
+  inputWrapper: {
+    position: "relative",
+    zIndex: Platform.OS === "android" ? 9999 : 1000,
   },
   searchInputContainer: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "white",
     borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     elevation: 4,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.08,
     shadowRadius: 4,
   },
   searchIcon: {
-    marginRight: 12,
+    marginRight: 10,
   },
   searchInput: {
     flex: 1,
     fontSize: 16,
     color: "#374151",
+    paddingVertical: 0,
   },
   actionButton: {
     marginLeft: 8,
-    padding: 4,
+    padding: 6,
   },
   loadingIndicator: {
     marginLeft: 8,
   },
-  suggestionsContainer: {
-    position: "absolute",
-    top: "100%",
-    left: 0,
-    right: 0,
+
+  // Inline & modal dropdown inner (shared style)
+  dropdownInner: {
     backgroundColor: "white",
     borderRadius: 12,
-    marginTop: 4,
     elevation: 8,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 8,
-    maxHeight: 300,
+    maxHeight: 420,
+    overflow: "hidden",
   },
+
+  // Inline suggestions list styling
   suggestionsList: {
-    maxHeight: 300,
+    maxHeight: 380,
   },
+
   suggestionItem: {
-    padding: 16,
+    padding: 14,
     borderBottomWidth: 1,
     borderBottomColor: "#F3F4F6",
   },
@@ -519,47 +714,47 @@ const styles = StyleSheet.create({
   suggestionSecondaryText: {
     fontSize: 14,
     color: "#6B7280",
-    marginTop: 2,
+    marginTop: 4,
   },
   accessibilityBadge: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 4,
+    marginTop: 6,
   },
   accessibilityBadgeText: {
     fontSize: 12,
     color: "#059669",
-    marginLeft: 4,
+    marginLeft: 6,
   },
-  popularDestinationsContainer: {
+
+  // Modal overlay (fills screen and prevents touch-through)
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.18)",
+  },
+
+  // anchored dropdown container inside modal
+  modalDropdownContainer: {
     position: "absolute",
-    top: "100%",
-    left: 0,
-    right: 0,
-    backgroundColor: "white",
-    borderRadius: 12,
-    marginTop: 4,
-    elevation: 8,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    maxHeight: 400,
+    maxHeight: "70%",
+    zIndex: Platform.OS === "android" ? 99999 : 10001,
   },
+
   popularDestinationsTitle: {
-    fontSize: 16,
-    fontWeight: "600",
+    fontSize: 15,
+    fontWeight: "700",
     color: "#111827",
-    padding: 16,
+    paddingTop: 12,
+    paddingHorizontal: 14,
     paddingBottom: 8,
     borderBottomWidth: 1,
     borderBottomColor: "#F3F4F6",
   },
   popularDestinationsList: {
-    maxHeight: 350,
+    maxHeight: 340,
   },
   popularDestinationItem: {
-    padding: 16,
+    padding: 12,
     borderBottomWidth: 1,
     borderBottomColor: "#F9FAFB",
   },
@@ -588,6 +783,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#6B7280",
     marginTop: 2,
+  },
+
+  resultsContainer: {
+    marginTop: 12,
+    borderRadius: 12,
+    overflow: "hidden",
   },
 });
 

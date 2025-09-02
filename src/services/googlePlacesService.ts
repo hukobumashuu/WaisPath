@@ -410,11 +410,6 @@ class GooglePlacesService {
         query: "DILG Office Pasig",
       },
       {
-        name: "BIR District Office",
-        category: "Government",
-        query: "BIR Pasig",
-      },
-      {
         name: "PhilHealth Pasig",
         category: "Healthcare",
         query: "PhilHealth Pasig",

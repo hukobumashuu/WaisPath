@@ -207,11 +207,6 @@ export default function NavigationScreen() {
     if (!currentValidationPrompt) return;
 
     try {
-      await obstacleValidationService.processValidationResponse(
-        currentValidationPrompt.obstacleId,
-        response
-      );
-
       setShowValidationPrompt(false);
       setCurrentValidationPrompt(null);
 
@@ -588,7 +583,7 @@ export default function NavigationScreen() {
 
       {/* NAVIGATION CONTROLS - Clean version without search */}
       <NavigationControls
-        showFAB={!routeAnalysis}
+        showFAB={false}
         onFABPress={() => calculateUnifiedRoutes()}
         fabStyle={{ bottom: insets.bottom + 20 }}
         isCalculating={isCalculating}
