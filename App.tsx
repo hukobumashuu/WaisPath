@@ -17,11 +17,6 @@ import HomeScreen from "./src/screens/HomeScreen";
 import NavigationScreen from "./src/screens/NavigationScreen";
 import UserProfileScreen from "./src/screens/UserProfileScreen";
 import ReportScreen from "./src/screens/ReportScreen";
-
-// Development/Testing Screens (imported but not in main navigation)
-import SimpleAHPTestScreen from "./src/screens/SimpleAHPTestScreen";
-import SidewalkTestScreen from "./src/screens/SidewalkTestScreen";
-
 // Store
 import { useUserProfile } from "./src/stores/userProfileStore";
 
