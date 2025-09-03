@@ -29,8 +29,5 @@
   },
   "submit": {
     "production": {}
-  },
-  "hooks": {
-    "prebuild": "node ./eas-hooks/inject-secrets.js"
   }
 }

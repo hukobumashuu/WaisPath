@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "index.ts",
   "scripts": {
+    "eas-build-post-install": "node ./eas-hooks/inject-secrets.js",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
