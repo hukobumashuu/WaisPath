@@ -1,6 +1,3 @@
-// app.config.js - WAISPATH Production-Ready Configuration
-// Handles multiple environments and deployment scenarios
-
 import "dotenv/config";
 
 // Helper function to get environment-specific values
@@ -31,7 +28,7 @@ const getEnvironmentConfig = () => {
 
 const envConfig = getEnvironmentConfig();
 
-// Validate critical environment variables
+// Validate critical environment variables (build-time check)
 const validateConfig = () => {
   const required = [
     "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY",
@@ -44,7 +41,7 @@ const validateConfig = () => {
   if (missing.length > 0) {
     console.error("❌ Missing required environment variables:");
     missing.forEach((key) => console.error(`   - ${key}`));
-    console.error("\n🔧 Please check your .env file");
+    console.error("\n🔧 Please check your .env file or EAS secrets");
 
     // In development, show helpful message but don't crash
     if (envConfig.isDevelopment) {
@@ -307,6 +304,14 @@ export default {
     // EXTRA METADATA FOR APP
     // ========================================
     extra: {
+      // expose sensitive build-time keys so runtime can read them via expo-constants
+      EXPO_PUBLIC_GOOGLE_MAPS_API_KEY:
+        process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || null,
+      EXPO_PUBLIC_FIREBASE_API_KEY:
+        process.env.EXPO_PUBLIC_FIREBASE_API_KEY || null,
+      EXPO_PUBLIC_FIREBASE_PROJECT_ID:
+        process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || null,
+
       // Environment information
       environment: envConfig.env,
 
@@ -344,18 +349,3 @@ export default {
     },
   },
 };
-
-// // Log configuration summary (without exposing keys)
-// console.log(`\n🚀 WAISPATH Configuration Summary:`);
-// console.log(`   Environment: ${envConfig.env}`);
-// console.log(`   Bundle ID: ${envConfig.bundleIdentifier}`);
-// console.log(
-//   `   Google Maps: ${process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ? "✅" : "❌"}`
-// );
-// console.log(
-//   `   Firebase: ${process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID ? "✅" : "❌"}`
-// );
-// console.log(
-//   `   Features: Crowdsourcing=${process.env.EXPO_PUBLIC_CROWDSOURCING_ENABLED}, Voice=${process.env.EXPO_PUBLIC_VOICE_GUIDANCE_ENABLED}`
-// );
-// console.log("=".repeat(50));
