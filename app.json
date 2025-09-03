@@ -21,7 +21,7 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.anonymous.waispathworking"
+      "package": "com.waispath.dev"
     },
     "web": {
       "favicon": "./assets/favicon.png"
