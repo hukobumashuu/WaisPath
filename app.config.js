@@ -310,6 +310,11 @@ export default {
       // Environment information
       environment: envConfig.env,
 
+      // EAS configuration
+      eas: {
+        projectId: "9d30cafc-ab50-4ada-b0db-fe7428b4e8fb",
+      },
+
       // Feature flags from environment
       features: {
         crowdsourcing: process.env.EXPO_PUBLIC_CROWDSOURCING_ENABLED === "true",

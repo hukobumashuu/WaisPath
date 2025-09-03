@@ -89,7 +89,6 @@ android/app/debug.keystore
 android/app/google-services.json
 android/app/src/main/res/values/strings.xml
 android/app/src/main/res/values/config.xml
-android/app/src/main/AndroidManifest.xml.backup
 
 # Android certificates and keys
 *.p8
@@ -351,8 +350,6 @@ dilg-integration-keys.json
 university-api-keys.json
 research-collaboration-secrets.json
 
-
-AndroidManifest.xml
 # =======================================================
 # IMPORTANT NOTES FOR WAISPATH TEAM:
 # =======================================================
