@@ -28,6 +28,7 @@ import { useLocation } from "../hooks/useLocation";
 import { useUserProfile } from "../stores/userProfileStore";
 import { firebaseServices } from "../services/firebase";
 import { UserLocation, AccessibilityObstacle, ObstacleType } from "../types";
+import Constants from "expo-constants";
 
 // PRESERVED: Import existing styles
 import { navigationStyles as styles } from "../styles/navigationStyles";
@@ -140,6 +141,15 @@ export default function NavigationScreen() {
   const [currentObstacleAlert, setCurrentObstacleAlert] =
     useState<ProximityAlert | null>(null);
   const [isUsingDetour, setIsUsingDetour] = useState(false);
+
+  // DEBUG: enhanced debugInfo state
+  const [debugInfo, setDebugInfo] = useState({
+    mapReady: false,
+    mapError: null as string | null,
+    apiKeyPresent: false,
+    locationFound: false,
+    renderCount: 0,
+  });
 
   // NEW: Enhanced destination selection handler
   const handleDestinationSelect = async (destination: PlaceSearchResult) => {
@@ -376,6 +386,21 @@ export default function NavigationScreen() {
     }
   }, [destinationName, proximityState.isDetecting]);
 
+  // NEW DEBUG: update debugInfo when location changes
+  useEffect(() => {
+    const apiKey =
+      (Constants?.expoConfig as any)?.extra?.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
+      process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
+      null;
+
+    setDebugInfo((prev) => ({
+      ...prev,
+      apiKeyPresent: !!apiKey,
+      locationFound: !!location,
+      renderCount: (prev.renderCount || 0) + 1,
+    }));
+  }, [location]);
+
   const checkForValidationPrompts = async () => {
     if (!location || !profile) return;
 
@@ -483,6 +508,75 @@ export default function NavigationScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* DEBUG OVERLAY - TEMPORARY */}
+      <View
+        style={{
+          position: "absolute",
+          top: insets.top + 150,
+          left: 10,
+          right: 10,
+          backgroundColor: "rgba(0,0,0,0.9)",
+          padding: 12,
+          borderRadius: 8,
+          zIndex: 999,
+        }}
+      >
+        <Text
+          style={{
+            color: "#22C55E",
+            fontSize: 16,
+            fontWeight: "bold",
+            marginBottom: 8,
+          }}
+        >
+          🔍 WAISPATH Debug Info
+        </Text>
+        <Text
+          style={{
+            color: debugInfo.mapReady ? "#22C55E" : "#EF4444",
+            fontSize: 14,
+          }}
+        >
+          Map Ready: {debugInfo.mapReady ? "YES ✅" : "NO ❌"}
+        </Text>
+        <Text
+          style={{
+            color: debugInfo.apiKeyPresent ? "#22C55E" : "#EF4444",
+            fontSize: 14,
+          }}
+        >
+          API Key: {debugInfo.apiKeyPresent ? "FOUND ✅" : "MISSING ❌"}
+        </Text>
+        <Text style={{ color: location ? "#22C55E" : "#EF4444", fontSize: 14 }}>
+          Location:{" "}
+          {location
+            ? `${location.latitude.toFixed(4)}, ${location.longitude.toFixed(
+                4
+              )} ✅`
+            : "MISSING ❌"}
+        </Text>
+        <Text style={{ color: "#60A5FA", fontSize: 14 }}>
+          Renders: {debugInfo.renderCount}
+        </Text>
+        {debugInfo.mapError && (
+          <Text style={{ color: "#EF4444", fontSize: 12, marginTop: 4 }}>
+            Error: {debugInfo.mapError}
+          </Text>
+        )}
+        <TouchableOpacity
+          onPress={() => setDebugInfo((prev) => ({ ...prev, renderCount: 0 }))}
+          style={{
+            backgroundColor: "#3B82F6",
+            padding: 6,
+            borderRadius: 4,
+            marginTop: 8,
+            alignSelf: "flex-start",
+          }}
+        >
+          <Text style={{ color: "white", fontSize: 12 }}>Clear Debug</Text>
+        </TouchableOpacity>
+      </View>
+
       <MapView
         ref={mapRef}
         style={styles.map}
@@ -496,6 +590,11 @@ export default function NavigationScreen() {
         showsMyLocationButton={false}
         showsCompass={false}
         followsUserLocation={isNavigating}
+        loadingEnabled={true}
+        onMapReady={() => {
+          setDebugInfo((prev) => ({ ...prev, mapReady: true }));
+          console.log("Map is ready!");
+        }}
       >
         {/* PRESERVED: USER MARKER */}
         {location && (

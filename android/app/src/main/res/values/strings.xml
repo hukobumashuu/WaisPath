@@ -3,5 +3,5 @@
   <string name="expo_splash_screen_resize_mode" translatable="false">contain</string>
   <string name="expo_splash_screen_status_bar_translucent" translatable="false">false</string>
   <string name="expo_runtime_version">exposdk:51.0.0</string>
-  <string name="google_maps_api_key">PLACEHOLDER_REPLACED_BY_EAS</string>
+  <string name="google_maps_api_key">AIzaSyAPPOhzDuWNV4PqiYdN5HrVE6loJojmyME</string>
 </resources>
