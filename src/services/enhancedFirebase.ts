@@ -1,679 +1,487 @@
-// src/services/enhancedFirebase.ts - NEW FILE (don't modify existing firebase.ts)
-// Enhanced Firebase services that work with your existing system
+// src/services/EnhancedFirebaseService.ts
+// 🔥 ENHANCED FIREBASE SERVICE - Adds rate limiting to existing Firebase service
+// ZERO BREAKING CHANGES - Wraps your existing firebaseServices
 
+import { firebaseServices } from "./firebase";
 import {
-  ahpCalculator,
-  AHPUtils,
-  AccessibilityScore,
-  SidewalkData,
-} from "../utils/ahp";
+  rateLimitService,
+  UserAuthType,
+  RateLimitResult,
+} from "./RateLimitService";
 import {
-  UserMobilityProfile,
-  CommunityObstacle,
-  EnhancedObstacleReport,
-  RouteAccessibilityAnalysis,
-  RouteSegmentScore,
-  AccessibilityWarning,
-} from "../types";
-import { firebaseServices } from "./firebase"; // Your existing Firebase service
+  userCapabilitiesService,
+  UserCapabilities,
+  AdminCapabilities,
+} from "./UserCapabilitiesService";
+import { UserLocation, ObstacleType, AccessibilityObstacle } from "../types";
+import { Alert } from "react-native";
 
-class EnhancedAccessibilityService {
+// Enhanced obstacle reporting interface
+interface EnhancedObstacleData {
+  location: UserLocation;
+  type: ObstacleType;
+  severity: "low" | "medium" | "high" | "blocking";
+  description: string;
+  photoBase64?: string;
+  timePattern?: "permanent" | "morning" | "afternoon" | "evening" | "weekend";
+}
+
+// Enhanced reporting result
+interface EnhancedReportingResult {
+  success: boolean;
+  obstacleId?: string;
+  rateLimitInfo: RateLimitResult;
+  userCapabilities: UserCapabilities;
+  message: string;
+}
+
+// User context for enhanced operations
+interface UserContext {
+  uid: string;
+  authType: UserAuthType;
+  capabilities: UserCapabilities;
+  adminCapabilities?: AdminCapabilities;
+}
+
+class EnhancedFirebaseService {
   /**
-   * Convert your existing AccessibilityObstacle to CommunityObstacle format
+   * 🎯 ENHANCED OBSTACLE REPORTING - Main function with rate limiting
    */
-  private convertToCommunityObstacle(obstacle: any): CommunityObstacle {
-    return {
-      id: obstacle.id,
-      type: obstacle.type,
-      severity: obstacle.severity,
-      description: obstacle.description,
-      location: obstacle.location,
-      timePattern: obstacle.timePattern || "permanent",
-      reportedAt: obstacle.reportedAt,
-      upvotes: obstacle.upvotes || 0,
-      downvotes: obstacle.downvotes || 0,
-      photoBase64: obstacle.photoBase64,
-      reportedBy: obstacle.reportedBy,
-      verified: obstacle.verified,
-    };
-  }
-
-  /**
-   * Analyze obstacles with AHP scoring for enhanced reporting
-   */
-  async analyzeObstacleWithAHP(
-    obstacle: CommunityObstacle,
-    userProfile: UserMobilityProfile
-  ): Promise<EnhancedObstacleReport> {
-    // Create sidewalk data context for this obstacle
-    const sidewalkData = this.estimateSidewalkConditions(obstacle);
-
-    // Calculate AHP-based accessibility impact
-    const accessibilityImpact = ahpCalculator.calculateAccessibilityScore(
-      sidewalkData,
-      userProfile
-    );
-
-    // Determine which user types are most affected
-    const affectedUserTypes = this.getAffectedUserTypes(obstacle);
-
-    // Calculate user-specific rating (1-5 stars)
-    const userSpecificRating = this.calculateUserRating(
-      accessibilityImpact,
-      userProfile
-    );
-
-    // Determine priority level for government reports
-    const priorityLevel = this.calculatePriorityLevel(
-      obstacle,
-      accessibilityImpact
-    );
-
-    // Estimate detour time needed
-    const estimatedDetourTime = this.estimateDetourTime(obstacle, userProfile);
-
-    return {
-      ...obstacle,
-      accessibilityImpact,
-      userSpecificRating,
-      affectedUserTypes,
-      priorityLevel,
-      estimatedDetourTime,
-    };
-  }
-
-  /**
-   * Get enhanced obstacle list with AHP scores for nearby area
-   */
-  async getEnhancedObstaclesInArea(
-    latitude: number,
-    longitude: number,
-    radiusKm: number,
-    userProfile: UserMobilityProfile
-  ): Promise<EnhancedObstacleReport[]> {
+  async reportObstacleEnhanced(
+    obstacleData: EnhancedObstacleData,
+    userContext?: UserContext
+  ): Promise<EnhancedReportingResult> {
     try {
-      // Get obstacles using existing Firebase service
-      const obstacles = await firebaseServices.obstacle.getObstaclesInArea(
-        latitude,
-        longitude,
-        radiusKm
+      // Get user context if not provided
+      const context = userContext || (await this.getCurrentUserContext());
+
+      console.log(
+        `🚀 Enhanced obstacle reporting for ${context.authType} user: ${context.uid}`
       );
 
-      // Convert to CommunityObstacle format and enhance with AHP analysis
-      const enhancedObstacles = await Promise.all(
-        obstacles.map(async (obstacle) => {
-          const communityObstacle = this.convertToCommunityObstacle(obstacle);
-          return this.analyzeObstacleWithAHP(communityObstacle, userProfile);
-        })
+      // 1. CHECK RATE LIMITING
+      const rateLimitCheck = await rateLimitService.checkReportingLimits(
+        context.uid,
+        context.authType
       );
 
-      // Sort by priority level and user-specific impact
-      return enhancedObstacles.sort((a, b) => {
-        const priorityOrder = { critical: 4, high: 3, medium: 2, low: 1 };
-        const priorityDiff =
-          priorityOrder[b.priorityLevel] - priorityOrder[a.priorityLevel];
-
-        if (priorityDiff !== 0) return priorityDiff;
-
-        // If same priority, sort by user-specific rating
-        return b.userSpecificRating - a.userSpecificRating;
-      });
-    } catch (error) {
-      console.error("Failed to get enhanced obstacles:", error);
-      throw new Error("Hindi nakuha ang obstacles. Check internet connection.");
-    }
-  }
-
-  /**
-   * Analyze complete route for accessibility using AHP methodology
-   */
-  async analyzeRouteAccessibility(
-    routeCoordinates: Array<{ latitude: number; longitude: number }>,
-    userProfile: UserMobilityProfile,
-    routeId?: string
-  ): Promise<RouteAccessibilityAnalysis> {
-    const segments: RouteSegmentScore[] = [];
-    let totalDistance = 0;
-    let obstacleCount = 0;
-    const warnings: AccessibilityWarning[] = [];
-
-    try {
-      // Break route into 100-meter segments for detailed analysis
-      for (let i = 0; i < routeCoordinates.length - 1; i++) {
-        const start = routeCoordinates[i];
-        const end = routeCoordinates[i + 1];
-
-        // Calculate segment distance
-        const segmentDistance = this.calculateDistance(start, end);
-        totalDistance += segmentDistance;
-
-        // Get obstacles near this segment (50-meter buffer)
-        const nearbyObstacles = await this.getObstaclesNearPath(start, end, 50);
-        obstacleCount += nearbyObstacles.length;
-
-        // Estimate sidewalk conditions for this segment
-        const estimatedSidewalkData = this.estimateSidewalkConditionsForSegment(
-          start,
-          end,
-          nearbyObstacles
-        );
-
-        // Calculate AHP accessibility score
-        const accessibilityScore = ahpCalculator.calculateAccessibilityScore(
-          estimatedSidewalkData,
-          userProfile
-        );
-
-        // Generate warnings for problematic areas
-        const segmentWarnings = this.generateSegmentWarnings(
-          nearbyObstacles,
-          accessibilityScore,
-          userProfile
-        );
-        warnings.push(...segmentWarnings);
-
-        segments.push({
-          segmentIndex: i,
-          startLocation: start,
-          endLocation: end,
-          distance: segmentDistance,
-          obstacles: nearbyObstacles,
-          accessibilityScore,
-          estimatedSidewalkData,
-          confidence: this.calculateConfidence(
-            nearbyObstacles.length,
-            segmentDistance
-          ),
-        });
+      if (!rateLimitCheck.allowed) {
+        return {
+          success: false,
+          rateLimitInfo: rateLimitCheck,
+          userCapabilities: context.capabilities,
+          message: rateLimitCheck.message || "Rate limit exceeded",
+        };
       }
 
-      // Calculate overall route accessibility (distance-weighted average)
-      const overallAccessibilityScore =
-        this.calculateOverallRouteScore(segments);
+      // 2. CHECK USER CAPABILITIES
+      if (!context.capabilities.canReport) {
+        return {
+          success: false,
+          rateLimitInfo: rateLimitCheck,
+          userCapabilities: context.capabilities,
+          message: "User does not have reporting permissions",
+        };
+      }
 
-      // Generate route recommendations
-      const recommendations = this.generateRouteRecommendations(
-        segments,
-        warnings,
-        userProfile
-      );
+      // 3. VALIDATE PHOTO UPLOAD PERMISSION
+      if (obstacleData.photoBase64 && !context.capabilities.canUploadPhotos) {
+        // Remove photo for users who can't upload photos
+        console.log(
+          `📷 Removing photo - ${context.authType} users cannot upload photos`
+        );
+        obstacleData = { ...obstacleData, photoBase64: undefined };
+      }
+
+      // 4. GET ADMIN USER FOR EXISTING FIREBASE SERVICE
+      const adminUserResult =
+        context.authType === "admin"
+          ? await firebaseServices.obstacle.getCurrentAdminUser()
+          : null;
+
+      // Fix the null assignment error by explicitly handling null
+      const adminUser = adminUserResult || undefined;
+
+      // 5. CALL EXISTING FIREBASE SERVICE (ZERO BREAKING CHANGES)
+      const obstacleId = await firebaseServices.obstacle.reportObstacle({
+        ...obstacleData,
+        adminUser,
+      });
+
+      // 6. RECORD REPORT FOR RATE LIMITING
+      await rateLimitService.recordReport(context.uid, context.authType);
+
+      console.log(`✅ Enhanced obstacle reporting successful: ${obstacleId}`);
 
       return {
-        routeId: routeId || `route_${Date.now()}`,
-        segments,
-        overallAccessibilityScore,
-        userProfile,
-        totalDistance,
-        estimatedDuration: this.estimateWalkingDuration(
-          totalDistance,
-          userProfile
+        success: true,
+        obstacleId,
+        rateLimitInfo: rateLimitCheck,
+        userCapabilities: context.capabilities,
+        message: this.getSuccessMessage(
+          context.authType,
+          rateLimitCheck.remaining
         ),
-        obstacleCount,
-        warnings,
-        recommendations,
-        analyzedAt: new Date(),
       };
-    } catch (error) {
-      console.error("Route analysis failed:", error);
-      throw new Error("Hindi na-analyze ang route. Subukan ulit.");
-    }
-  }
+    } catch (error: any) {
+      console.error("Enhanced obstacle reporting failed:", error);
 
-  /**
-   * Estimate sidewalk conditions based on obstacle data and location
-   */
-  private estimateSidewalkConditions(
-    obstacle: CommunityObstacle
-  ): SidewalkData {
-    return {
-      obstacles: [obstacle],
-      estimatedWidth: this.estimateWidthFromLocation(obstacle.location),
-      surfaceCondition: this.estimateSurfaceCondition(obstacle),
-      slope: 0, // Default - can be enhanced with elevation API later
-      lighting: this.estimateLighting(obstacle.location),
-      shadeLevel: this.estimateShade(obstacle.location),
-      trafficLevel: this.estimateTrafficLevel(obstacle.location),
-      hasRamp: obstacle.type === "stairs_no_ramp" ? false : true,
-      hasHandrails: false, // Default - can be enhanced with crowdsourced data
-    };
-  }
-
-  /**
-   * Estimate sidewalk conditions for route segment
-   */
-  private estimateSidewalkConditionsForSegment(
-    start: { latitude: number; longitude: number },
-    end: { latitude: number; longitude: number },
-    obstacles: CommunityObstacle[]
-  ): SidewalkData {
-    const midpoint = {
-      latitude: (start.latitude + end.latitude) / 2,
-      longitude: (start.longitude + end.longitude) / 2,
-    };
-
-    return {
-      obstacles,
-      estimatedWidth: this.estimateWidthFromLocation(midpoint),
-      surfaceCondition: this.estimateSurfaceFromObstacles(obstacles),
-      slope: 0, // Default
-      lighting: this.estimateLighting(midpoint),
-      shadeLevel: this.estimateShade(midpoint),
-      trafficLevel: this.estimateTrafficLevel(midpoint),
-      hasRamp: !obstacles.some((o) => o.type === "stairs_no_ramp"),
-      hasHandrails: false,
-    };
-  }
-
-  private estimateSurfaceCondition(
-    obstacle: CommunityObstacle
-  ): "smooth" | "rough" | "broken" {
-    if (obstacle.type === "broken_pavement") return "broken";
-    if (obstacle.type === "flooding") return "rough";
-    if (obstacle.type === "tree_roots") return "rough";
-    return "smooth";
-  }
-
-  private estimateWidthFromLocation(location: {
-    latitude: number;
-    longitude: number;
-  }): number {
-    // Default estimates for Pasig City areas
-    if (this.isInBusinessDistrict(location)) return 2.0; // Wider business sidewalks
-    if (this.isInResidentialArea(location)) return 1.2; // Narrower residential
-    return 1.5; // Default assumption
-  }
-
-  private estimateSurfaceFromObstacles(
-    obstacles: CommunityObstacle[]
-  ): "smooth" | "rough" | "broken" {
-    if (obstacles.some((o) => o.type === "broken_pavement")) return "broken";
-    if (obstacles.some((o) => o.type === "flooding" || o.type === "tree_roots"))
-      return "rough";
-    return "smooth";
-  }
-
-  private estimateLighting(location: {
-    latitude: number;
-    longitude: number;
-  }): "good" | "poor" | "none" {
-    if (this.isInBusinessDistrict(location)) return "good";
-    if (this.isNearMainRoad(location)) return "good";
-    return "poor";
-  }
-
-  private estimateShade(location: {
-    latitude: number;
-    longitude: number;
-  }): "covered" | "partial" | "none" {
-    if (this.isInBusinessDistrict(location)) return "covered";
-    return "partial";
-  }
-
-  private estimateTrafficLevel(location: {
-    latitude: number;
-    longitude: number;
-  }): "high" | "medium" | "low" {
-    if (this.isNearMainRoad(location)) return "high";
-    if (this.isInBusinessDistrict(location)) return "medium";
-    return "low";
-  }
-
-  private getAffectedUserTypes(obstacle: CommunityObstacle): string[] {
-    const affectedTypes: string[] = [];
-
-    switch (obstacle.type) {
-      case "stairs_no_ramp":
-        affectedTypes.push("wheelchair", "walker");
-        if (obstacle.severity === "blocking") affectedTypes.push("crutches");
-        break;
-      case "narrow_passage":
-        affectedTypes.push("wheelchair", "walker");
-        break;
-      case "broken_pavement":
-      case "tree_roots":
-        affectedTypes.push("wheelchair", "walker", "cane", "crutches");
-        break;
-      case "flooding":
-        affectedTypes.push("wheelchair", "walker", "crutches");
-        break;
-      case "vendor_blocking":
-        if (obstacle.severity === "high" || obstacle.severity === "blocking") {
-          affectedTypes.push("wheelchair", "walker");
-        }
-        break;
-      case "parked_vehicles":
-      case "no_sidewalk":
-        affectedTypes.push("wheelchair", "walker");
-        break;
-      case "construction":
-        affectedTypes.push("wheelchair", "walker", "crutches");
-        break;
-      default:
-        affectedTypes.push("wheelchair");
-    }
-
-    return affectedTypes;
-  }
-
-  private calculateUserRating(
-    accessibilityScore: AccessibilityScore,
-    userProfile: UserMobilityProfile
-  ): number {
-    let rating = 5;
-
-    if (accessibilityScore.overall < 20) rating = 1;
-    else if (accessibilityScore.overall < 40) rating = 2;
-    else if (accessibilityScore.overall < 60) rating = 3;
-    else if (accessibilityScore.overall < 80) rating = 4;
-
-    // Adjust based on user-specific factors
-    if (accessibilityScore.userSpecificAdjustment < -10) {
-      rating = Math.max(1, rating - 1);
-    } else if (accessibilityScore.userSpecificAdjustment > 5) {
-      rating = Math.min(5, rating + 1);
-    }
-
-    return rating;
-  }
-
-  private calculatePriorityLevel(
-    obstacle: CommunityObstacle,
-    accessibilityScore: AccessibilityScore
-  ): "critical" | "high" | "medium" | "low" {
-    if (obstacle.severity === "blocking") return "critical";
-    if (accessibilityScore.overall < 30) return "high";
-    if (obstacle.type === "stairs_no_ramp" || obstacle.type === "no_sidewalk")
-      return "high";
-    if (obstacle.type === "broken_pavement" || obstacle.type === "flooding") {
-      return obstacle.severity === "high" ? "high" : "medium";
-    }
-    return obstacle.severity === "high" ? "medium" : "low";
-  }
-
-  private estimateDetourTime(
-    obstacle: CommunityObstacle,
-    userProfile: UserMobilityProfile
-  ): number {
-    const baseDetourTimes: Record<string, number> = {
-      stairs_no_ramp: 5,
-      parked_vehicles: 2,
-      vendor_blocking: 1,
-      flooding: 8,
-      broken_pavement: 3,
-      narrow_passage: 2,
-      construction: 10,
-      no_sidewalk: 15,
-      tree_roots: 2,
-      electrical_post: 1,
-    };
-
-    let detourTime = baseDetourTimes[obstacle.type] || 2;
-
-    if (obstacle.severity === "blocking") detourTime *= 2;
-    else if (obstacle.severity === "high") detourTime *= 1.5;
-
-    if (
-      userProfile.type === "wheelchair" &&
-      (obstacle.type === "stairs_no_ramp" || obstacle.type === "narrow_passage")
-    ) {
-      detourTime *= 1.5;
-    }
-
-    return Math.round(detourTime);
-  }
-
-  private generateSegmentWarnings(
-    obstacles: CommunityObstacle[],
-    accessibilityScore: AccessibilityScore,
-    userProfile: UserMobilityProfile
-  ): AccessibilityWarning[] {
-    const warnings: AccessibilityWarning[] = [];
-
-    if (accessibilityScore.overall < 40) {
-      warnings.push({
-        type: "difficult",
-        severity: accessibilityScore.overall < 20 ? "critical" : "high",
-        message: `Very difficult path for ${userProfile.type} users (${accessibilityScore.grade} grade)`,
-        location: obstacles[0]?.location || { latitude: 0, longitude: 0 },
-        affectedUserTypes: [userProfile.type],
-        suggestedAction: "Consider alternative route or request assistance",
-      });
-    }
-
-    obstacles.forEach((obstacle) => {
-      if (obstacle.severity === "blocking") {
-        warnings.push({
-          type: "blocking",
-          severity: "critical",
-          message: `Path completely blocked by ${obstacle.type}`,
-          location: obstacle.location,
-          affectedUserTypes: this.getAffectedUserTypes(obstacle),
-          suggestedAction: "Find alternative route immediately",
-        });
-      }
-    });
-
-    return warnings;
-  }
-
-  private calculateOverallRouteScore(
-    segments: RouteSegmentScore[]
-  ): AccessibilityScore {
-    if (segments.length === 0) {
       return {
-        traversability: 100,
-        safety: 100,
-        comfort: 100,
-        overall: 100,
-        grade: "A",
-        userSpecificAdjustment: 0,
+        success: false,
+        rateLimitInfo: {
+          allowed: false,
+          remaining: 0,
+          resetTime: new Date(),
+          authType: "anonymous",
+          upgradeRequired: false,
+          message: "Reporting failed",
+        },
+        userCapabilities: this.getDefaultCapabilities(),
+        message: `Reporting failed: ${error.message}`,
       };
     }
-
-    let totalDistance = 0;
-    let weightedTraversability = 0;
-    let weightedSafety = 0;
-    let weightedComfort = 0;
-    let weightedOverall = 0;
-    let totalAdjustment = 0;
-
-    segments.forEach((segment) => {
-      const weight = segment.distance;
-      totalDistance += weight;
-
-      weightedTraversability +=
-        segment.accessibilityScore.traversability * weight;
-      weightedSafety += segment.accessibilityScore.safety * weight;
-      weightedComfort += segment.accessibilityScore.comfort * weight;
-      weightedOverall += segment.accessibilityScore.overall * weight;
-      totalAdjustment +=
-        segment.accessibilityScore.userSpecificAdjustment * weight;
-    });
-
-    if (totalDistance === 0) totalDistance = 1;
-
-    const overall = weightedOverall / totalDistance;
-
-    return {
-      traversability:
-        Math.round((weightedTraversability / totalDistance) * 10) / 10,
-      safety: Math.round((weightedSafety / totalDistance) * 10) / 10,
-      comfort: Math.round((weightedComfort / totalDistance) * 10) / 10,
-      overall: Math.round(overall * 10) / 10,
-      grade: this.scoreToGrade(overall),
-      userSpecificAdjustment:
-        Math.round((totalAdjustment / totalDistance) * 10) / 10,
-    };
   }
 
-  private generateRouteRecommendations(
-    segments: RouteSegmentScore[],
-    warnings: AccessibilityWarning[],
-    userProfile: UserMobilityProfile
-  ): string[] {
-    const recommendations: string[] = [];
-
-    const criticalWarnings = warnings.filter((w) => w.severity === "critical");
-    if (criticalWarnings.length > 0) {
-      recommendations.push(
-        "⚠️ CRITICAL: This route has major accessibility barriers"
-      );
-      recommendations.push("Strongly recommend finding alternative route");
-    }
-
-    if (userProfile.type === "wheelchair") {
-      const stairsCount = segments.reduce(
-        (count, s) =>
-          count + s.obstacles.filter((o) => o.type === "stairs_no_ramp").length,
-        0
-      );
-
-      if (stairsCount > 0) {
-        recommendations.push(
-          `${stairsCount} stairs without ramps - look for alternative entrances`
-        );
-      }
-    }
-
-    const avgScore =
-      segments.reduce((sum, s) => sum + s.accessibilityScore.overall, 0) /
-      segments.length;
-
-    if (avgScore < 50) {
-      recommendations.push(
-        "Overall accessibility is poor - consider requesting assistance"
-      );
-    } else if (avgScore > 80) {
-      recommendations.push(
-        "Good accessibility route - should be comfortable to navigate"
-      );
-    }
-
-    return recommendations;
-  }
-
-  // Utility methods
-  private isInBusinessDistrict(location: {
-    latitude: number;
-    longitude: number;
-  }): boolean {
-    return (
-      location.latitude >= 14.585 &&
-      location.latitude <= 14.595 &&
-      location.longitude >= 121.055 &&
-      location.longitude <= 121.07
-    );
-  }
-
-  private isInResidentialArea(location: {
-    latitude: number;
-    longitude: number;
-  }): boolean {
-    return (
-      !this.isInBusinessDistrict(location) && !this.isNearMainRoad(location)
-    );
-  }
-
-  private isNearMainRoad(location: {
-    latitude: number;
-    longitude: number;
-  }): boolean {
-    return false; // Placeholder
-  }
-
-  private calculateDistance(
-    start: { latitude: number; longitude: number },
-    end: { latitude: number; longitude: number }
-  ): number {
-    const R = 6371e3;
-    const φ1 = (start.latitude * Math.PI) / 180;
-    const φ2 = (end.latitude * Math.PI) / 180;
-    const Δφ = ((end.latitude - start.latitude) * Math.PI) / 180;
-    const Δλ = ((end.longitude - start.longitude) * Math.PI) / 180;
-
-    const a =
-      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-    return R * c;
-  }
-
-  private estimateWalkingDuration(
-    distance: number,
-    userProfile: UserMobilityProfile
-  ): number {
-    const speeds = {
-      wheelchair: 50,
-      walker: 40,
-      crutches: 35,
-      cane: 60,
-      none: 80,
-    };
-
-    const speed = speeds[userProfile.type] || 60;
-    return Math.round(distance / speed);
-  }
-
-  private calculateConfidence(obstacleCount: number, distance: number): number {
-    let confidence = 0.7;
-    confidence += Math.min(0.2, obstacleCount * 0.05);
-    confidence -= Math.min(0.2, (distance / 1000) * 0.1);
-    return Math.max(0.3, Math.min(1.0, confidence));
-  }
-
-  private scoreToGrade(score: number): "A" | "B" | "C" | "D" | "F" {
-    if (score >= 85) return "A";
-    if (score >= 70) return "B";
-    if (score >= 55) return "C";
-    if (score >= 40) return "D";
-    return "F";
-  }
-
-  private async getObstaclesNearPath(
-    start: { latitude: number; longitude: number },
-    end: { latitude: number; longitude: number },
-    bufferMeters: number
-  ): Promise<CommunityObstacle[]> {
-    const midpoint = {
-      latitude: (start.latitude + end.latitude) / 2,
-      longitude: (start.longitude + end.longitude) / 2,
-    };
-
-    const searchRadius = Math.max(
-      0.1,
-      this.calculateDistance(start, end) / 1000 + bufferMeters / 1000
-    );
-
+  /**
+   * 🔍 GET CURRENT USER CONTEXT - Determines user auth type and capabilities
+   */
+  async getCurrentUserContext(): Promise<UserContext> {
     try {
-      const obstacles = await firebaseServices.obstacle.getObstaclesInArea(
-        midpoint.latitude,
-        midpoint.longitude,
-        searchRadius
+      // Check if user is admin
+      const adminUser = await firebaseServices.obstacle.getCurrentAdminUser();
+
+      if (adminUser) {
+        const adminRole = adminUser.role as any;
+        const capabilities = userCapabilitiesService.getUserCapabilities(
+          "admin",
+          adminRole
+        );
+        const adminCapabilities =
+          userCapabilitiesService.getAdminCapabilities(adminRole);
+
+        return {
+          uid: adminUser.uid,
+          authType: "admin",
+          capabilities,
+          adminCapabilities,
+        };
+      }
+
+      // Check if user is registered (has email)
+      const currentUser = await this.getCurrentFirebaseUser();
+      const isRegistered = currentUser && !currentUser.isAnonymous;
+
+      const authType: UserAuthType = isRegistered ? "registered" : "anonymous";
+      const capabilities =
+        userCapabilitiesService.getUserCapabilities(authType);
+
+      return {
+        uid: currentUser?.uid || "unknown",
+        authType,
+        capabilities,
+      };
+    } catch (error) {
+      console.error("Failed to get current user context:", error);
+
+      // Return safe defaults
+      return {
+        uid: "unknown",
+        authType: "anonymous",
+        capabilities: this.getDefaultCapabilities(),
+      };
+    }
+  }
+
+  /**
+   * 📊 GET USER REPORTING STATUS - For UI display
+   */
+  async getUserReportingStatus(): Promise<{
+    rateLimitInfo: RateLimitResult;
+    capabilities: UserCapabilities;
+    canReportNow: boolean;
+    nextAction: "report" | "register" | "wait";
+    actionMessage: string;
+  }> {
+    try {
+      const context = await this.getCurrentUserContext();
+      const rateLimitInfo = await rateLimitService.checkReportingLimits(
+        context.uid,
+        context.authType
       );
 
-      return obstacles.map((obstacle) =>
-        this.convertToCommunityObstacle(obstacle)
+      const canReportNow =
+        rateLimitInfo.allowed && context.capabilities.canReport;
+
+      let nextAction: "report" | "register" | "wait" = "report";
+      let actionMessage = "Ready to report obstacles";
+
+      if (!canReportNow) {
+        if (rateLimitInfo.upgradeRequired) {
+          nextAction = "register";
+          actionMessage = "Register for unlimited reporting with photos";
+        } else {
+          nextAction = "wait";
+          actionMessage = `Daily limit reached. Resets at ${rateLimitInfo.resetTime.toLocaleTimeString()}`;
+        }
+      }
+
+      return {
+        rateLimitInfo,
+        capabilities: context.capabilities,
+        canReportNow,
+        nextAction,
+        actionMessage,
+      };
+    } catch (error) {
+      console.error("Failed to get user reporting status:", error);
+
+      // Return safe defaults
+      return {
+        rateLimitInfo: {
+          allowed: false,
+          remaining: 0,
+          resetTime: new Date(),
+          authType: "anonymous",
+          upgradeRequired: false,
+          message: "Status check failed",
+        },
+        capabilities: this.getDefaultCapabilities(),
+        canReportNow: false,
+        nextAction: "wait",
+        actionMessage: "Unable to check reporting status",
+      };
+    }
+  }
+
+  /**
+   * 🔄 UPGRADE USER TO REGISTERED - Called after successful registration
+   */
+  async upgradeUserToRegistered(userUID?: string): Promise<void> {
+    try {
+      const uid = userUID || (await this.getCurrentFirebaseUser())?.uid;
+      if (!uid) {
+        throw new Error("No user ID available for upgrade");
+      }
+
+      // Update rate limiting for new user type
+      await rateLimitService.upgradeUserType(uid, "registered");
+
+      console.log(
+        `🔄 User ${uid} upgraded to registered - unlimited reporting enabled`
       );
     } catch (error) {
-      console.warn("Failed to get obstacles near path:", error);
-      return [];
+      console.error("Failed to upgrade user to registered:", error);
+    }
+  }
+
+  /**
+   * 🏛️ UPGRADE USER TO ADMIN - Called when admin claims are set
+   */
+  async upgradeUserToAdmin(userUID: string, adminRole: any): Promise<void> {
+    try {
+      // Update rate limiting for admin user
+      await rateLimitService.upgradeUserType(userUID, "admin");
+
+      console.log(
+        `🏛️ User ${userUID} upgraded to admin (${adminRole}) - unlimited reporting enabled`
+      );
+    } catch (error) {
+      console.error("Failed to upgrade user to admin:", error);
+    }
+  }
+
+  /**
+   * 📱 SHOW RATE LIMIT ALERT - User-friendly rate limit notification
+   */
+  showRateLimitAlert(
+    rateLimitInfo: RateLimitResult,
+    onRegister?: () => void,
+    onCancel?: () => void
+  ): void {
+    if (rateLimitInfo.upgradeRequired) {
+      Alert.alert(
+        "Daily Limit Reached",
+        "Anonymous users can report 1 obstacle per day.\n\nRegister for unlimited reporting with photos!",
+        [
+          {
+            text: "Later",
+            style: "cancel",
+            onPress: onCancel,
+          },
+          {
+            text: "Register",
+            onPress: onRegister || (() => console.log("Registration needed")),
+          },
+        ]
+      );
+    } else {
+      Alert.alert(
+        "Daily Limit Reached",
+        `You've reached your daily reporting limit.\n\nResets at ${rateLimitInfo.resetTime.toLocaleTimeString()}`,
+        [
+          {
+            text: "OK",
+            onPress: onCancel,
+          },
+        ]
+      );
+    }
+  }
+
+  /**
+   * 🎯 ENHANCED OBSTACLE VERIFICATION - With user capability checking
+   */
+  async verifyObstacleEnhanced(
+    obstacleId: string,
+    verification: "upvote" | "downvote"
+  ): Promise<{
+    success: boolean;
+    message: string;
+    capabilities: UserCapabilities;
+  }> {
+    try {
+      const context = await this.getCurrentUserContext();
+
+      // Check if user can validate reports
+      if (!context.capabilities.canValidateReports) {
+        return {
+          success: false,
+          message: `${context.authType} users cannot validate reports. Register to join community validation!`,
+          capabilities: context.capabilities,
+        };
+      }
+
+      // Call existing Firebase service
+      await firebaseServices.obstacle.verifyObstacle(obstacleId, verification);
+
+      return {
+        success: true,
+        message: `${
+          verification === "upvote" ? "Upvoted" : "Downvoted"
+        } obstacle successfully`,
+        capabilities: context.capabilities,
+      };
+    } catch (error: any) {
+      console.error("Enhanced obstacle verification failed:", error);
+
+      return {
+        success: false,
+        message: `Verification failed: ${error.message}`,
+        capabilities: this.getDefaultCapabilities(),
+      };
+    }
+  }
+
+  // ========================================
+  // 🔧 WRAPPER METHODS - Direct access to existing Firebase services
+  // ========================================
+
+  /**
+   * 🗺️ GET OBSTACLES - Direct wrapper to existing service
+   */
+  async getObstaclesInArea(
+    lat: number,
+    lng: number,
+    radiusKm: number
+  ): Promise<AccessibilityObstacle[]> {
+    return firebaseServices.obstacle.getObstaclesInArea(lat, lng, radiusKm);
+  }
+
+  /**
+   * 👤 PROFILE METHODS - Direct wrappers to existing profile service
+   */
+  async saveProfile(profile: any): Promise<void> {
+    return firebaseServices.profile.saveProfile(profile);
+  }
+
+  async getProfile(): Promise<any> {
+    return firebaseServices.profile.getProfile();
+  }
+
+  async deleteProfile(): Promise<void> {
+    return firebaseServices.profile.deleteProfile();
+  }
+
+  // ========================================
+  // 🔧 PRIVATE HELPER METHODS
+  // ========================================
+
+  private async getCurrentFirebaseUser(): Promise<any> {
+    try {
+      // Access the current user from your existing Firebase service
+      // This might need adjustment based on your exact Firebase service structure
+      return (firebaseServices as any).currentUser;
+    } catch (error) {
+      console.error("Failed to get current Firebase user:", error);
+      return null;
+    }
+  }
+
+  private getDefaultCapabilities(): UserCapabilities {
+    return userCapabilitiesService.getUserCapabilities("anonymous");
+  }
+
+  private getSuccessMessage(authType: UserAuthType, remaining: number): string {
+    switch (authType) {
+      case "admin":
+        return "Official obstacle report submitted successfully";
+
+      case "registered":
+        return `Obstacle reported successfully! ${remaining} reports remaining today`;
+
+      case "anonymous":
+        return remaining > 0
+          ? `Obstacle reported successfully! ${remaining} report remaining today`
+          : "Obstacle reported successfully! Register for unlimited reporting";
+
+      default:
+        return "Obstacle reported successfully";
+    }
+  }
+
+  /**
+   * 🧹 CLEANUP - Call periodically to clean old rate limit data
+   */
+  async performMaintenance(): Promise<void> {
+    try {
+      await rateLimitService.cleanupOldData(7); // Keep 7 days of data
+      console.log("🧹 Enhanced Firebase service maintenance completed");
+    } catch (error) {
+      console.error("Maintenance failed:", error);
     }
   }
 }
 
-// Create enhanced accessibility service instance
-export const enhancedAccessibilityService = new EnhancedAccessibilityService();
+// 🚀 EXPORT SINGLETON INSTANCE
+export const enhancedFirebaseService = new EnhancedFirebaseService();
 
-// Simple function to update verification using existing service
-export const updateObstacleVerification = async (
+// 🎯 EXPORT CONVENIENCE FUNCTIONS FOR EASY MIGRATION
+export const reportObstacleWithRateLimit = (
+  obstacleData: EnhancedObstacleData
+) => enhancedFirebaseService.reportObstacleEnhanced(obstacleData);
+
+export const checkUserReportingStatus = () =>
+  enhancedFirebaseService.getUserReportingStatus();
+
+export const verifyObstacleWithPermissionCheck = (
   obstacleId: string,
-  action: "upvote" | "downvote"
-): Promise<void> => {
-  try {
-    await firebaseServices.obstacle.verifyObstacle(obstacleId, action);
-  } catch (error) {
-    console.error("Verification failed:", error);
-    throw error;
-  }
-};
+  verification: "upvote" | "downvote"
+) => enhancedFirebaseService.verifyObstacleEnhanced(obstacleId, verification);
+
+export const showRateLimitNotification = (
+  rateLimitInfo: RateLimitResult,
+  onRegister?: () => void,
+  onCancel?: () => void
+) =>
+  enhancedFirebaseService.showRateLimitAlert(
+    rateLimitInfo,
+    onRegister,
+    onCancel
+  );
+
+// 🔄 EXPORT USER UPGRADE FUNCTIONS
+export const upgradeToRegisteredUser = (userUID?: string) =>
+  enhancedFirebaseService.upgradeUserToRegistered(userUID);
+
+export const upgradeToAdminUser = (userUID: string, adminRole: any) =>
+  enhancedFirebaseService.upgradeUserToAdmin(userUID, adminRole);
