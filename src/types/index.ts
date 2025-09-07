@@ -22,7 +22,15 @@ export interface AccessibilityObstacle {
   upvotes?: number;
   downvotes?: number;
   status?: "pending" | "verified" | "resolved" | "false_report";
-  reportsCount?: number; // NEW: Total engagement count
+  reportsCount?: number; // Total engagement count
+
+  // NEW: Admin badge support (safe additions)
+  adminReported?: boolean; // Flag indicating this was reported by an admin
+  adminRole?: "super_admin" | "lgu_admin" | "field_admin"; // Which type of admin reported it
+  adminEmail?: string; // Admin identifier for audit purposes
+
+  // ENHANCED: Auto-verification support
+  autoVerified?: boolean; // True if admin report bypassed community validation
 
   // Media and metadata
   photoBase64?: string;
@@ -31,8 +39,8 @@ export interface AccessibilityObstacle {
   reviewedBy?: string;
   reviewedAt?: Date;
   adminNotes?: string;
-  confidenceScore?: number; // NEW: Dynamic confidence scoring
-  lastVerifiedAt?: Date; // NEW: Last validation timestamp
+  confidenceScore?: number;
+  lastVerifiedAt?: Date;
 }
 
 // Philippine street reality obstacle types

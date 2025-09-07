@@ -121,7 +121,9 @@ class GoogleMapsService {
   private readonly COORDINATE_PRECISION = 4;
 
   constructor() {
-    this.apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "";
+    this.apiKey =
+      process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
+      "AIzaSyAPPOhzDuWNV4PqiYdN5HrVE6loJojmyME";
 
     if (!this.apiKey) {
       console.warn(

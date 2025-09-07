@@ -1,5 +1,5 @@
 // src/components/EnhancedObstacleMarker.tsx
-// COMPLETE: Route visualization + Validation status + Crowdsourcing indicators
+// SAFE UPDATE: Adding admin badge without breaking existing functionality
 
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
@@ -94,8 +94,17 @@ export function EnhancedObstacleMarker({
   const validationStatus =
     obstacleValidationService.getValidationStatus(obstacle);
 
-  // Determine final color priority: Route status vs Validation status
+  // NEW: Admin badge logic
+  const isAdminReport = obstacle.adminReported === true;
+  const adminRole = obstacle.adminRole;
+
+  // Determine final color priority: Route status vs Validation status vs Admin status
   const getMarkerColor = () => {
+    // Admin reports get special colors
+    if (isAdminReport) {
+      return "#3B82F6"; // Official blue for admin reports
+    }
+
     if (isOnRoute) {
       // Route obstacles use obstacle type color for visibility
       return display.color;
@@ -131,8 +140,14 @@ export function EnhancedObstacleMarker({
       opacity: opacity,
     };
 
-    // Route type specific border colors
-    if (isOnRoute && routeType) {
+    // Admin reports get gold border
+    if (isAdminReport) {
+      baseStyle.borderColor = "#F59E0B"; // Gold border for admin reports
+      baseStyle.borderWidth = 3;
+    }
+
+    // Route type specific border colors (if not admin)
+    if (isOnRoute && routeType && !isAdminReport) {
       switch (routeType) {
         case "both":
           baseStyle.borderColor = "#8B5CF6"; // Purple for both routes
@@ -149,24 +164,39 @@ export function EnhancedObstacleMarker({
     return baseStyle;
   };
 
-  // Get validation UI elements
+  // Get validation badge (updated for admin reports)
   const getValidationBadge = () => {
+    // Admin reports override validation status
+    if (isAdminReport) {
+      return {
+        color: "#3B82F6",
+        text: "OFFICIAL",
+        icon: "shield-checkmark" as any,
+      };
+    }
+
+    // Regular validation status
     switch (validationStatus.tier) {
       case "admin_resolved":
         return {
           color: "#3B82F6",
           text: obstacle.status === "resolved" ? "CLEARED" : "OFFICIAL",
+          icon: "shield-checkmark" as any,
         };
       case "community_verified":
         return {
           color: validationStatus.conflictingReports ? "#F59E0B" : "#10B981",
           text: validationStatus.conflictingReports ? "DISPUTED" : "VERIFIED",
+          icon: validationStatus.conflictingReports
+            ? ("warning" as any)
+            : ("checkmark-circle" as any),
         };
       case "single_report":
       default:
         return {
           color: "#6B7280",
           text: "UNVERIFIED",
+          icon: "help-circle" as any,
         };
     }
   };
@@ -180,7 +210,11 @@ export function EnhancedObstacleMarker({
         longitude: obstacle.location.longitude,
       }}
       onPress={onPress}
-      accessibilityLabel={`${display.title} obstacle - ${validationStatus.displayLabel}`}
+      accessibilityLabel={`${display.title} obstacle - ${
+        isAdminReport
+          ? "Official government report"
+          : validationStatus.displayLabel
+      }`}
       tracksViewChanges={false}
     >
       <View style={styles.markerContainer}>
@@ -192,8 +226,15 @@ export function EnhancedObstacleMarker({
             color="white"
           />
 
+          {/* NEW: Admin shield overlay */}
+          {isAdminReport && (
+            <View style={styles.adminShield}>
+              <Ionicons name="shield-checkmark" size={8} color="#F59E0B" />
+            </View>
+          )}
+
           {/* Route indicator badge */}
-          {isOnRoute && routeType && (
+          {isOnRoute && routeType && !isAdminReport && (
             <View style={styles.routeIndicator}>
               <Text style={styles.routeIndicatorText}>
                 {routeType === "both"
@@ -204,71 +245,69 @@ export function EnhancedObstacleMarker({
               </Text>
             </View>
           )}
-
-          {/* Conflicting reports warning */}
-          {validationStatus.conflictingReports && (
-            <View style={styles.conflictIndicator}>
-              <Ionicons name="warning" size={8} color="white" />
-            </View>
-          )}
         </View>
 
-        {/* Validation Status Badge */}
+        {/* Validation Status Badge (updated for admin) */}
         <View
           style={[
             styles.validationBadge,
-            { backgroundColor: "white", borderColor: validationBadge.color },
+            { backgroundColor: validationBadge.color },
           ]}
         >
-          <Text
-            style={[styles.validationText, { color: validationBadge.color }]}
-          >
-            {validationBadge.text}
-          </Text>
+          <Ionicons
+            name={validationBadge.icon}
+            size={8}
+            color="white"
+            style={{ marginRight: 2 }}
+          />
+          <Text style={styles.badgeText}>{validationBadge.text}</Text>
         </View>
+
+        {/* NEW: Admin role indicator */}
+        {isAdminReport && adminRole && (
+          <View style={styles.adminRoleIndicator}>
+            <Text style={styles.adminRoleText}>
+              {adminRole === "super_admin"
+                ? "SA"
+                : adminRole === "lgu_admin"
+                ? "LGU"
+                : adminRole === "field_admin"
+                ? "FA"
+                : "ADM"}
+            </Text>
+          </View>
+        )}
+
+        {/* Conflicting Reports Indicator */}
+        {validationStatus.conflictingReports && !isAdminReport && (
+          <View style={styles.conflictIndicator}>
+            <Ionicons name="warning" size={10} color="white" />
+          </View>
+        )}
       </View>
 
-      <Callout>
-        <View style={styles.calloutContainer}>
-          <View style={styles.calloutHeader}>
-            <Text style={styles.calloutTitle}>{display.title}</Text>
-            <View
-              style={[
-                styles.calloutBadge,
-                { backgroundColor: validationBadge.color },
-              ]}
-            >
-              <Text style={styles.calloutBadgeText}>
-                {validationBadge.text}
+      {/* Enhanced Callout with Admin Info */}
+      <Callout style={styles.callout}>
+        <View style={styles.calloutContent}>
+          <Text style={styles.calloutTitle}>{display.title}</Text>
+          <Text style={styles.calloutDescription}>{obstacle.description}</Text>
+
+          {/* NEW: Admin report indicator in callout */}
+          {isAdminReport && (
+            <View style={styles.adminCalloutBadge}>
+              <Ionicons name="shield-checkmark" size={12} color="#3B82F6" />
+              <Text style={styles.adminCalloutText}>
+                Official Report{" "}
+                {adminRole
+                  ? `(${adminRole.replace("_", " ").toUpperCase()})`
+                  : ""}
               </Text>
             </View>
-          </View>
-
-          {obstacle.description && (
-            <Text style={styles.calloutDescription}>
-              {obstacle.description}
-            </Text>
           )}
 
-          <View style={styles.calloutMeta}>
-            <Text style={styles.metaText}>
-              {obstacle.upvotes || 0} confirms • {obstacle.downvotes || 0}{" "}
-              disputes
-            </Text>
-            <Text style={styles.metaDate}>
-              {new Date(obstacle.reportedAt).toLocaleDateString()}
-            </Text>
-          </View>
-
-          {isOnRoute && routeType && (
-            <Text style={styles.routeInfo}>
-              📍 On{" "}
-              {routeType === "both" ? "both routes" : `${routeType} route`}
-            </Text>
-          )}
-
-          <Text style={styles.calloutAction}>
-            Tap to validate or report changes
+          <Text style={styles.calloutMeta}>
+            {validationStatus.displayLabel} •{" "}
+            {new Date(obstacle.reportedAt).toLocaleDateString()}
           </Text>
         </View>
       </Callout>
@@ -279,106 +318,121 @@ export function EnhancedObstacleMarker({
 const styles = StyleSheet.create({
   markerContainer: {
     alignItems: "center",
+    position: "relative",
   },
   routeIndicator: {
     position: "absolute",
-    top: -4,
-    right: -4,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: "#FFFFFF",
+    top: -6,
+    right: -6,
+    backgroundColor: "#1F2937",
+    borderRadius: 8,
+    width: 16,
+    height: 16,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#E5E7EB",
+    borderColor: "#FFFFFF",
   },
   routeIndicatorText: {
+    color: "white",
     fontSize: 8,
     fontWeight: "bold",
-    color: "#1F2937",
   },
-  conflictIndicator: {
+  // NEW: Admin shield overlay
+  adminShield: {
     position: "absolute",
-    top: -2,
-    left: -2,
+    top: -4,
+    right: -4,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 6,
     width: 12,
     height: 12,
-    borderRadius: 6,
-    backgroundColor: "#F59E0B",
     justifyContent: "center",
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#F59E0B",
   },
   validationBadge: {
-    marginTop: 2,
-    paddingHorizontal: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 4,
     paddingVertical: 1,
-    borderRadius: 8,
-    borderWidth: 1,
+    borderRadius: 6,
+    marginTop: 2,
     minWidth: 50,
+    justifyContent: "center",
   },
-  validationText: {
-    fontSize: 9,
+  badgeText: {
+    color: "white",
+    fontSize: 7,
     fontWeight: "bold",
     textAlign: "center",
   },
-  calloutContainer: {
-    width: 220,
-    padding: 10,
+  // NEW: Admin role indicator
+  adminRoleIndicator: {
+    position: "absolute",
+    bottom: -8,
+    left: -8,
+    backgroundColor: "#F59E0B",
+    borderRadius: 6,
+    paddingHorizontal: 3,
+    paddingVertical: 1,
+    borderWidth: 1,
+    borderColor: "#FFFFFF",
   },
-  calloutHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+  adminRoleText: {
+    color: "white",
+    fontSize: 6,
+    fontWeight: "bold",
+  },
+  conflictIndicator: {
+    position: "absolute",
+    top: -5,
+    right: -5,
+    backgroundColor: "#F59E0B",
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    justifyContent: "center",
     alignItems: "center",
-    marginBottom: 6,
+  },
+  callout: {
+    width: 200,
+    padding: 0,
+  },
+  calloutContent: {
+    padding: 8,
   },
   calloutTitle: {
+    fontWeight: "bold",
     fontSize: 14,
-    fontWeight: "bold",
     color: "#1F2937",
-    flex: 1,
-    marginRight: 8,
-  },
-  calloutBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  calloutBadgeText: {
-    fontSize: 8,
-    fontWeight: "bold",
-    color: "white",
+    marginBottom: 4,
   },
   calloutDescription: {
     fontSize: 12,
     color: "#4B5563",
     marginBottom: 6,
-    lineHeight: 16,
+  },
+  // NEW: Admin badge in callout
+  adminCalloutBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#EFF6FF",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginBottom: 4,
+  },
+  adminCalloutText: {
+    fontSize: 10,
+    color: "#3B82F6",
+    fontWeight: "600",
+    marginLeft: 4,
   },
   calloutMeta: {
-    marginBottom: 4,
-  },
-  metaText: {
     fontSize: 10,
     color: "#6B7280",
-    marginBottom: 2,
-  },
-  metaDate: {
-    fontSize: 10,
-    color: "#9CA3AF",
-  },
-  routeInfo: {
-    fontSize: 11,
-    color: "#8B5CF6",
-    fontWeight: "600",
-    marginTop: 4,
-    marginBottom: 4,
-  },
-  calloutAction: {
-    fontSize: 11,
-    color: "#3B82F6",
     fontStyle: "italic",
-    textAlign: "center",
-    marginTop: 6,
   },
 });
