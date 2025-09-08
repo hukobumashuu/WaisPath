@@ -121,25 +121,55 @@ class SimpleFirebaseService implements FirebaseService {
     try {
       console.log("Initializing Firebase connection...");
 
-      const { initializeApp } = await import("firebase/app");
+      const { initializeApp, getApps } = await import("firebase/app");
       const { getFirestore } = await import("firebase/firestore");
-      const { getAuth, signInAnonymously } = await import("firebase/auth");
 
-      const config = getFirebaseConfig();
-      const app = initializeApp(config);
+      // 🔥 FIX: Use unified auth instead of creating new auth instance
+      const { getUnifiedFirebaseAuth } = await import(
+        "../config/firebaseConfig"
+      );
+
+      // Get existing app or create new one
+      const existingApps = getApps();
+      let app;
+      if (existingApps.length > 0) {
+        app = existingApps[0];
+        console.log("Using existing Firebase app");
+      } else {
+        const config = getFirebaseConfig();
+        app = initializeApp(config);
+        console.log("Firebase app initialized");
+      }
 
       this.db = getFirestore(app);
-      const auth = getAuth(app);
+
+      // Use unified auth (prevents conflicts)
+      const auth = await getUnifiedFirebaseAuth();
 
       console.log("Connecting directly to production Firestore...");
 
-      const authPromise = signInAnonymously(auth);
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Auth timeout")), 10000)
-      );
+      // Check if user is already authenticated
+      if (auth.currentUser) {
+        console.log(
+          "User already authenticated, using existing auth:",
+          auth.currentUser.email || "anonymous"
+        );
+        this.currentUser = auth.currentUser;
+      } else {
+        console.log("No existing auth, signing in anonymously");
+        const { signInAnonymously } = await import("firebase/auth");
 
-      const userCredential = await Promise.race([authPromise, timeoutPromise]);
-      this.currentUser = (userCredential as any).user;
+        const authPromise = signInAnonymously(auth);
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Auth timeout")), 10000)
+        );
+
+        const userCredential = await Promise.race([
+          authPromise,
+          timeoutPromise,
+        ]);
+        this.currentUser = (userCredential as any).user;
+      }
 
       this.initialized = true;
       console.log("Firebase initialized successfully");

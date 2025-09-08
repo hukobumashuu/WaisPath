@@ -1,4 +1,4 @@
-// App.tsx - Updated with test screens removed from navigation
+// App.tsx - Updated with auth coordinator initialization
 import "./global.css";
 import React, { useEffect, useState } from "react";
 import { NavigationContainer } from "@react-navigation/native";
@@ -19,6 +19,8 @@ import UserProfileScreen from "./src/screens/UserProfileScreen";
 import ReportScreen from "./src/screens/ReportScreen";
 // Store
 import { useUserProfile } from "./src/stores/userProfileStore";
+// NEW: Auth coordinator
+import { initializeAuthCoordinator } from "./src/services/AuthStateCoordinator";
 
 // Temporary placeholder for future screens
 const PlaceholderScreen = ({ title }: { title: string }) => (
@@ -109,37 +111,6 @@ const MainTabNavigator = () => {
           tabBarAccessibilityLabel: "User profile and accessibility settings",
         }}
       />
-
-      {/* 
-      DEVELOPMENT NOTE: Test screens (AHP Test, Sidewalk Test) have been 
-      temporarily removed from navigation to focus on core user experience.
-      These screens are still available in the codebase for development 
-      and can be accessed programmatically if needed for testing.
-      
-      To re-enable test screens in development:
-      1. Uncomment the Tab.Screen components below
-      2. Update the tabBarIcon logic above to include the test screen icons
-      
-      <Tab.Screen
-        name="AHP Test"
-        component={SimpleAHPTestScreen}
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="analytics" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="Sidewalk Test"
-        component={SidewalkTestScreen}
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="walk" size={size} color={color} />
-          ),
-          tabBarLabel: "Sidewalk",
-        }}
-      />
-      */}
     </Tab.Navigator>
   );
 };
@@ -155,8 +126,12 @@ export default function App() {
         // Load user profile on app start
         await loadProfile();
         console.log("📱 App initialized with profile system");
+
+        // NEW: Initialize auth coordinator for unified auth state
+        await initializeAuthCoordinator();
+        console.log("🔄 Auth coordinator initialized");
       } catch (error) {
-        console.warn("⚠️ Profile loading failed:", error);
+        console.warn("⚠️ App initialization failed:", error);
       } finally {
         setAppReady(true);
       }

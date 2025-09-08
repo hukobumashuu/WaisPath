@@ -1,6 +1,5 @@
 // src/components/AuthenticationSection.tsx
-// 🔐 AUTHENTICATION SECTION - FIXED VERSION
-// All TypeScript errors resolved, missing styles added
+// AUTHENTICATION SECTION - Complete Remake with Proper Imports
 
 import React, { useState, useEffect } from "react";
 import {
@@ -13,9 +12,23 @@ import {
   SafeAreaView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { enhancedFirebaseService } from "../services/enhancedFirebase"; // Using your file name
+import {
+  enhancedFirebaseService,
+  clearAuthCache,
+} from "../services/enhancedFirebase";
 import { UserCapabilities } from "../services/UserCapabilitiesService";
 import UniversalLoginForm from "./UniversalLoginForm";
+import {
+  addAuthListener,
+  removeAuthListener,
+  refreshAuthState,
+  type AuthState,
+} from "../services/AuthStateCoordinator";
+import {
+  saveAuthState,
+  loadAuthState,
+  clearAuthState,
+} from "../services/SimpleAuthPersistence";
 
 const COLORS = {
   white: "#FFFFFF",
@@ -44,7 +57,36 @@ export default function AuthenticationSection({
   const [showLoginModal, setShowLoginModal] = useState(false);
 
   useEffect(() => {
+    // Set up auth state listener
+    const handleAuthStateChange = async (authState: AuthState) => {
+      console.log(`AuthSection received auth change: ${authState.authType}`);
+
+      try {
+        setIsLoading(true);
+
+        // Get capabilities based on auth state
+        const status = await enhancedFirebaseService.getUserReportingStatus();
+        setUserCapabilities(status.capabilities);
+
+        if (onAuthStateChange) {
+          onAuthStateChange(status.capabilities.authType);
+        }
+      } catch (error) {
+        console.error("Failed to update user status:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    // Add listener with unique ID
+    addAuthListener("auth-section", handleAuthStateChange);
+
+    // Initial load
     loadUserStatus();
+
+    return () => {
+      removeAuthListener("auth-section");
+    };
   }, []);
 
   const loadUserStatus = async () => {
@@ -52,6 +94,8 @@ export default function AuthenticationSection({
       setIsLoading(true);
       const status = await enhancedFirebaseService.getUserReportingStatus();
       setUserCapabilities(status.capabilities);
+
+      console.log(`Auth section loaded: ${status.capabilities.authType} user`);
 
       if (onAuthStateChange) {
         onAuthStateChange(status.capabilities.authType);
@@ -67,9 +111,21 @@ export default function AuthenticationSection({
     userType: "admin" | "registered",
     userInfo: any
   ) => {
-    console.log(`Authentication successful: ${userType}`);
+    console.log(`Authentication successful in section: ${userType}`);
     setShowLoginModal(false);
-    await loadUserStatus();
+
+    // Clear cache and refresh auth state through coordinator
+    clearAuthCache();
+    await refreshAuthState();
+
+    // Save auth state for next session
+    await saveAuthState(
+      userType,
+      userInfo?.email,
+      userType === "admin" ? userInfo?.customClaims?.role : undefined
+    );
+
+    console.log("Auth cache cleared, state refreshed, and persistence updated");
 
     const message =
       userType === "admin"
@@ -79,420 +135,339 @@ export default function AuthenticationSection({
     Alert.alert("Welcome!", message);
   };
 
-  const handleUpgradePrompt = () => {
-    if (!userCapabilities) return;
-
-    const benefits = [
-      "📊 Track report status and timeline",
-      "🔔 Get notified when reports are reviewed",
-      "📝 Access your complete reporting history",
-      "🚀 Unlimited daily reporting (vs 1 per day)",
-      "💾 Sync your profile across all devices",
-    ];
-
+  const handleSignOut = async () => {
     Alert.alert(
-      "Upgrade Your Account",
-      "Anonymous users can only report 1 obstacle per day.\n\nRegister for unlimited access:\n\n" +
-        benefits.join("\n"),
+      "Sign Out",
+      "Are you sure you want to sign out? You'll return to guest mode with limited features.",
       [
-        { text: "Later", style: "cancel" },
-        { text: "Sign In / Register", onPress: () => setShowLoginModal(true) },
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Sign Out",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              // Clear auth state persistence
+              await clearAuthState();
+
+              // Clear cache
+              clearAuthCache();
+
+              // Sign out from Firebase
+              const { getUnifiedFirebaseAuth } = await import(
+                "../config/firebaseConfig"
+              );
+              const auth = await getUnifiedFirebaseAuth();
+
+              const { signOut } = await import("firebase/auth");
+              await signOut(auth);
+
+              console.log("User signed out successfully");
+
+              // Refresh auth state
+              await refreshAuthState();
+            } catch (error) {
+              console.error("Sign out failed:", error);
+              Alert.alert("Error", "Failed to sign out. Please try again.");
+            }
+          },
+        },
       ]
     );
   };
 
+  const getUserBadgeInfo = () => {
+    if (!userCapabilities) return { text: "LOADING", color: COLORS.muted };
+
+    switch (userCapabilities.authType) {
+      case "admin":
+        return {
+          text: "OFFICIAL (LGU ADMIN)",
+          color: COLORS.success,
+          icon: "shield-checkmark" as const,
+        };
+      case "registered":
+        return {
+          text: "REGISTERED USER",
+          color: COLORS.softBlue,
+          icon: "person-circle" as const,
+        };
+      case "anonymous":
+      default:
+        return {
+          text: "GUEST",
+          color: COLORS.warning,
+          icon: "person" as const,
+        };
+    }
+  };
+
+  const getFeaturesList = () => {
+    if (!userCapabilities) return [];
+
+    const features = [];
+
+    if (userCapabilities.canReport) {
+      const reportText =
+        userCapabilities.authType === "admin"
+          ? "Unlimited official reporting"
+          : userCapabilities.authType === "registered"
+          ? `${userCapabilities.dailyReportLimit} reports per day`
+          : "1 report per day";
+
+      features.push({
+        icon: "alert-circle" as const,
+        text: reportText,
+        available: true,
+      });
+    }
+
+    if (userCapabilities.canUploadPhotos) {
+      features.push({
+        icon: "camera" as const,
+        text: "Photo uploads",
+        available: true,
+      });
+    } else {
+      features.push({
+        icon: "camera" as const,
+        text: "Photo uploads",
+        available: false,
+      });
+    }
+
+    if (userCapabilities.canTrackReports) {
+      features.push({
+        icon: "list" as const,
+        text: "Report tracking",
+        available: true,
+      });
+    } else {
+      features.push({
+        icon: "list" as const,
+        text: "Report tracking",
+        available: false,
+      });
+    }
+
+    if (userCapabilities.canValidateReports) {
+      features.push({
+        icon: "people" as const,
+        text: "Community validation",
+        available: true,
+      });
+    } else {
+      features.push({
+        icon: "people" as const,
+        text: "Community validation",
+        available: false,
+      });
+    }
+
+    return features;
+  };
+
+  const badgeInfo = getUserBadgeInfo();
+  const features = getFeaturesList();
+
   if (isLoading) {
     return (
       <View style={[styles.container, style]}>
-        <View style={styles.loadingCard}>
-          <Text style={styles.loadingText}>Loading account status...</Text>
-        </View>
-      </View>
-    );
-  }
-
-  if (!userCapabilities) {
-    return (
-      <View style={[styles.container, style]}>
-        <View style={styles.errorCard}>
-          <Ionicons name="warning" size={20} color={COLORS.warning} />
-          <Text style={styles.errorText}>Unable to load account status</Text>
-          <TouchableOpacity onPress={loadUserStatus} style={styles.retryButton}>
-            <Text style={styles.retryButtonText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-
-  if (userCapabilities.authType === "anonymous") {
-    return (
-      <View style={[styles.container, style]}>
-        <AnonymousUserCard
-          capabilities={userCapabilities}
-          onUpgrade={handleUpgradePrompt}
-          onLogin={() => setShowLoginModal(true)}
-        />
-
-        <Modal
-          visible={showLoginModal}
-          animationType="slide"
-          presentationStyle="pageSheet"
-          onRequestClose={() => setShowLoginModal(false)}
-        >
-          <SafeAreaView style={styles.modalContainer}>
-            <UniversalLoginForm
-              mode="upgrade"
-              onLoginSuccess={handleLoginSuccess}
-              onCancel={() => setShowLoginModal(false)}
-            />
-          </SafeAreaView>
-        </Modal>
-      </View>
-    );
-  } else {
-    return (
-      <View style={[styles.container, style]}>
-        <AuthenticatedUserCard
-          capabilities={userCapabilities}
-          onRefresh={loadUserStatus}
-        />
-      </View>
-    );
-  }
-}
-
-function AnonymousUserCard({
-  capabilities,
-  onUpgrade,
-  onLogin,
-}: {
-  capabilities: UserCapabilities;
-  onUpgrade: () => void;
-  onLogin: () => void;
-}) {
-  return (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <View
-          style={[
-            styles.badge,
-            { backgroundColor: capabilities.badgeColor + "20" },
-          ]}
-        >
-          <Text style={styles.badgeEmoji}>👤</Text>
-          <Text style={[styles.badgeText, { color: capabilities.badgeColor }]}>
-            {capabilities.badgeText}
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>
+            Loading authentication status...
           </Text>
         </View>
       </View>
-
-      <View style={styles.cardContent}>
-        <Text style={styles.cardTitle}>Anonymous User</Text>
-        <Text style={styles.cardSubtitle}>
-          You can report {capabilities.dailyReportLimit} obstacle per day
-        </Text>
-
-        <View style={styles.limitInfo}>
-          <Ionicons
-            name="information-circle"
-            size={16}
-            color={COLORS.warning}
-          />
-          <Text style={styles.limitText}>
-            Limited features - upgrade for unlimited access
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.cardActions}>
-        <TouchableOpacity style={styles.primaryButton} onPress={onLogin}>
-          <Ionicons name="log-in" size={16} color={COLORS.white} />
-          <Text style={styles.primaryButtonText}>Sign In / Register</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.secondaryButton} onPress={onUpgrade}>
-          <Text style={styles.secondaryButtonText}>Learn More</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-}
-
-function AuthenticatedUserCard({
-  capabilities,
-  onRefresh,
-}: {
-  capabilities: UserCapabilities;
-  onRefresh: () => void;
-}) {
-  const isAdmin = capabilities.authType === "admin";
-  const isRegistered = capabilities.authType === "registered";
+    );
+  }
 
   return (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <View
-          style={[
-            styles.badge,
-            { backgroundColor: capabilities.badgeColor + "20" },
-          ]}
-        >
-          <Text style={styles.badgeEmoji}>
-            {isAdmin ? "🏛️" : isRegistered ? "✅" : "👤"}
-          </Text>
-          <Text style={[styles.badgeText, { color: capabilities.badgeColor }]}>
-            {capabilities.badgeText}
-          </Text>
+    <View style={[styles.container, style]}>
+      <View style={styles.header}>
+        <View style={styles.badgeContainer}>
+          <View style={[styles.badge, { backgroundColor: badgeInfo.color }]}>
+            <Ionicons
+              name={badgeInfo.icon}
+              size={16}
+              color={COLORS.white}
+              style={styles.badgeIcon}
+            />
+            <Text style={styles.badgeText}>{badgeInfo.text}</Text>
+          </View>
         </View>
 
-        <TouchableOpacity onPress={onRefresh} style={styles.refreshButton}>
-          <Ionicons name="refresh" size={16} color={COLORS.muted} />
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.cardContent}>
-        <Text style={styles.cardTitle}>
-          {isAdmin ? "Administrator" : "Registered User"}
-        </Text>
-        <Text style={styles.cardSubtitle}>
-          {isAdmin
-            ? "Full admin access with unlimited reporting"
-            : "Unlimited reporting with report tracking"}
-        </Text>
-
-        <View style={styles.featuresGrid}>
-          <FeatureItem
-            icon="infinite"
-            text={
-              capabilities.dailyReportLimit === -1
-                ? "Unlimited reports"
-                : `${capabilities.dailyReportLimit} reports/day`
-            }
-            enabled={true}
-          />
-          <FeatureItem
-            icon="camera"
-            text="Photo uploads"
-            enabled={capabilities.canUploadPhotos}
-          />
-          <FeatureItem
-            icon="analytics"
-            text="Report tracking"
-            enabled={capabilities.canTrackReports}
-          />
-          {isAdmin && (
-            <FeatureItem
-              icon="shield-checkmark"
-              text="Admin features"
-              enabled={capabilities.canAccessAdminFeatures}
-            />
+        <View style={styles.actionContainer}>
+          {userCapabilities?.authType === "anonymous" ? (
+            <TouchableOpacity
+              style={styles.loginButton}
+              onPress={() => setShowLoginModal(true)}
+            >
+              <Ionicons name="log-in" size={20} color={COLORS.white} />
+              <Text style={styles.loginButtonText}>Sign In / Register</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.signOutButton}
+              onPress={handleSignOut}
+            >
+              <Ionicons name="log-out" size={18} color={COLORS.muted} />
+              <Text style={styles.signOutButtonText}>Sign Out</Text>
+            </TouchableOpacity>
           )}
         </View>
       </View>
-    </View>
-  );
-}
 
-function FeatureItem({
-  icon,
-  text,
-  enabled,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  text: string;
-  enabled: boolean;
-}) {
-  return (
-    <View style={styles.featureItem}>
-      <Ionicons
-        name={icon}
-        size={14}
-        color={enabled ? COLORS.success : COLORS.muted}
-      />
-      <Text
-        style={[
-          styles.featureText,
-          { color: enabled ? COLORS.slate : COLORS.muted },
-        ]}
+      <View style={styles.featuresContainer}>
+        <Text style={styles.featuresTitle}>Account Features</Text>
+        {features.map((feature, index) => (
+          <View key={index} style={styles.feature}>
+            <Ionicons
+              name={feature.icon}
+              size={18}
+              color={feature.available ? COLORS.success : COLORS.muted}
+            />
+            <Text
+              style={[
+                styles.featureText,
+                !feature.available && styles.featureTextDisabled,
+              ]}
+            >
+              {feature.text}
+            </Text>
+            {!feature.available && (
+              <Ionicons name="lock-closed" size={14} color={COLORS.muted} />
+            )}
+          </View>
+        ))}
+
+        {userCapabilities?.authType === "anonymous" && (
+          <TouchableOpacity
+            style={styles.upgradePrompt}
+            onPress={() => setShowLoginModal(true)}
+          >
+            <Text style={styles.upgradePromptText}>
+              Register for unlimited access →
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <Modal
+        visible={showLoginModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
       >
-        {text}
-      </Text>
+        <UniversalLoginForm
+          mode={
+            userCapabilities?.authType === "anonymous" ? "upgrade" : "login"
+          }
+          onLoginSuccess={handleLoginSuccess}
+          onCancel={() => setShowLoginModal(false)}
+        />
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    marginVertical: 8,
-  },
-
-  card: {
     backgroundColor: COLORS.white,
     borderRadius: 12,
-    padding: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
-
-  loadingCard: {
-    backgroundColor: COLORS.lightGray,
-    borderRadius: 12,
+  loadingContainer: {
     padding: 20,
     alignItems: "center",
   },
-
   loadingText: {
+    fontSize: 16,
     color: COLORS.muted,
-    fontSize: 14,
   },
-
-  errorCard: {
-    backgroundColor: COLORS.lightGray,
-    borderRadius: 12,
-    padding: 16,
-    alignItems: "center",
+  header: {
+    marginBottom: 20,
   },
-
-  errorText: {
-    color: COLORS.muted,
-    fontSize: 14,
-    marginTop: 8,
-    marginBottom: 12,
+  badgeContainer: {
+    marginBottom: 16,
   },
-
-  retryButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: COLORS.softBlue,
-    borderRadius: 6,
-  },
-
-  retryButtonText: {
-    color: COLORS.white,
-    fontSize: 12,
-    fontWeight: "600",
-  },
-
-  cardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 12,
-  },
-
   badge: {
     flexDirection: "row",
     alignItems: "center",
+    alignSelf: "flex-start",
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 16,
+    borderRadius: 20,
   },
-
-  badgeEmoji: {
-    fontSize: 14,
+  badgeIcon: {
     marginRight: 6,
   },
-
   badgeText: {
     fontSize: 12,
     fontWeight: "600",
-    letterSpacing: 0.5,
+    color: COLORS.white,
+    textTransform: "uppercase",
   },
-
-  refreshButton: {
-    padding: 4,
+  actionContainer: {
+    alignItems: "flex-start",
   },
-
-  cardContent: {
-    marginBottom: 16,
+  loginButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: COLORS.softBlue,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
   },
-
-  cardTitle: {
+  loginButtonText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: COLORS.white,
+    marginLeft: 8,
+  },
+  signOutButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  signOutButtonText: {
+    fontSize: 14,
+    color: COLORS.muted,
+    marginLeft: 6,
+  },
+  featuresContainer: {
+    borderTopWidth: 1,
+    borderTopColor: "#E5E7EB",
+    paddingTop: 16,
+  },
+  featuresTitle: {
     fontSize: 16,
     fontWeight: "600",
     color: COLORS.slate,
-    marginBottom: 4,
-  },
-
-  cardSubtitle: {
-    fontSize: 14,
-    color: COLORS.muted,
-    lineHeight: 18,
     marginBottom: 12,
   },
-
-  limitInfo: {
+  feature: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: COLORS.warning + "10",
-    padding: 8,
-    borderRadius: 8,
+    marginBottom: 10,
   },
-
-  limitText: {
-    fontSize: 12,
-    color: COLORS.warning,
-    marginLeft: 6,
-    fontWeight: "500",
-  },
-
-  cardActions: {
-    flexDirection: "row",
-    gap: 8,
-  },
-
-  primaryButton: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: COLORS.softBlue,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-
-  primaryButtonText: {
-    color: COLORS.white,
-    fontSize: 14,
-    fontWeight: "600",
-    marginLeft: 6,
-  },
-
-  secondaryButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: COLORS.muted,
-    borderRadius: 8,
-  },
-
-  secondaryButtonText: {
-    color: COLORS.muted,
-    fontSize: 14,
-    fontWeight: "500",
-  },
-
-  featuresGrid: {
-    gap: 8,
-  },
-
-  featureItem: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-
   featureText: {
-    fontSize: 13,
-    marginLeft: 8,
-    fontWeight: "500",
-  },
-
-  modalContainer: {
+    fontSize: 14,
+    color: COLORS.slate,
+    marginLeft: 10,
     flex: 1,
-    backgroundColor: COLORS.lightGray,
+  },
+  featureTextDisabled: {
+    color: COLORS.muted,
+  },
+  upgradePrompt: {
+    marginTop: 8,
+    paddingVertical: 8,
+  },
+  upgradePromptText: {
+    fontSize: 14,
+    color: COLORS.softBlue,
+    fontWeight: "500",
   },
 });

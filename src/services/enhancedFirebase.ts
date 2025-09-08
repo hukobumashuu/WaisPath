@@ -1,6 +1,6 @@
-// src/services/EnhancedFirebaseService.ts
-// 🔥 ENHANCED FIREBASE SERVICE - Adds rate limiting to existing Firebase service
-// ZERO BREAKING CHANGES - Wraps your existing firebaseServices
+// src/services/enhancedFirebase.ts
+// 🔥 ENHANCED FIREBASE SERVICE - FIXED VERSION
+// Resolves auth state conflict between anonymous and admin login
 
 import { firebaseServices } from "./firebase";
 import {
@@ -44,6 +44,151 @@ interface UserContext {
 }
 
 class EnhancedFirebaseService {
+  // 🔥 NEW: Cache for unified auth state
+  private unifiedAuthCache: {
+    user: any;
+    timestamp: number;
+    isAdmin: boolean;
+    claims: any;
+  } | null = null;
+
+  private readonly CACHE_TTL = 30000; // 30 seconds cache
+
+  /**
+   * SIMPLIFIED: Get current Firebase user with unified auth
+   */
+  private async getCurrentFirebaseUser(): Promise<any> {
+    try {
+      // Check cache first
+      if (
+        this.unifiedAuthCache &&
+        Date.now() - this.unifiedAuthCache.timestamp < this.CACHE_TTL
+      ) {
+        return this.unifiedAuthCache.user;
+      }
+
+      // Use unified Firebase auth (prevents auth conflicts)
+      const { getUnifiedFirebaseAuth } = await import(
+        "../config/firebaseConfig"
+      );
+      const auth = await getUnifiedFirebaseAuth();
+      const currentUser = auth.currentUser;
+
+      console.log(
+        `🔍 getCurrentFirebaseUser: ${
+          currentUser?.email || "anonymous"
+        } (isAnonymous: ${currentUser?.isAnonymous})`
+      );
+
+      // Update cache
+      if (currentUser) {
+        try {
+          const tokenResult = await currentUser.getIdTokenResult();
+          this.unifiedAuthCache = {
+            user: currentUser,
+            timestamp: Date.now(),
+            isAdmin: tokenResult.claims.admin === true,
+            claims: tokenResult.claims,
+          };
+        } catch (error) {
+          console.warn("Failed to get token claims, using user without claims");
+          this.unifiedAuthCache = {
+            user: currentUser,
+            timestamp: Date.now(),
+            isAdmin: false,
+            claims: {},
+          };
+        }
+      } else {
+        this.unifiedAuthCache = null;
+      }
+
+      return currentUser;
+    } catch (error) {
+      console.error("Failed to get current Firebase user:", error);
+      this.unifiedAuthCache = null;
+      return null;
+    }
+  }
+
+  /**
+   * 🔥 FIXED: Clear auth cache when login state changes
+   */
+  public clearAuthCache(): void {
+    this.unifiedAuthCache = null;
+    console.log("🧹 Auth cache cleared");
+  }
+
+  /**
+   * 🔍 FIXED: GET CURRENT USER CONTEXT - Uses unified auth state
+   */
+  async getCurrentUserContext(): Promise<UserContext> {
+    try {
+      // STEP 1: Get current user from unified auth state
+      const currentUser = await this.getCurrentFirebaseUser();
+
+      if (!currentUser) {
+        console.log(
+          "🔍 No authenticated user found, returning anonymous context"
+        );
+        return {
+          uid: "unknown",
+          authType: "anonymous",
+          capabilities: this.getDefaultCapabilities(),
+        };
+      }
+
+      // STEP 2: Check if user is admin using cached claims
+      if (this.unifiedAuthCache?.isAdmin) {
+        const adminRole = this.unifiedAuthCache.claims.role as any;
+        const capabilities = userCapabilitiesService.getUserCapabilities(
+          "admin",
+          adminRole
+        );
+        const adminCapabilities =
+          userCapabilitiesService.getAdminCapabilities(adminRole);
+
+        console.log(
+          `🏛️ Admin user context: ${currentUser.email} (${adminRole})`
+        );
+
+        return {
+          uid: currentUser.uid,
+          authType: "admin",
+          capabilities,
+          adminCapabilities,
+        };
+      }
+
+      // STEP 3: Check if user is registered (has email and not anonymous)
+      const isRegistered =
+        currentUser && !currentUser.isAnonymous && currentUser.email;
+      const authType: UserAuthType = isRegistered ? "registered" : "anonymous";
+
+      console.log(
+        `👤 User context: ${authType} (email: ${currentUser.email}, anonymous: ${currentUser.isAnonymous})`
+      );
+
+      const capabilities =
+        userCapabilitiesService.getUserCapabilities(authType);
+
+      return {
+        uid: currentUser.uid,
+        authType,
+        capabilities,
+      };
+    } catch (error) {
+      console.error("Failed to get current user context:", error);
+
+      // Return safe defaults
+      return {
+        uid: "unknown",
+        authType: "anonymous",
+        capabilities: this.getDefaultCapabilities(),
+      };
+    }
+  }
+
   /**
    * 🎯 ENHANCED OBSTACLE REPORTING - Main function with rate limiting
    */
@@ -86,7 +231,6 @@ class EnhancedFirebaseService {
 
       // 3. VALIDATE PHOTO UPLOAD PERMISSION
       if (obstacleData.photoBase64 && !context.capabilities.canUploadPhotos) {
-        // Remove photo for users who can't upload photos
         console.log(
           `📷 Removing photo - ${context.authType} users cannot upload photos`
         );
@@ -99,10 +243,9 @@ class EnhancedFirebaseService {
           ? await firebaseServices.obstacle.getCurrentAdminUser()
           : null;
 
-      // Fix the null assignment error by explicitly handling null
       const adminUser = adminUserResult || undefined;
 
-      // 5. CALL EXISTING FIREBASE SERVICE (ZERO BREAKING CHANGES)
+      // 5. CALL EXISTING FIREBASE SERVICE
       const obstacleId = await firebaseServices.obstacle.reportObstacle({
         ...obstacleData,
         adminUser,
@@ -138,56 +281,6 @@ class EnhancedFirebaseService {
         },
         userCapabilities: this.getDefaultCapabilities(),
         message: `Reporting failed: ${error.message}`,
-      };
-    }
-  }
-
-  /**
-   * 🔍 GET CURRENT USER CONTEXT - Determines user auth type and capabilities
-   */
-  async getCurrentUserContext(): Promise<UserContext> {
-    try {
-      // Check if user is admin
-      const adminUser = await firebaseServices.obstacle.getCurrentAdminUser();
-
-      if (adminUser) {
-        const adminRole = adminUser.role as any;
-        const capabilities = userCapabilitiesService.getUserCapabilities(
-          "admin",
-          adminRole
-        );
-        const adminCapabilities =
-          userCapabilitiesService.getAdminCapabilities(adminRole);
-
-        return {
-          uid: adminUser.uid,
-          authType: "admin",
-          capabilities,
-          adminCapabilities,
-        };
-      }
-
-      // Check if user is registered (has email)
-      const currentUser = await this.getCurrentFirebaseUser();
-      const isRegistered = currentUser && !currentUser.isAnonymous;
-
-      const authType: UserAuthType = isRegistered ? "registered" : "anonymous";
-      const capabilities =
-        userCapabilitiesService.getUserCapabilities(authType);
-
-      return {
-        uid: currentUser?.uid || "unknown",
-        authType,
-        capabilities,
-      };
-    } catch (error) {
-      console.error("Failed to get current user context:", error);
-
-      // Return safe defaults
-      return {
-        uid: "unknown",
-        authType: "anonymous",
-        capabilities: this.getDefaultCapabilities(),
       };
     }
   }
@@ -263,7 +356,9 @@ class EnhancedFirebaseService {
         throw new Error("No user ID available for upgrade");
       }
 
-      // Update rate limiting for new user type
+      // Clear cache to force fresh auth state check
+      this.clearAuthCache();
+
       await rateLimitService.upgradeUserType(uid, "registered");
 
       console.log(
@@ -279,7 +374,9 @@ class EnhancedFirebaseService {
    */
   async upgradeUserToAdmin(userUID: string, adminRole: any): Promise<void> {
     try {
-      // Update rate limiting for admin user
+      // Clear cache to force fresh auth state check
+      this.clearAuthCache();
+
       await rateLimitService.upgradeUserType(userUID, "admin");
 
       console.log(
@@ -342,7 +439,6 @@ class EnhancedFirebaseService {
     try {
       const context = await this.getCurrentUserContext();
 
-      // Check if user can validate reports
       if (!context.capabilities.canValidateReports) {
         return {
           success: false,
@@ -351,7 +447,6 @@ class EnhancedFirebaseService {
         };
       }
 
-      // Call existing Firebase service
       await firebaseServices.obstacle.verifyObstacle(obstacleId, verification);
 
       return {
@@ -376,9 +471,6 @@ class EnhancedFirebaseService {
   // 🔧 WRAPPER METHODS - Direct access to existing Firebase services
   // ========================================
 
-  /**
-   * 🗺️ GET OBSTACLES - Direct wrapper to existing service
-   */
   async getObstaclesInArea(
     lat: number,
     lng: number,
@@ -387,9 +479,6 @@ class EnhancedFirebaseService {
     return firebaseServices.obstacle.getObstaclesInArea(lat, lng, radiusKm);
   }
 
-  /**
-   * 👤 PROFILE METHODS - Direct wrappers to existing profile service
-   */
   async saveProfile(profile: any): Promise<void> {
     return firebaseServices.profile.saveProfile(profile);
   }
@@ -405,17 +494,6 @@ class EnhancedFirebaseService {
   // ========================================
   // 🔧 PRIVATE HELPER METHODS
   // ========================================
-
-  private async getCurrentFirebaseUser(): Promise<any> {
-    try {
-      // Access the current user from your existing Firebase service
-      // This might need adjustment based on your exact Firebase service structure
-      return (firebaseServices as any).currentUser;
-    } catch (error) {
-      console.error("Failed to get current Firebase user:", error);
-      return null;
-    }
-  }
 
   private getDefaultCapabilities(): UserCapabilities {
     return userCapabilitiesService.getUserCapabilities("anonymous");
@@ -444,7 +522,7 @@ class EnhancedFirebaseService {
    */
   async performMaintenance(): Promise<void> {
     try {
-      await rateLimitService.cleanupOldData(7); // Keep 7 days of data
+      await rateLimitService.cleanupOldData(7);
       console.log("🧹 Enhanced Firebase service maintenance completed");
     } catch (error) {
       console.error("Maintenance failed:", error);
@@ -485,3 +563,6 @@ export const upgradeToRegisteredUser = (userUID?: string) =>
 
 export const upgradeToAdminUser = (userUID: string, adminRole: any) =>
   enhancedFirebaseService.upgradeUserToAdmin(userUID, adminRole);
+
+// 🧹 EXPORT CACHE MANAGEMENT
+export const clearAuthCache = () => enhancedFirebaseService.clearAuthCache();
