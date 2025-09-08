@@ -29,6 +29,7 @@ import {
   loadAuthState,
   clearAuthState,
 } from "../services/SimpleAuthPersistence";
+import { useUserProfile } from "../stores/userProfileStore";
 
 const COLORS = {
   white: "#FFFFFF",
@@ -117,6 +118,10 @@ export default function AuthenticationSection({
     // Clear cache and refresh auth state through coordinator
     clearAuthCache();
     await refreshAuthState();
+
+    // FIXED: Trigger profile reload using the hook
+    const { reloadProfileAfterLogin } = useUserProfile.getState();
+    await reloadProfileAfterLogin();
 
     // Save auth state for next session
     await saveAuthState(

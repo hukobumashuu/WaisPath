@@ -1,4 +1,4 @@
-// App.tsx - Updated with auth coordinator initialization
+// App.tsx - FIXED: Auth-first initialization to skip onboarding for existing users
 import "./global.css";
 import React, { useEffect, useState } from "react";
 import { NavigationContainer } from "@react-navigation/native";
@@ -19,7 +19,7 @@ import UserProfileScreen from "./src/screens/UserProfileScreen";
 import ReportScreen from "./src/screens/ReportScreen";
 // Store
 import { useUserProfile } from "./src/stores/userProfileStore";
-// NEW: Auth coordinator
+// Auth coordinator
 import { initializeAuthCoordinator } from "./src/services/AuthStateCoordinator";
 
 // Temporary placeholder for future screens
@@ -36,7 +36,7 @@ const PlaceholderScreen = ({ title }: { title: string }) => (
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
-// Main tab navigator for authenticated users - CLEANED UP FOR PRODUCTION
+// Main tab navigator for authenticated users
 const MainTabNavigator = () => {
   const insets = useSafeAreaInsets();
 
@@ -115,7 +115,7 @@ const MainTabNavigator = () => {
   );
 };
 
-// App entry point with profile-aware navigation
+// App entry point with FIXED auth-first initialization + reactive navigation
 export default function App() {
   const { profile, isFirstTime, isLoading, loadProfile } = useUserProfile();
   const [appReady, setAppReady] = useState(false);
@@ -123,13 +123,15 @@ export default function App() {
   useEffect(() => {
     const initializeApp = async () => {
       try {
-        // Load user profile on app start
+        // FIXED: Initialize auth coordinator FIRST to restore auth state
+        console.log("🔐 Initializing auth coordinator first...");
+        await initializeAuthCoordinator();
+        console.log("🔄 Auth coordinator initialized - auth state ready");
+
+        // FIXED: Load profile AFTER auth is ready (so it can detect authenticated users)
+        console.log("📱 Loading profile with auth context...");
         await loadProfile();
         console.log("📱 App initialized with profile system");
-
-        // NEW: Initialize auth coordinator for unified auth state
-        await initializeAuthCoordinator();
-        console.log("🔄 Auth coordinator initialized");
       } catch (error) {
         console.warn("⚠️ App initialization failed:", error);
       } finally {
@@ -139,6 +141,17 @@ export default function App() {
 
     initializeApp();
   }, [loadProfile]);
+
+  // FIXED: Add effect to react to isFirstTime changes during login
+  useEffect(() => {
+    if (appReady && !isLoading) {
+      console.log(
+        `🔄 Navigation decision: isFirstTime=${isFirstTime} ${
+          isFirstTime ? "(showing onboarding)" : "(showing main app)"
+        }`
+      );
+    }
+  }, [isFirstTime, appReady, isLoading]);
 
   // Show loading screen while initializing
   if (!appReady || isLoading) {
@@ -150,24 +163,27 @@ export default function App() {
           <Text className="text-base text-blue-100 mt-2">
             Intelligent Accessibility Navigation
           </Text>
-          <Text className="text-sm text-blue-200 mt-8">Loading...</Text>
+          <Text className="text-sm text-blue-200 mt-8">
+            {!appReady ? "Starting up..." : "Loading profile..."}
+          </Text>
           <StatusBar style="light" />
         </View>
       </SafeAreaProvider>
     );
   }
 
+  // FIXED: This now reacts to isFirstTime changes in real-time
   return (
     <SafeAreaProvider>
       <NavigationContainer>
         <StatusBar style="auto" />
         {isFirstTime ? (
-          // First-time users see onboarding
+          // First-time users or users without cloud profiles see onboarding
           <Stack.Navigator screenOptions={{ headerShown: false }}>
             <Stack.Screen name="Onboarding" component={UserProfileScreen} />
           </Stack.Navigator>
         ) : (
-          // Existing users go directly to main app with clean navigation
+          // Existing users with cloud profiles OR users who just logged in go to main app
           <MainTabNavigator />
         )}
       </NavigationContainer>

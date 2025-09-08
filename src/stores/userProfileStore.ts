@@ -1,5 +1,5 @@
 // src/stores/userProfileStore.ts
-// Hybrid User Profile Store - FIXED VERSION with all required fields
+// FIXED: Auth-aware profile loading - Skip onboarding for authenticated users with cloud profiles
 
 import { create } from "zustand";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -8,7 +8,6 @@ import { UserMobilityProfile, ObstacleType } from "../types";
 // Optional Firebase - only import if we want to try cloud sync
 let firebaseServices: any = null;
 try {
-  // Dynamically import Firebase services - if it fails, we continue without it
   import("../services/firebase")
     .then((module) => {
       firebaseServices = module.firebaseServices;
@@ -37,6 +36,7 @@ interface UserProfileState {
 
   // Hybrid storage actions
   loadProfile: () => Promise<void>;
+  reloadProfileAfterLogin: () => Promise<void>;
   saveProfileLocally: (profile: UserMobilityProfile) => Promise<void>;
   syncToCloud: () => Promise<void>;
   setLoading: (loading: boolean) => void;
@@ -51,7 +51,7 @@ const STORAGE_KEYS = {
   LAST_SYNC: "@waispath:lastSync",
 };
 
-// FIXED: Complete defaults for each mobility device type
+// Complete defaults for each mobility device type
 const DEVICE_DEFAULTS = {
   wheelchair: {
     maxRampSlope: 5,
@@ -59,7 +59,7 @@ const DEVICE_DEFAULTS = {
     avoidStairs: true,
     avoidCrowds: true,
     preferShade: true,
-    maxWalkingDistance: 800, // FIXED: Was missing!
+    maxWalkingDistance: 800,
   },
   walker: {
     maxRampSlope: 7,
@@ -67,7 +67,7 @@ const DEVICE_DEFAULTS = {
     avoidStairs: true,
     avoidCrowds: false,
     preferShade: true,
-    maxWalkingDistance: 400, // FIXED: Was missing!
+    maxWalkingDistance: 400,
   },
   cane: {
     maxRampSlope: 12,
@@ -75,7 +75,7 @@ const DEVICE_DEFAULTS = {
     avoidStairs: false,
     avoidCrowds: false,
     preferShade: true,
-    maxWalkingDistance: 600, // FIXED: Was missing!
+    maxWalkingDistance: 600,
   },
   crutches: {
     maxRampSlope: 10,
@@ -83,7 +83,7 @@ const DEVICE_DEFAULTS = {
     avoidStairs: false,
     avoidCrowds: true,
     preferShade: true,
-    maxWalkingDistance: 300, // FIXED: Was missing!
+    maxWalkingDistance: 300,
   },
   none: {
     maxRampSlope: 15,
@@ -91,9 +91,28 @@ const DEVICE_DEFAULTS = {
     avoidStairs: false,
     avoidCrowds: false,
     preferShade: false,
-    maxWalkingDistance: 1000, // FIXED: Was missing!
+    maxWalkingDistance: 1000,
   },
 };
+
+// Helper to check auth state
+async function getAuthState(): Promise<{
+  isAuthenticated: boolean;
+  isAnonymous: boolean;
+}> {
+  try {
+    const { getUnifiedFirebaseAuth } = await import("../config/firebaseConfig");
+    const auth = await getUnifiedFirebaseAuth();
+
+    return {
+      isAuthenticated: !!auth.currentUser,
+      isAnonymous: auth.currentUser?.isAnonymous || false,
+    };
+  } catch (error) {
+    console.log("Cannot check auth state:", error);
+    return { isAuthenticated: false, isAnonymous: true };
+  }
+}
 
 export const useUserProfile = create<UserProfileState>((set, get) => ({
   profile: null,
@@ -168,12 +187,64 @@ export const useUserProfile = create<UserProfileState>((set, get) => ({
     }
   },
 
+  // Helper method for when user logs in (triggers profile reload)
+  reloadProfileAfterLogin: async () => {
+    console.log("🔄 Reloading profile after login...");
+    await get().loadProfile();
+  },
+
+  // FIXED: Auth-aware profile loading
   loadProfile: async () => {
     const { setLoading, setSyncStatus } = get();
 
     try {
       setLoading(true);
 
+      // STEP 1: Check if user is authenticated (not anonymous)
+      const authState = await getAuthState();
+
+      // STEP 2: For authenticated users, prioritize cloud profile
+      if (
+        authState.isAuthenticated &&
+        !authState.isAnonymous &&
+        firebaseServices
+      ) {
+        try {
+          console.log("🔍 Checking cloud profile for authenticated user...");
+          const cloudProfile = await firebaseServices.profile.getProfile();
+
+          if (cloudProfile) {
+            // Fix date objects
+            if (cloudProfile.createdAt)
+              cloudProfile.createdAt = new Date(cloudProfile.createdAt);
+            if (cloudProfile.lastUpdated)
+              cloudProfile.lastUpdated = new Date(cloudProfile.lastUpdated);
+
+            set({
+              profile: cloudProfile,
+              isFirstTime: false, // FIXED: Skip onboarding for existing users
+              syncStatus: "synced",
+            });
+
+            // Save to local storage for offline access
+            await AsyncStorage.setItem(
+              STORAGE_KEYS.PROFILE,
+              JSON.stringify(cloudProfile)
+            );
+            await AsyncStorage.setItem(STORAGE_KEYS.FIRST_TIME, "false");
+
+            console.log("☁️ Profile loaded from cloud (authenticated user)");
+            return; // Exit early - profile found
+          }
+        } catch (cloudError) {
+          console.log(
+            "☁️ Cloud profile check failed, falling back to local:",
+            cloudError
+          );
+        }
+      }
+
+      // STEP 3: Fallback to local storage (anonymous users or cloud failed)
       const [profileData, firstTimeData] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEYS.PROFILE),
         AsyncStorage.getItem(STORAGE_KEYS.FIRST_TIME),
@@ -194,11 +265,15 @@ export const useUserProfile = create<UserProfileState>((set, get) => ({
         console.log("📱 Profile loaded from local storage");
       } else {
         set({ isFirstTime: true });
-        console.log("📭 No local profile found");
+        console.log("📭 No profile found anywhere - showing onboarding");
       }
 
-      // Try cloud sync in background
-      if (firebaseServices) {
+      // STEP 4: Background cloud sync for registered users
+      if (
+        authState.isAuthenticated &&
+        !authState.isAnonymous &&
+        firebaseServices
+      ) {
         get()
           .syncToCloud()
           .catch((error: any) => {
@@ -207,7 +282,7 @@ export const useUserProfile = create<UserProfileState>((set, get) => ({
           });
       }
     } catch (error: any) {
-      console.error("❌ Failed to load profile from local storage:", error);
+      console.error("❌ Failed to load profile:", error);
       set({ isFirstTime: true });
     } finally {
       setLoading(false);
@@ -270,7 +345,7 @@ export const useUserProfile = create<UserProfileState>((set, get) => ({
   },
 }));
 
-// FIXED: Helper function with complete defaults
+// Helper function with complete defaults
 export const createProfileWithDefaults = (
   deviceType: UserMobilityProfile["type"],
   customPreferences?: Partial<UserMobilityProfile>
@@ -281,15 +356,11 @@ export const createProfileWithDefaults = (
   const profile = {
     id: `profile_${deviceType}_${Date.now()}`,
     type: deviceType,
-    ...defaults, // This now includes maxWalkingDistance!
+    ...defaults,
     ...customPreferences,
     createdAt: now,
     lastUpdated: now,
   };
-
-  // Debug log to verify all fields are present
-  console.log("🔍 Created profile with fields:", Object.keys(profile));
-  console.log("🔍 maxWalkingDistance:", profile.maxWalkingDistance);
 
   return profile;
 };

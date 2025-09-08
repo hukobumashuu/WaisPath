@@ -1,6 +1,9 @@
 // src/styles/reportScreenStyles.ts
+// Separated styles for ReportScreen component
+
 import { StyleSheet } from "react-native";
 
+/* Pasig City color scheme */
 export const COLORS = {
   white: "#FFFFFF",
   softBlue: "#2BA4FF",
@@ -14,7 +17,7 @@ export const COLORS = {
   lightGray: "#F8FAFC",
 };
 
-export const styles = StyleSheet.create({
+export const reportScreenStyles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.lightGray,
@@ -38,7 +41,7 @@ export const styles = StyleSheet.create({
     opacity: 0.85,
   },
 
-  // Progress Section - Below Hero
+  // Progress Section
   progressSection: {
     backgroundColor: COLORS.white,
     paddingVertical: 16,

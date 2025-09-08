@@ -1,6 +1,6 @@
 // src/config/firebaseConfig.ts
-// FIREBASE CONFIG - Prefer 'firebase/auth/react-native' for persistence,
-// fall back gracefully to memory-only auth if persistence cannot be established.
+// FIREBASE CONFIG - FIXED: Waits for initial auth state before resolving
+// Prevents race conditions between Firebase restoration and app startup
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -49,6 +49,45 @@ let globalFirebaseAuth: any = null;
 let globalFirebaseDb: any = null;
 let initializationPromise: Promise<void> | null = null;
 
+// NEW: Helper to wait for initial auth state restoration
+function waitForInitialAuthState(
+  authInstance: any,
+  timeoutMs = 5000
+): Promise<void> {
+  return new Promise((resolve) => {
+    let resolved = false;
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        console.warn("Auth init: timeout waiting for initial auth state");
+        resolve();
+      }
+    }, timeoutMs);
+
+    try {
+      const unsubscribe = authInstance.onAuthStateChanged((user: any) => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          try {
+            unsubscribe();
+          } catch (e) {}
+          console.log("Auth init: initial onAuthStateChanged fired", {
+            uid: user?.uid,
+            isAnonymous: user?.isAnonymous,
+            email: user?.email,
+          });
+          resolve();
+        }
+      });
+    } catch (e) {
+      console.warn("Auth init: onAuthStateChanged not available or threw", e);
+      clearTimeout(timer);
+      resolve();
+    }
+  });
+}
+
 async function initializeFirebaseOnce(): Promise<void> {
   if (initializationPromise) return initializationPromise;
 
@@ -66,7 +105,7 @@ async function initializeFirebaseOnce(): Promise<void> {
         globalFirebaseApp = existingApps[0];
         console.log("Using existing Firebase app instance");
       } else {
-        const config = getFirebaseConfig();
+        const config = validateFirebaseConfig();
         globalFirebaseApp = initializeApp(config);
         console.log("Firebase app initialized");
       }
@@ -93,6 +132,9 @@ async function initializeFirebaseOnce(): Promise<void> {
           console.log(
             "✅ Firebase Auth initialized WITH AsyncStorage persistence (react-native entrypoint)"
           );
+
+          // NEW: Wait for initial auth state before resolving
+          await waitForInitialAuthState(globalFirebaseAuth);
           return;
         } else {
           console.warn(
@@ -100,18 +142,16 @@ async function initializeFirebaseOnce(): Promise<void> {
           );
         }
       } catch (rnErr) {
-        // non-fatal: log and continue to fallback
         console.warn(
           "'firebase/auth/react-native' not available or failed:",
           rnErr
         );
       }
 
-      // Try 2: Main firebase/auth (may not expose RN persistence) - safe guard
+      // Try 2: Main firebase/auth (may not expose RN persistence)
       try {
         console.log("Attempting auth init using 'firebase/auth' (fallback)...");
         const authMain = await import("firebase/auth");
-        // some sdk builds may provide these functions as named exports
         const initializeAuth = (authMain as any).initializeAuth;
         const getReactNativePersistence = (authMain as any)
           .getReactNativePersistence;
@@ -128,12 +168,18 @@ async function initializeFirebaseOnce(): Promise<void> {
           console.log(
             "✅ Firebase Auth initialized WITH AsyncStorage persistence (firebase/auth)"
           );
+
+          // NEW: Wait for initial auth state before resolving
+          await waitForInitialAuthState(globalFirebaseAuth);
           return;
         }
 
         if (typeof getAuth === "function") {
           globalFirebaseAuth = getAuth(globalFirebaseApp);
           console.log("⚠️ Firebase Auth initialized (memory-only via getAuth)");
+
+          // NEW: Still wait for initial state even in memory-only mode
+          await waitForInitialAuthState(globalFirebaseAuth);
           return;
         }
 
@@ -144,7 +190,7 @@ async function initializeFirebaseOnce(): Promise<void> {
         console.warn("Fallback 'firebase/auth' attempt failed:", fallbackErr);
       }
 
-      // Final fallback: try initializeAuth without persistence or getAuth one last time
+      // Final fallback: try initializeAuth without persistence
       try {
         console.log(
           "Final fallback: attempt initializeAuth() or getAuth() (memory-only)..."
@@ -157,6 +203,9 @@ async function initializeFirebaseOnce(): Promise<void> {
           console.log(
             "⚠️ Firebase Auth initialized via initializeAuth() (memory-only)"
           );
+
+          // NEW: Wait for initial auth state
+          await waitForInitialAuthState(globalFirebaseAuth);
           return;
         }
 
@@ -165,6 +214,9 @@ async function initializeFirebaseOnce(): Promise<void> {
           console.log(
             "⚠️ Firebase Auth initialized via getAuth() (memory-only)"
           );
+
+          // NEW: Wait for initial auth state
+          await waitForInitialAuthState(globalFirebaseAuth);
           return;
         }
 
