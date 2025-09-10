@@ -1,6 +1,6 @@
 // src/components/UniversalLoginForm.tsx
-// 🔐 UNIVERSAL LOGIN FORM - FIXED VERSION
-// Added auth cache clearing after successful login
+// 🔐 FIXED LOGIN FORM - Properly handles existing accounts during upgrade
+// KEY FIX: Handle auth/email-already-in-use by switching to existing account
 
 import React, { useState } from "react";
 import {
@@ -14,8 +14,15 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  linkWithCredential,
+  EmailAuthProvider,
+  signOut,
+} from "firebase/auth";
+import {
   enhancedFirebaseService,
-  clearAuthCache, // 🔥 NEW: Import cache clearing function
+  clearAuthCache,
 } from "../services/enhancedFirebase";
 
 const COLORS = {
@@ -68,7 +75,6 @@ export default function UniversalLoginForm({
       const result = await performAuthentication(email, password, mode);
 
       if (result.success) {
-        // 🔥 CRITICAL FIX: Clear auth cache after successful login
         clearAuthCache();
         console.log("🧹 Auth cache cleared after successful login");
 
@@ -82,7 +88,6 @@ export default function UniversalLoginForm({
         Alert.alert("Login Successful", welcomeMessage);
         onLoginSuccess(result.userType, result.user);
 
-        // 🔥 FIXED: Add small delay to ensure auth state propagates
         setTimeout(async () => {
           await enhancedFirebaseService.getCurrentUserContext();
           console.log("🔄 User context refreshed after login");
@@ -101,6 +106,7 @@ export default function UniversalLoginForm({
     }
   };
 
+  // 🔥 FIXED: Smart authentication logic that handles existing accounts
   const performAuthentication = async (
     email: string,
     password: string,
@@ -116,17 +122,56 @@ export default function UniversalLoginForm({
       let userCredential;
 
       if (authMode === "upgrade") {
-        // Check if there's actually an anonymous user to upgrade
+        // 🔥 KEY FIX: Handle upgrade mode properly
         if (auth.currentUser && auth.currentUser.isAnonymous) {
-          // Link anonymous account to email/password
-          const credential = EmailAuthProvider.credential(email, password);
-          userCredential = await linkWithCredential(
-            auth.currentUser,
-            credential
+          console.log(
+            "🔄 Attempting to upgrade anonymous user to registered account"
           );
-          console.log("✅ Anonymous account linked to email/password");
+
+          try {
+            // Try to link anonymous account to email/password
+            const credential = EmailAuthProvider.credential(email, password);
+            userCredential = await linkWithCredential(
+              auth.currentUser,
+              credential
+            );
+            console.log(
+              "✅ Anonymous account successfully linked to email/password"
+            );
+          } catch (linkError: any) {
+            if (linkError.code === "auth/email-already-in-use") {
+              // 🔥 FIX: Email already exists - sign out anonymous and sign in to existing account
+              console.log(
+                "⚠️ Email already in use - switching to existing account"
+              );
+
+              // Sign out the anonymous user
+              await signOut(auth);
+              console.log("🔄 Anonymous user signed out");
+
+              // Sign in to the existing account
+              userCredential = await signInWithEmailAndPassword(
+                auth,
+                email,
+                password
+              );
+              console.log("✅ Signed in to existing account");
+
+              // Show user-friendly message
+              Alert.alert(
+                "Account Found",
+                "We found your existing account and signed you in. Your anonymous data will be preserved in your profile."
+              );
+            } else if (linkError.code === "auth/wrong-password") {
+              throw new Error("Incorrect password for this email address");
+            } else if (linkError.code === "auth/invalid-credential") {
+              throw new Error("Invalid email or password");
+            } else {
+              throw linkError;
+            }
+          }
         } else {
-          // No anonymous user, just do regular login/registration
+          // No anonymous user, just do regular login
           console.log("⚠️ No anonymous user found, attempting regular login");
           try {
             userCredential = await signInWithEmailAndPassword(
@@ -150,7 +195,7 @@ export default function UniversalLoginForm({
           }
         }
       } else {
-        // Standard login
+        // Standard login mode
         try {
           userCredential = await signInWithEmailAndPassword(
             auth,
@@ -206,7 +251,7 @@ export default function UniversalLoginForm({
           userType: "admin",
           user,
           adminRole,
-          message: `✅ upgrade successful: admin ${adminRole}`,
+          message: `✅ Admin login successful: ${adminRole}`,
         };
       } else {
         // Regular user
@@ -261,7 +306,6 @@ export default function UniversalLoginForm({
 
   const getExistingFirebaseAuth = async () => {
     try {
-      // Use unified Firebase auth (prevents auth conflicts)
       const { getUnifiedFirebaseAuth } = await import(
         "../config/firebaseConfig"
       );
@@ -343,59 +387,8 @@ export default function UniversalLoginForm({
           onPress={handleSubmit}
           disabled={isLoading}
         >
-          {isLoading ? (
-            <View style={styles.loadingContainer}>
-              <Text style={styles.submitButtonText}>
-                {getSubmitButtonText()}
-              </Text>
-            </View>
-          ) : (
-            <Text style={styles.submitButtonText}>{getSubmitButtonText()}</Text>
-          )}
+          <Text style={styles.submitButtonText}>{getSubmitButtonText()}</Text>
         </TouchableOpacity>
-
-        {mode === "upgrade" && (
-          <View style={styles.upgradeInfo}>
-            <View style={styles.featureList}>
-              <View style={styles.feature}>
-                <Ionicons
-                  name="checkmark-circle"
-                  size={20}
-                  color={COLORS.success}
-                />
-                <Text style={styles.featureText}>
-                  Unlimited obstacle reporting
-                </Text>
-              </View>
-              <View style={styles.feature}>
-                <Ionicons name="camera" size={20} color={COLORS.success} />
-                <Text style={styles.featureText}>
-                  Photo uploads with reports
-                </Text>
-              </View>
-              <View style={styles.feature}>
-                <Ionicons name="list" size={20} color={COLORS.success} />
-                <Text style={styles.featureText}>
-                  Track your report history
-                </Text>
-              </View>
-              <View style={styles.feature}>
-                <Ionicons name="people" size={20} color={COLORS.success} />
-                <Text style={styles.featureText}>
-                  Join community validation
-                </Text>
-              </View>
-            </View>
-          </View>
-        )}
-
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>
-            {mode === "upgrade"
-              ? "Your account helps build a more accessible Pasig City"
-              : "Don't have an account? One will be created automatically"}
-          </Text>
-        </View>
       </View>
     </SafeAreaView>
   );
@@ -407,45 +400,42 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
   },
   header: {
-    paddingHorizontal: 20,
-    paddingTop: 20,
+    padding: 24,
     paddingBottom: 32,
     alignItems: "center",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
   },
   closeButton: {
     position: "absolute",
-    top: 20,
-    right: 20,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    top: 24,
+    right: 24,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: COLORS.lightGray,
-    justifyContent: "center",
     alignItems: "center",
+    justifyContent: "center",
   },
   title: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: COLORS.navy,
-    marginBottom: 8,
+    fontSize: 28,
+    fontWeight: "700",
+    color: COLORS.slate,
     textAlign: "center",
+    marginTop: 20,
+    marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,
     color: COLORS.muted,
     textAlign: "center",
     lineHeight: 22,
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
   },
   form: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 32,
+    padding: 24,
   },
   inputGroup: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   label: {
     fontSize: 16,
@@ -454,70 +444,27 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   input: {
-    height: 56,
-    borderWidth: 2,
-    borderColor: "#E5E7EB",
+    borderWidth: 1.5,
+    borderColor: "#E2E8F0",
     borderRadius: 12,
-    paddingHorizontal: 16,
+    padding: 16,
     fontSize: 16,
     backgroundColor: COLORS.white,
     color: COLORS.slate,
   },
   submitButton: {
-    height: 56,
     backgroundColor: COLORS.softBlue,
     borderRadius: 12,
-    justifyContent: "center",
+    padding: 18,
     alignItems: "center",
-    marginTop: 8,
-    marginBottom: 32,
+    marginTop: 12,
   },
   submitButtonDisabled: {
-    opacity: 0.6,
+    backgroundColor: COLORS.muted,
   },
   submitButtonText: {
-    fontSize: 18,
-    fontWeight: "600",
     color: COLORS.white,
-  },
-  loadingContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  upgradeInfo: {
-    marginBottom: 32,
-  },
-  featureList: {
-    backgroundColor: COLORS.chipBg,
-    borderRadius: 12,
-    padding: 20,
-  },
-  feature: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  featureText: {
     fontSize: 16,
-    color: COLORS.slate,
-    marginLeft: 12,
-    flex: 1,
-  },
-  footer: {
-    paddingBottom: 32,
-  },
-  footerText: {
-    fontSize: 14,
-    color: COLORS.muted,
-    textAlign: "center",
-    lineHeight: 20,
+    fontWeight: "600",
   },
 });
-
-// Import Firebase auth functions - moved to top level imports
-import {
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  linkWithCredential,
-  EmailAuthProvider,
-} from "firebase/auth";

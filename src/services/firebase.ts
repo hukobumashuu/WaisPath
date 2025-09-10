@@ -1,5 +1,6 @@
 // src/services/firebase.ts
-// ENHANCED: Added admin support to existing Firebase service without breaking changes
+// 🔥 PHASE 1 FIX: Remove Auto-Anonymous Creation
+// Trust Firebase persistence and only create anonymous users when needed
 
 import {
   UserMobilityProfile,
@@ -111,7 +112,9 @@ class SimpleFirebaseService implements FirebaseService {
   private initialized = false;
   private db: any = null;
   private connectionFailed = false;
+  private auth: any = null; // 🔥 NEW: Store auth instance for lazy anonymous creation
 
+  // 🔥 PHASE 1 FIX: Remove auto-anonymous creation
   async ensureInitialized(): Promise<void> {
     if (this.initialized) return;
     if (this.connectionFailed) {
@@ -144,39 +147,78 @@ class SimpleFirebaseService implements FirebaseService {
       this.db = getFirestore(app);
 
       // Use unified auth (prevents conflicts)
-      const auth = await getUnifiedFirebaseAuth();
+      this.auth = await getUnifiedFirebaseAuth();
 
       console.log("Connecting directly to production Firestore...");
 
-      // Check if user is already authenticated
-      if (auth.currentUser) {
+      // 🔥 PHASE 1 FIX: Trust Firebase persistence - don't force anonymous creation
+      if (this.auth.currentUser) {
         console.log(
           "User already authenticated, using existing auth:",
-          auth.currentUser.email || "anonymous"
+          this.auth.currentUser.email || "anonymous"
         );
-        this.currentUser = auth.currentUser;
+        this.currentUser = this.auth.currentUser;
       } else {
-        console.log("No existing auth, signing in anonymously");
-        const { signInAnonymously } = await import("firebase/auth");
-
-        const authPromise = signInAnonymously(auth);
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Auth timeout")), 10000)
+        console.log(
+          "🔄 No existing auth - waiting for Firebase persistence or explicit authentication"
         );
-
-        const userCredential = await Promise.race([
-          authPromise,
-          timeoutPromise,
-        ]);
-        this.currentUser = (userCredential as any).user;
+        // 🔥 KEY CHANGE: Don't automatically create anonymous user
+        // Let Firebase restore previous auth state or wait for explicit action
+        this.currentUser = null;
       }
 
       this.initialized = true;
-      console.log("Firebase initialized successfully");
+      console.log(
+        "🔥 Firebase initialized successfully (no forced anonymous creation)"
+      );
     } catch (error: any) {
       console.error("Firebase initialization failed:", error.message);
       this.connectionFailed = true;
       throw new Error(`Firebase connection failed: ${error.message}`);
+    }
+  }
+
+  // 🔥 NEW: Lazy anonymous user creation - only when needed
+  private async ensureAnonymousUser(): Promise<void> {
+    // If we already have a user, we're good
+    if (this.currentUser) {
+      return;
+    }
+
+    // If auth instance not available, initialize first
+    if (!this.auth) {
+      await this.ensureInitialized();
+    }
+
+    // Check if Firebase restored a user in the meantime
+    if (this.auth.currentUser) {
+      console.log("🔄 Firebase restored user during initialization");
+      this.currentUser = this.auth.currentUser;
+      return;
+    }
+
+    // Only now create anonymous user if absolutely needed
+    try {
+      console.log(
+        "🔄 Creating anonymous user for operation that requires authentication"
+      );
+      const { signInAnonymously } = await import("firebase/auth");
+
+      const authPromise = signInAnonymously(this.auth);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Auth timeout")), 10000)
+      );
+
+      const userCredential = await Promise.race([authPromise, timeoutPromise]);
+      this.currentUser = (userCredential as any).user;
+
+      console.log(
+        "✅ Anonymous user created successfully:",
+        this.currentUser.uid
+      );
+    } catch (error: any) {
+      console.error("Failed to create anonymous user:", error);
+      throw new Error(`Anonymous authentication failed: ${error.message}`);
     }
   }
 
@@ -187,18 +229,36 @@ class SimpleFirebaseService implements FirebaseService {
   profile = {
     saveProfile: async (profile: UserMobilityProfile): Promise<void> => {
       await this.ensureInitialized();
+      await this.ensureAnonymousUser();
 
-      const { doc, setDoc } = await import("firebase/firestore");
+      const { collection, query, where, getDocs, doc, setDoc, addDoc } =
+        await import("firebase/firestore");
 
       try {
-        const profileDoc = doc(this.db, "profiles", this.currentUser.uid);
-        await setDoc(profileDoc, {
+        // Check if profile already exists for this user
+        const profilesQuery = query(
+          collection(this.db, "profiles"),
+          where("userId", "==", this.currentUser.uid)
+        );
+
+        const existingProfiles = await getDocs(profilesQuery);
+
+        const profileData = {
           ...profile,
           userId: this.currentUser.uid,
           lastUpdated: new Date(),
-        });
+        };
 
-        console.log("Profile saved to Firestore");
+        if (!existingProfiles.empty) {
+          // Update existing profile
+          const existingDoc = existingProfiles.docs[0];
+          await setDoc(existingDoc.ref, profileData);
+          console.log("Profile updated in Firestore");
+        } else {
+          // Create new profile
+          await addDoc(collection(this.db, "profiles"), profileData);
+          console.log("Profile created in Firestore");
+        }
       } catch (error: any) {
         console.error("Failed to save profile:", error);
         throw new Error(`Hindi ma-save ang profile: ${error.message}`);
@@ -207,15 +267,24 @@ class SimpleFirebaseService implements FirebaseService {
 
     getProfile: async (): Promise<UserMobilityProfile | null> => {
       await this.ensureInitialized();
+      await this.ensureAnonymousUser();
 
-      const { doc, getDoc } = await import("firebase/firestore");
+      const { collection, query, where, getDocs } = await import(
+        "firebase/firestore"
+      );
 
       try {
-        const profileDoc = doc(this.db, "profiles", this.currentUser.uid);
-        const docSnap = await getDoc(profileDoc);
+        // Query profiles by userId field
+        const profilesQuery = query(
+          collection(this.db, "profiles"),
+          where("userId", "==", this.currentUser.uid)
+        );
 
-        if (docSnap.exists()) {
-          const data = docSnap.data();
+        const querySnapshot = await getDocs(profilesQuery);
+
+        if (!querySnapshot.empty) {
+          const profileDoc = querySnapshot.docs[0];
+          const data = profileDoc.data();
           console.log("Profile loaded from Firestore");
           return data as UserMobilityProfile;
         } else {
@@ -230,14 +299,30 @@ class SimpleFirebaseService implements FirebaseService {
 
     deleteProfile: async (): Promise<void> => {
       await this.ensureInitialized();
+      await this.ensureAnonymousUser();
 
-      const { doc, deleteDoc } = await import("firebase/firestore");
+      const { collection, query, where, getDocs, deleteDoc } = await import(
+        "firebase/firestore"
+      );
 
       try {
-        const profileDoc = doc(this.db, "profiles", this.currentUser.uid);
-        await deleteDoc(profileDoc);
+        // Query profiles by userId field
+        const profilesQuery = query(
+          collection(this.db, "profiles"),
+          where("userId", "==", this.currentUser.uid)
+        );
 
-        console.log("Profile deleted from Firestore");
+        const querySnapshot = await getDocs(profilesQuery);
+
+        if (!querySnapshot.empty) {
+          // Delete all profiles for this user (there should only be one)
+          for (const profileDoc of querySnapshot.docs) {
+            await deleteDoc(profileDoc.ref);
+          }
+          console.log("Profile deleted from Firestore");
+        } else {
+          console.log("No profile found to delete");
+        }
       } catch (error: any) {
         console.error("Failed to delete profile:", error);
         throw new Error(`Hindi ma-delete ang profile: ${error.message}`);
@@ -263,6 +348,9 @@ class SimpleFirebaseService implements FirebaseService {
       adminUser?: AdminUser;
     }): Promise<string> => {
       await this.ensureInitialized();
+
+      // 🔥 PHASE 1 FIX: Ensure user exists before obstacle operations
+      await this.ensureAnonymousUser();
 
       const { collection, addDoc, serverTimestamp } = await import(
         "firebase/firestore"
@@ -320,23 +408,10 @@ class SimpleFirebaseService implements FirebaseService {
         console.log(
           `✅ Obstacle reported successfully: ${obstacleId} ${
             isAdminReport
-              ? "(ADMIN REPORT - AUTO-VERIFIED)"
-              : "(COMMUNITY REPORT)"
+              ? `(ADMIN AUTO-VERIFIED by ${adminRole})`
+              : "(pending verification)"
           }`
         );
-
-        // NEW: Log admin action if admin report (placeholder for Step 2)
-        if (isAdminReport && adminEmail) {
-          try {
-            console.log(
-              `📋 Admin report logged: ${adminEmail} reported ${obstacleData.type}`
-            );
-            // TODO: Add audit logging in Step 2
-          } catch (error) {
-            console.warn("Failed to log admin action:", error);
-            // Non-blocking - report still succeeds
-          }
-        }
 
         return obstacleId;
       } catch (error: any) {
@@ -345,7 +420,6 @@ class SimpleFirebaseService implements FirebaseService {
       }
     },
 
-    // ENHANCED: Get obstacles with admin metadata preserved
     getObstaclesInArea: async (
       lat: number,
       lng: number,
@@ -353,51 +427,37 @@ class SimpleFirebaseService implements FirebaseService {
     ): Promise<AccessibilityObstacle[]> => {
       await this.ensureInitialized();
 
+      // 🔥 PHASE 1 FIX: getObstaclesInArea doesn't need user authentication
+      // This is a read operation that can work without currentUser
+
       const { collection, getDocs } = await import("firebase/firestore");
 
       try {
-        console.log(
-          `Getting obstacles in area: ${lat}, ${lng} (${radiusKm}km radius)`
+        const obstaclesSnapshot = await getDocs(
+          collection(this.db, "obstacles")
         );
 
-        const obstaclesCollection = collection(this.db, "obstacles");
-        const querySnapshot = await getDocs(obstaclesCollection);
-
         const allObstacles: AccessibilityObstacle[] = [];
-        querySnapshot.forEach((doc) => {
-          const data = doc.data();
-          if (data) {
-            allObstacles.push({
-              id: data.id ?? doc.id,
-              location: data.location,
-              type: data.type,
-              severity: data.severity,
-              description: data.description,
-              reportedBy: data.reportedBy,
-              reportedAt:
-                data.reportedAt?.toDate?.() ||
-                new Date(data.reportedAt) ||
-                new Date(),
-              verified: data.verified || false,
-              timePattern: data.timePattern,
-              upvotes: data.upvotes || 0,
-              downvotes: data.downvotes || 0,
-              status: data.status || "pending",
-              reportsCount: data.reportsCount || 1,
-              photoBase64: data.photoBase64,
-              confidenceScore: data.confidenceScore,
-              lastVerifiedAt: data.lastVerifiedAt?.toDate?.(),
 
-              // NEW: Admin fields (safe access)
-              adminReported: data.adminReported || false,
-              adminRole: data.adminRole,
-              adminEmail: data.adminEmail,
-              autoVerified: data.autoVerified || false,
-            });
-          }
+        obstaclesSnapshot.forEach((doc) => {
+          const data = doc.data();
+          const obstacle: AccessibilityObstacle = {
+            id: data.id || doc.id,
+            location: data.location,
+            type: data.type as ObstacleType,
+            severity: data.severity,
+            description: data.description,
+            reportedBy: data.reportedBy,
+            reportedAt: data.reportedAt?.toDate() || new Date(),
+            verified: data.verified || false,
+            upvotes: data.upvotes || 0,
+            downvotes: data.downvotes || 0,
+            photoBase64: data.photoBase64,
+            timePattern: data.timePattern || "permanent",
+          };
+          allObstacles.push(obstacle);
         });
 
-        // FIXED: Apply spatial filtering using proper coordinate calculation
         const filteredObstacles = allObstacles.filter((obstacle) => {
           const distance = haversineKm(
             { latitude: lat, longitude: lng },
@@ -406,17 +466,15 @@ class SimpleFirebaseService implements FirebaseService {
           return distance <= radiusKm;
         });
 
+        const deduped = dedupeById(filteredObstacles);
+
         console.log(
-          `📍 Found ${
-            filteredObstacles.length
-          } obstacles in ${radiusKm}km radius (${
-            filteredObstacles.filter((o) => o.adminReported).length
-          } admin reports)`
+          `📍 Found ${deduped.length} obstacles in ${radiusKm}km radius`
         );
 
-        return dedupeById(filteredObstacles).slice(0, 50);
+        return deduped;
       } catch (error: any) {
-        console.error("Failed to get obstacles in area:", error);
+        console.error("Failed to get obstacles:", error);
         throw new Error(`Hindi ma-load ang mga obstacles: ${error.message}`);
       }
     },
@@ -426,6 +484,9 @@ class SimpleFirebaseService implements FirebaseService {
       verification: "upvote" | "downvote"
     ): Promise<void> => {
       await this.ensureInitialized();
+
+      // 🔥 PHASE 1 FIX: Ensure user exists before verification operations
+      await this.ensureAnonymousUser();
 
       const {
         collection,
@@ -438,9 +499,9 @@ class SimpleFirebaseService implements FirebaseService {
         serverTimestamp,
       } = await import("firebase/firestore");
 
-      const userId = this.currentUser?.uid || "anonymous";
-
       try {
+        const userId = this.currentUser.uid;
+
         const obstaclesQuery = query(
           collection(this.db, "obstacles"),
           where("id", "==", obstacleId)
@@ -450,6 +511,7 @@ class SimpleFirebaseService implements FirebaseService {
 
         if (!querySnapshot.empty) {
           const obstacleDoc = querySnapshot.docs[0];
+
           await updateDoc(obstacleDoc.ref, {
             [verification === "upvote" ? "upvotes" : "downvotes"]: increment(1),
             [`${verification}dBy`]: arrayUnion(userId),
@@ -472,6 +534,9 @@ class SimpleFirebaseService implements FirebaseService {
       eventData: ValidationEvent
     ): Promise<void> => {
       await this.ensureInitialized();
+
+      // 🔥 PHASE 1 FIX: recordPromptEvent can work with or without user
+      // Use current user if available, otherwise use anonymous placeholder
 
       const { collection, addDoc, serverTimestamp } = await import(
         "firebase/firestore"
@@ -505,6 +570,8 @@ class SimpleFirebaseService implements FirebaseService {
     ): Promise<void> => {
       await this.ensureInitialized();
 
+      // 🔥 PHASE 1 FIX: Confidence updates are administrative, don't need user
+
       const { collection, query, where, getDocs, updateDoc } = await import(
         "firebase/firestore"
       );
@@ -533,7 +600,14 @@ class SimpleFirebaseService implements FirebaseService {
     // NEW: Helper method to check if current user is admin
     getCurrentAdminUser: async (): Promise<AdminUser | null> => {
       try {
-        if (!this.currentUser) return null;
+        // 🔥 PHASE 1 FIX: Admin check should work with existing auth state
+        // Don't force anonymous creation for admin checks
+
+        if (!this.currentUser) {
+          await this.ensureInitialized();
+          // Still no user after init? Not an admin
+          if (!this.currentUser) return null;
+        }
 
         // Get user's ID token with custom claims
         const tokenResult = await this.currentUser.getIdTokenResult();
@@ -637,54 +711,12 @@ export const reportObstacleWithAdminCheck = async (obstacleData: {
   description: string;
   photoBase64?: string;
   timePattern?: "permanent" | "morning" | "afternoon" | "evening" | "weekend";
-}) => {
-  // Check if current user is admin
+}): Promise<string> => {
+  // Get admin context if available
   const adminUser = await firebaseServices.obstacle.getCurrentAdminUser();
 
-  // Report with admin context if applicable
   return firebaseServices.obstacle.reportObstacle({
     ...obstacleData,
     adminUser: adminUser || undefined,
   });
 };
-
-export async function checkFirebaseHealth(): Promise<{
-  status: "connected" | "error";
-  message: string;
-}> {
-  try {
-    return {
-      status: "connected",
-      message: "Connected to real Firebase",
-    };
-  } catch (error: any) {
-    return {
-      status: "error",
-      message: `Firebase error: ${error.message}`,
-    };
-  }
-}
-
-export async function saveObstacleLocally(obstacle: any): Promise<void> {
-  try {
-    const existingData = await AsyncStorage.getItem(
-      "@waispath:local_obstacles"
-    );
-    const obstacles = existingData ? JSON.parse(existingData) : [];
-
-    obstacles.push({
-      ...obstacle,
-      id: `local_${Date.now()}`,
-      savedAt: new Date().toISOString(),
-      synced: false,
-    });
-
-    await AsyncStorage.setItem(
-      "@waispath:local_obstacles",
-      JSON.stringify(obstacles)
-    );
-    console.log("Obstacle saved locally");
-  } catch (error) {
-    console.error("Failed to save obstacle locally:", error);
-  }
-}

@@ -1,5 +1,5 @@
 // src/screens/NavigationScreen.tsx
-// CLEAN: Added search functionality without breaking existing code
+// CLEAN: Removed debug panel, ready for production
 
 import React, {
   useState,
@@ -28,12 +28,11 @@ import { useLocation } from "../hooks/useLocation";
 import { useUserProfile } from "../stores/userProfileStore";
 import { firebaseServices } from "../services/firebase";
 import { UserLocation, AccessibilityObstacle, ObstacleType } from "../types";
-import Constants from "expo-constants";
 
-// PRESERVED: Import existing styles
+// Import existing styles
 import { navigationStyles as styles } from "../styles/navigationStyles";
 
-// PRESERVED: Import existing hooks and components
+// Import existing hooks and components
 import { useProximityDetection } from "../hooks/useProximityDetection";
 import { useRouteCalculation } from "../hooks/useRouteCalculation";
 import { ProximityAlertsOverlay } from "../components/ProximityAlertsOverlay";
@@ -41,11 +40,11 @@ import { EnhancedObstacleMarker } from "../components/EnhancedObstacleMarker";
 import { RouteInfoPanel } from "../components/RouteInfoPanel";
 import { NavigationControls } from "../components/NavigationControls";
 
-// NEW: Enhanced search component
+// Enhanced search component
 import EnhancedSearchBar from "../components/EnhancedSearchBar";
 import { PlaceSearchResult } from "../services/googlePlacesService";
 
-// PRESERVED: Import existing utilities and services
+// Import existing utilities and services
 import { getPOIIcon } from "../utils/mapUtils";
 import { SAMPLE_POIS } from "../constants/navigationConstants";
 import {
@@ -75,16 +74,13 @@ export default function NavigationScreen() {
   const mapRef = useRef<MapView | null>(null);
   const [destination, setDestination] = useState("");
 
-  // NEW: Search mode toggle - REMOVED, just use enhanced search by default
-  // const [useEnhancedSearch, setUseEnhancedSearch] = useState(true);
-
-  // PRESERVED: All existing state
+  // All existing state
   const [showAllObstacles, setShowAllObstacles] = useState(false);
   const [validationRadiusObstacles, setValidationRadiusObstacles] = useState<
     AccessibilityObstacle[]
   >([]);
 
-  // PRESERVED: All existing helper functions
+  // Existing helper functions
   function getObstacleRouteType(
     obstacle: AccessibilityObstacle,
     routeAnalysis: any
@@ -110,7 +106,7 @@ export default function NavigationScreen() {
     return Array.from(map.values());
   };
 
-  // PRESERVED: Existing hook usage
+  // Existing hook usage
   const {
     routeAnalysis,
     isCalculating,
@@ -128,7 +124,7 @@ export default function NavigationScreen() {
     destination,
   });
 
-  // PRESERVED: All existing state variables
+  // All existing state variables
   const [isNavigating, setIsNavigating] = useState(false);
   const [showValidationPrompt, setShowValidationPrompt] = useState(false);
   const [currentValidationPrompt, setCurrentValidationPrompt] =
@@ -142,16 +138,7 @@ export default function NavigationScreen() {
     useState<ProximityAlert | null>(null);
   const [isUsingDetour, setIsUsingDetour] = useState(false);
 
-  // DEBUG: enhanced debugInfo state
-  const [debugInfo, setDebugInfo] = useState({
-    mapReady: false,
-    mapError: null as string | null,
-    apiKeyPresent: false,
-    locationFound: false,
-    renderCount: 0,
-  });
-
-  // NEW: Enhanced destination selection handler
+  // Enhanced destination selection handler
   const handleDestinationSelect = async (destination: PlaceSearchResult) => {
     try {
       setDestination(destination.name);
@@ -179,7 +166,7 @@ export default function NavigationScreen() {
     }
   };
 
-  // NEW: Helper function
+  // Helper function
   const getDestinationTypeFromGoogleTypes = (types: string[]): string => {
     if (types.includes("hospital") || types.includes("pharmacy"))
       return "healthcare";
@@ -190,7 +177,7 @@ export default function NavigationScreen() {
     return "business";
   };
 
-  // PRESERVED: All existing functions unchanged
+  // All existing functions unchanged
   const loadValidationRadiusObstacles = async () => {
     if (!location) return;
 
@@ -256,7 +243,7 @@ export default function NavigationScreen() {
     }
   };
 
-  // FIXED: Proper method signature for createMicroDetour
+  // Proper method signature for createMicroDetour
   const handleCriticalObstacle = useCallback(
     async (alert: ProximityAlert) => {
       try {
@@ -268,7 +255,7 @@ export default function NavigationScreen() {
 
         setCurrentObstacleAlert(alert);
 
-        // FIXED: Correct parameter order
+        // Correct parameter order
         const detour = await microReroutingService.createMicroDetour(
           location,
           alert.obstacle,
@@ -290,7 +277,7 @@ export default function NavigationScreen() {
     [location, selectedDestination, profile]
   );
 
-  // PRESERVED: All other existing handlers
+  // All other existing handlers
   const handleAcceptDetour = useCallback(() => {
     if (currentMicroDetour) {
       setIsUsingDetour(true);
@@ -358,7 +345,7 @@ export default function NavigationScreen() {
     [handleCriticalObstacle]
   );
 
-  // PRESERVED: All existing effects and memos
+  // All existing effects and memos
   const routePolyline = useMemo(() => {
     return routeAnalysis?.fastestRoute?.polyline || [];
   }, [routeAnalysis?.fastestRoute?.polyline]);
@@ -385,21 +372,6 @@ export default function NavigationScreen() {
       proximityDetectionService.resetDetectionState();
     }
   }, [destinationName, proximityState.isDetecting]);
-
-  // NEW DEBUG: update debugInfo when location changes
-  useEffect(() => {
-    const apiKey =
-      (Constants?.expoConfig as any)?.extra?.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
-      process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
-      null;
-
-    setDebugInfo((prev) => ({
-      ...prev,
-      apiKeyPresent: !!apiKey,
-      locationFound: !!location,
-      renderCount: (prev.renderCount || 0) + 1,
-    }));
-  }, [location]);
 
   const checkForValidationPrompts = async () => {
     if (!location || !profile) return;
@@ -428,7 +400,7 @@ export default function NavigationScreen() {
     );
   };
 
-  // PRESERVED: Existing obstacle rendering
+  // Existing obstacle rendering
   const renderObstacles = () => {
     const allObstacleIds = new Set<string>();
     const renderedObstacles: JSX.Element[] = [];
@@ -483,7 +455,7 @@ export default function NavigationScreen() {
     return renderedObstacles;
   };
 
-  // PRESERVED: Loading and error screens
+  // Loading and error screens
   if (!location && !locationError) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
@@ -508,75 +480,6 @@ export default function NavigationScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* DEBUG OVERLAY - TEMPORARY */}
-      <View
-        style={{
-          position: "absolute",
-          top: insets.top + 150,
-          left: 10,
-          right: 10,
-          backgroundColor: "rgba(0,0,0,0.9)",
-          padding: 12,
-          borderRadius: 8,
-          zIndex: 999,
-        }}
-      >
-        <Text
-          style={{
-            color: "#22C55E",
-            fontSize: 16,
-            fontWeight: "bold",
-            marginBottom: 8,
-          }}
-        >
-          🔍 WAISPATH Debug Info
-        </Text>
-        <Text
-          style={{
-            color: debugInfo.mapReady ? "#22C55E" : "#EF4444",
-            fontSize: 14,
-          }}
-        >
-          Map Ready: {debugInfo.mapReady ? "YES ✅" : "NO ❌"}
-        </Text>
-        <Text
-          style={{
-            color: debugInfo.apiKeyPresent ? "#22C55E" : "#EF4444",
-            fontSize: 14,
-          }}
-        >
-          API Key: {debugInfo.apiKeyPresent ? "FOUND ✅" : "MISSING ❌"}
-        </Text>
-        <Text style={{ color: location ? "#22C55E" : "#EF4444", fontSize: 14 }}>
-          Location:{" "}
-          {location
-            ? `${location.latitude.toFixed(4)}, ${location.longitude.toFixed(
-                4
-              )} ✅`
-            : "MISSING ❌"}
-        </Text>
-        <Text style={{ color: "#60A5FA", fontSize: 14 }}>
-          Renders: {debugInfo.renderCount}
-        </Text>
-        {debugInfo.mapError && (
-          <Text style={{ color: "#EF4444", fontSize: 12, marginTop: 4 }}>
-            Error: {debugInfo.mapError}
-          </Text>
-        )}
-        <TouchableOpacity
-          onPress={() => setDebugInfo((prev) => ({ ...prev, renderCount: 0 }))}
-          style={{
-            backgroundColor: "#3B82F6",
-            padding: 6,
-            borderRadius: 4,
-            marginTop: 8,
-            alignSelf: "flex-start",
-          }}
-        >
-          <Text style={{ color: "white", fontSize: 12 }}>Clear Debug</Text>
-        </TouchableOpacity>
-      </View>
-
       <MapView
         ref={mapRef}
         style={styles.map}
@@ -592,11 +495,10 @@ export default function NavigationScreen() {
         followsUserLocation={isNavigating}
         loadingEnabled={true}
         onMapReady={() => {
-          setDebugInfo((prev) => ({ ...prev, mapReady: true }));
           console.log("Map is ready!");
         }}
       >
-        {/* PRESERVED: USER MARKER */}
+        {/* USER MARKER */}
         {location && (
           <Marker coordinate={location} anchor={{ x: 0.5, y: 0.5 }}>
             <View style={styles.userLocationMarker}>
@@ -605,7 +507,7 @@ export default function NavigationScreen() {
           </Marker>
         )}
 
-        {/* PRESERVED: DESTINATION MARKER */}
+        {/* DESTINATION MARKER */}
         {selectedDestination && (
           <Marker coordinate={selectedDestination} anchor={{ x: 0.5, y: 1 }}>
             <View style={styles.destinationMarker}>
@@ -614,10 +516,10 @@ export default function NavigationScreen() {
           </Marker>
         )}
 
-        {/* PRESERVED: OBSTACLES */}
+        {/* OBSTACLES */}
         {renderObstacles()}
 
-        {/* PRESERVED: POI MARKERS */}
+        {/* POI MARKERS */}
         {SAMPLE_POIS.map((poi) => (
           <Marker
             key={poi.id}
@@ -641,7 +543,7 @@ export default function NavigationScreen() {
           </Marker>
         ))}
 
-        {/* PRESERVED: ROUTE VISUALIZATION */}
+        {/* ROUTE VISUALIZATION */}
         {routeAnalysis && (
           <>
             {routeAnalysis.fastestRoute.polyline && (
@@ -666,7 +568,7 @@ export default function NavigationScreen() {
         )}
       </MapView>
 
-      {/* ENHANCED SEARCH - Replace NavigationControls search input */}
+      {/* ENHANCED SEARCH */}
       <EnhancedSearchBar
         onDestinationSelect={handleDestinationSelect}
         userLocation={location || undefined}
@@ -680,7 +582,7 @@ export default function NavigationScreen() {
         placeholder="Search for accessible destinations..."
       />
 
-      {/* NAVIGATION CONTROLS - Clean version without search */}
+      {/* NAVIGATION CONTROLS */}
       <NavigationControls
         showFAB={false}
         onFABPress={() => calculateUnifiedRoutes()}
@@ -696,9 +598,7 @@ export default function NavigationScreen() {
         obstacleToggleStyle={{ top: insets.top + 70 }}
       />
 
-      {/* REMOVED: Toggle button - unnecessary confusion */}
-
-      {/* PRESERVED: All existing overlays */}
+      {/* All existing overlays */}
       <ProximityAlertsOverlay
         alerts={proximityState.proximityAlerts}
         onAlertPress={handleProximityAlertPress}
@@ -729,7 +629,7 @@ export default function NavigationScreen() {
         )}
       </Modal>
 
-      {/* FIXED: Proper component interfaces */}
+      {/* Detour components */}
       {showDetourModal && currentMicroDetour && currentObstacleAlert && (
         <DetourSuggestionModal
           visible={showDetourModal}
