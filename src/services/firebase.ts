@@ -512,15 +512,19 @@ class SimpleFirebaseService implements FirebaseService {
         if (!querySnapshot.empty) {
           const obstacleDoc = querySnapshot.docs[0];
 
+          // 🔥 PHASE 1 CRITICAL FIX: Only update vote counts and metadata
+          // DO NOT increment reportsCount - that's for duplicate reports, not validations
           await updateDoc(obstacleDoc.ref, {
             [verification === "upvote" ? "upvotes" : "downvotes"]: increment(1),
             [`${verification}dBy`]: arrayUnion(userId),
-            reportsCount: increment(1),
+            // ❌ REMOVED: reportsCount: increment(1),  // THIS WAS THE BUG CAUSING CORRUPTION
             lastVerifiedAt: serverTimestamp(),
           });
-        }
 
-        console.log(`${verification} recorded for obstacle ${obstacleId}`);
+          console.log(
+            `✅ ${verification} recorded for obstacle ${obstacleId} (reportsCount unchanged)`
+          );
+        }
       } catch (error: any) {
         console.error(`Failed to ${verification} obstacle:`, error);
         throw new Error(

@@ -1,5 +1,5 @@
 // src/services/obstacleValidationService.ts
-// COMPLETE FIXED VERSION with GPS accuracy fix and enhanced debugging
+// PHASE 2 COMPLETE: Updated with all fixes applied
 
 import { firebaseServices } from "./firebase";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -40,9 +40,11 @@ export interface ObstacleValidationStatus {
 }
 
 class ObstacleValidationService {
-  private readonly PROXIMITY_RADIUS = 50; // meters
-  private readonly MAX_PROMPTS_PER_SESSION = 1;
+  // PHASE 2 UPDATED: Improved constants for better user experience
+  private readonly PROXIMITY_RADIUS = 100; // meters (increased from 50m)
+  private readonly MAX_PROMPTS_PER_SESSION = 5; // increased from 1
   private readonly AUTO_EXPIRE_DAYS = 30;
+  private readonly USER_VALIDATION_COOLDOWN_DAYS = 1; // reduced from 7
   private sessionPromptCount = 0;
 
   /**
@@ -120,7 +122,7 @@ class ObstacleValidationService {
       console.log(
         `📝 Generated ${validationPrompts.length} validation prompts`
       );
-      return validationPrompts.slice(0, 1); // Max 1 prompt per check
+      return validationPrompts.slice(0, this.MAX_PROMPTS_PER_SESSION); // Max 1 prompt per check
     } catch (error) {
       console.error("❌ Error checking validation prompts:", error);
       return [];
@@ -156,7 +158,7 @@ class ObstacleValidationService {
       return false;
     }
 
-    // Check proximity (within 50m radius)
+    // Check proximity (within 100m radius)
     const distance = this.calculateDistance(userLocation, obstacle.location);
     console.log(`📏 Distance to obstacle: ${Math.round(distance)}m`);
 
@@ -257,7 +259,7 @@ class ObstacleValidationService {
 
   /**
    * Get validation status for UI display
-   * FIXED: Maps actual status values to display tiers
+   * PHASE 2 UPDATED: Adjusted threshold for better testing with existing data
    */
   getValidationStatus(
     obstacle: AccessibilityObstacle
@@ -279,8 +281,8 @@ class ObstacleValidationService {
           ? "CLEARED by Admin"
           : "VERIFIED by Admin";
     }
-    // Community verified - when status is "verified" OR has enough upvotes
-    else if (obstacle.status === "verified" || totalValidations >= 5) {
+    // Community verified - PHASE 2 UPDATED: raised threshold to 8 for better testing
+    else if (obstacle.status === "verified" || totalValidations >= 8) {
       tier = "community_verified";
       confidence = upvotes > downvotes ? "medium" : "low";
       displayLabel = `Community Verified (${upvotes} confirms, ${downvotes} disputes)`;
@@ -358,6 +360,31 @@ class ObstacleValidationService {
     console.log("🔄 Validation session counters reset");
   }
 
+  /**
+   * PHASE 2 NEW: Reset session counters and cooldowns for testing
+   * Call this when user moves to a new area or manually resets
+   */
+  async resetValidationSession(): Promise<void> {
+    this.sessionPromptCount = 0;
+    console.log("🔄 Validation session manually reset - ready for new prompts");
+  }
+
+  /**
+   * PHASE 2 NEW: Clear all user validation cooldowns (for testing)
+   */
+  async clearAllValidationCooldowns(): Promise<void> {
+    try {
+      const keys = await AsyncStorage.getAllKeys();
+      const validationKeys = keys.filter((key) =>
+        key.startsWith("@validation:")
+      );
+      await AsyncStorage.multiRemove(validationKeys);
+      console.log(`🧹 Cleared ${validationKeys.length} validation cooldowns`);
+    } catch (error) {
+      console.error("Failed to clear validation cooldowns:", error);
+    }
+  }
+
   // HELPER METHODS
 
   private async getUserLastValidation(
@@ -372,10 +399,13 @@ class ObstacleValidationService {
     }
   }
 
+  // PHASE 2 FIXED: Now uses the configurable cooldown constant instead of hardcoded 7 days
   private isRecentValidation(lastValidated: Date): boolean {
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    return lastValidated > sevenDaysAgo;
+    const cooldownDate = new Date();
+    cooldownDate.setDate(
+      cooldownDate.getDate() - this.USER_VALIDATION_COOLDOWN_DAYS
+    );
+    return lastValidated > cooldownDate;
   }
 
   private isExpired(obstacle: AccessibilityObstacle): boolean {

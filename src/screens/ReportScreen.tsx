@@ -19,7 +19,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // FIXED: Import enhanced Firebase service instead of basic service
 import { enhancedFirebaseService } from "../services/enhancedFirebase";
-import { saveObstacleLocally } from "../services/firebase";
 import { useUserProfile } from "../stores/userProfileStore";
 import { useLocation } from "../hooks/useLocation";
 import { ObstacleType } from "../types";
@@ -211,9 +210,6 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
         photoBase64: capturedPhoto?.base64,
         timePattern: "permanent" as const,
       };
-
-      // Save locally first (offline-first)
-      await saveObstacleLocally(obstacleData);
 
       // FIXED: Use enhanced Firebase service for admin detection and auto-verification
       try {
