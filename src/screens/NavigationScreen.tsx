@@ -56,6 +56,7 @@ import {
   obstacleValidationService,
   type ValidationPrompt as ValidationPromptType,
 } from "../services/obstacleValidationService";
+import { textToSpeechService } from "../services/textToSpeechService";
 
 export default function NavigationScreen() {
   const insets = useSafeAreaInsets();

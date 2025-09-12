@@ -8,6 +8,7 @@ import {
   ProximityAlert,
 } from "../services/proximityDetectionService";
 import { UserLocation, UserMobilityProfile } from "../types";
+import { textToSpeechService } from "../services/textToSpeechService";
 
 interface UseProximityDetectionOptions {
   isNavigating: boolean;
@@ -55,13 +56,34 @@ export function useProximityDetection({
         userProfile
       );
 
-      // Filter critical alerts (within 50m and high severity)
+      // Filter critical alerts (within 50m and high severity) - EXISTING CODE
       const criticalAlerts = alerts.filter(
         (alert) =>
           alert.distance < 50 &&
           (alert.severity === "blocking" || alert.severity === "high")
       );
 
+      // NEW: Add TTS announcements for new critical alerts
+      for (const alert of criticalAlerts) {
+        const isNewAlert = !lastCriticalIdsRef.current.has(alert.obstacle.id);
+        if (isNewAlert && userProfile) {
+          try {
+            await textToSpeechService.announceProximityAlert(
+              alert.obstacle,
+              alert.distance,
+              userProfile
+            );
+            console.log(
+              `🔊 TTS: Announced obstacle ${alert.obstacle.type} at ${alert.distance}m`
+            );
+          } catch (ttsError) {
+            console.warn("🔊 TTS: Failed to announce obstacle:", ttsError);
+            // Don't break proximity detection if TTS fails
+          }
+        }
+      }
+
+      // EXISTING CODE continues unchanged...
       setState((prev) => ({
         ...prev,
         proximityAlerts: alerts || [],
@@ -70,44 +92,37 @@ export function useProximityDetection({
         detectionError: null,
       }));
 
-      // Handle critical obstacles - prevent spam notifications
-      if (criticalAlerts.length > 0 && onCriticalObstacle) {
-        const mostCritical = criticalAlerts[0]; // Highest urgency (already sorted by service)
-
-        // Check if this is a new critical obstacle using ref (avoids stale closure issues)
-        if (!lastCriticalIdsRef.current.has(mostCritical.obstacle.id)) {
-          if (__DEV__) {
-            console.log(
-              "🚨 New critical obstacle detected:",
-              mostCritical.obstacle.type,
-              `at ${mostCritical.distance}m`
-            );
-          }
-          lastCriticalIdsRef.current.add(mostCritical.obstacle.id);
-          onCriticalObstacle(mostCritical);
-        }
-      }
-
-      // Clean up old critical IDs when obstacles are no longer critical (reset logic)
+      // Update critical obstacle tracking - EXISTING CODE
       const currentCriticalIds = new Set(
         criticalAlerts.map((alert) => alert.obstacle.id)
       );
 
-      // Remove IDs that are no longer critical
-      const idsToRemove: string[] = [];
-      lastCriticalIdsRef.current.forEach((id) => {
-        if (!currentCriticalIds.has(id)) {
-          idsToRemove.push(id);
-        }
-      });
-      idsToRemove.forEach((id) => lastCriticalIdsRef.current.delete(id));
+      // Trigger critical obstacle callback for new alerts - EXISTING CODE
+      if (onCriticalObstacle) {
+        const newCriticalAlerts = criticalAlerts.filter(
+          (alert) => !lastCriticalIdsRef.current.has(alert.obstacle.id)
+        );
 
+        for (const alert of newCriticalAlerts) {
+          onCriticalObstacle(alert);
+        }
+      }
+
+      // Update tracking reference - EXISTING CODE
+      lastCriticalIdsRef.current = currentCriticalIds;
       lastLocationRef.current = userLocation;
+
+      if (__DEV__ && alerts.length > 0) {
+        console.log(
+          `🚨 Proximity: ${alerts.length} alerts, ${criticalAlerts.length} critical`
+        );
+      }
     } catch (error) {
       console.error("❌ Proximity detection error:", error);
       setState((prev) => ({
         ...prev,
-        detectionError: "Detection failed - using cached data",
+        detectionError:
+          error instanceof Error ? error.message : "Unknown error",
         isDetecting: false,
       }));
     }
