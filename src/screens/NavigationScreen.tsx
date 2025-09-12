@@ -56,15 +56,6 @@ import {
   obstacleValidationService,
   type ValidationPrompt as ValidationPromptType,
 } from "../services/obstacleValidationService";
-import {
-  microReroutingService,
-  MicroDetour,
-} from "../services/microReroutingService";
-import {
-  DetourSuggestionModal,
-  CompactObstacleWarning,
-  DetourStatusIndicator,
-} from "../components/DetourComponents";
 
 export default function NavigationScreen() {
   const insets = useSafeAreaInsets();
@@ -130,13 +121,6 @@ export default function NavigationScreen() {
   const [currentValidationPrompt, setCurrentValidationPrompt] =
     useState<ValidationPromptType | null>(null);
   const [showSidewalks, setShowSidewalks] = useState(true);
-  const [showDetourModal, setShowDetourModal] = useState(false);
-  const [showObstacleWarning, setShowObstacleWarning] = useState(false);
-  const [currentMicroDetour, setCurrentMicroDetour] =
-    useState<MicroDetour | null>(null);
-  const [currentObstacleAlert, setCurrentObstacleAlert] =
-    useState<ProximityAlert | null>(null);
-  const [isUsingDetour, setIsUsingDetour] = useState(false);
 
   // Enhanced destination selection handler
   const handleDestinationSelect = async (destination: PlaceSearchResult) => {
@@ -243,119 +227,44 @@ export default function NavigationScreen() {
     }
   };
 
-  // Proper method signature for createMicroDetour
-  const handleCriticalObstacle = useCallback(
-    async (alert: ProximityAlert) => {
-      try {
-        if (!location || !selectedDestination || !profile) {
-          setCurrentObstacleAlert(alert);
-          setShowObstacleWarning(true);
-          return;
-        }
-
-        setCurrentObstacleAlert(alert);
-
-        // Correct parameter order
-        const detour = await microReroutingService.createMicroDetour(
-          location,
-          alert.obstacle,
-          selectedDestination,
-          profile
-        );
-
-        if (detour) {
-          setCurrentMicroDetour(detour);
-          setShowDetourModal(true);
-        } else {
-          setShowObstacleWarning(true);
-        }
-      } catch (error) {
-        console.error("Failed to generate detour:", error);
-        setShowObstacleWarning(true);
-      }
-    },
-    [location, selectedDestination, profile]
-  );
+  // Removed micro-reroute/detour handlers and state to simplify navigation flow
 
   // All other existing handlers
-  const handleAcceptDetour = useCallback(() => {
-    if (currentMicroDetour) {
-      setIsUsingDetour(true);
-      setShowDetourModal(false);
-      Alert.alert(
-        "Detour Activated",
-        `Following detour: ${currentMicroDetour.reason}`,
-        [{ text: "Got it!" }]
+
+  const handleProximityAlertPress = useCallback((alert: ProximityAlert) => {
+    if (mapRef.current) {
+      mapRef.current.animateToRegion(
+        {
+          latitude: alert.obstacle.location.latitude,
+          longitude: alert.obstacle.location.longitude,
+          latitudeDelta: 0.005,
+          longitudeDelta: 0.005,
+        },
+        1000
       );
     }
-  }, [currentMicroDetour]);
 
-  const handleDeclineDetour = useCallback(() => {
-    setShowDetourModal(false);
-    setShowObstacleWarning(true);
-  }, []);
-
-  const handleDismissObstacleWarning = useCallback(() => {
-    setShowObstacleWarning(false);
-    setCurrentObstacleAlert(null);
-  }, []);
-
-  const handleReturnToMainRoute = useCallback(() => {
+    // Show a read-only details alert without any detour/alternative actions
     Alert.alert(
-      "Return to Main Route?",
-      "Do you want to return to the original route?",
-      [
-        {
-          text: "Yes, Return",
-          onPress: () => setIsUsingDetour(false),
-        },
-        { text: "Keep Detour" },
-      ]
+      "Obstacle Details",
+      `Type: ${alert.obstacle.type.replace("_", " ")}\n` +
+        `Distance: ${alert.distance}m away\n` +
+        `${alert.obstacle.description}`,
+      [{ text: "OK" }]
     );
   }, []);
-
-  const handleProximityAlertPress = useCallback(
-    (alert: ProximityAlert) => {
-      if (mapRef.current) {
-        mapRef.current.animateToRegion(
-          {
-            latitude: alert.obstacle.location.latitude,
-            longitude: alert.obstacle.location.longitude,
-            latitudeDelta: 0.005,
-            longitudeDelta: 0.005,
-          },
-          1000
-        );
-      }
-
-      Alert.alert(
-        "Obstacle Details",
-        `Type: ${alert.obstacle.type.replace("_", " ")}\n` +
-          `Distance: ${alert.distance}m away\n` +
-          `${alert.obstacle.description}`,
-        [
-          {
-            text: "Find Alternative",
-            onPress: () => handleCriticalObstacle(alert),
-          },
-          { text: "OK" },
-        ]
-      );
-    },
-    [handleCriticalObstacle]
-  );
 
   // All existing effects and memos
   const routePolyline = useMemo(() => {
     return routeAnalysis?.fastestRoute?.polyline || [];
   }, [routeAnalysis?.fastestRoute?.polyline]);
 
+  // Removed onCriticalObstacle wiring — proximity detection will still report alerts
   const proximityState = useProximityDetection({
     isNavigating,
     userLocation: location,
     routePolyline,
     userProfile: profile,
-    onCriticalObstacle: handleCriticalObstacle,
   });
 
   useEffect(() => {
@@ -629,39 +538,7 @@ export default function NavigationScreen() {
         )}
       </Modal>
 
-      {/* Detour components */}
-      {showDetourModal && currentMicroDetour && currentObstacleAlert && (
-        <DetourSuggestionModal
-          visible={showDetourModal}
-          detour={currentMicroDetour}
-          obstacleAlert={currentObstacleAlert}
-          onAccept={handleAcceptDetour}
-          onDecline={handleDeclineDetour}
-          onClose={() => setShowDetourModal(false)}
-        />
-      )}
-
-      {showObstacleWarning && currentObstacleAlert && (
-        <CompactObstacleWarning
-          visible={showObstacleWarning}
-          message={`${currentObstacleAlert.obstacle.type.replace(
-            "_",
-            " "
-          )} ahead`}
-          obstacleType={currentObstacleAlert.obstacle.type}
-          onDismiss={handleDismissObstacleWarning}
-        />
-      )}
-
-      {isUsingDetour && (
-        <DetourStatusIndicator
-          isActive={isUsingDetour}
-          detourDescription={
-            currentMicroDetour?.reason || "Taking alternative route"
-          }
-          onCancel={handleReturnToMainRoute}
-        />
-      )}
+      {/* Detour/micro-reroute UI removed to simplify behavior */}
     </SafeAreaView>
   );
 }
