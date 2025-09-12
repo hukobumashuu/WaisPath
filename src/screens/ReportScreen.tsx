@@ -1,5 +1,5 @@
 // src/screens/ReportScreen.tsx
-// FIXED: Uses enhanced Firebase service for admin auto-verification + separated styles
+// COMPLETE: Enhanced ReportScreen with admin obstacle report logging
 
 import React, { useState, useEffect, useMemo } from "react";
 import {
@@ -17,8 +17,12 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-// FIXED: Import enhanced Firebase service instead of basic service
+// FIXED: Import enhanced Firebase service
 import { enhancedFirebaseService } from "../services/enhancedFirebase";
+
+// 🔥 NEW: Import mobile admin logger
+import { logAdminObstacleReport } from "../services/mobileAdminLogger";
+
 import { useUserProfile } from "../stores/userProfileStore";
 import { useLocation } from "../hooks/useLocation";
 import { ObstacleType } from "../types";
@@ -188,7 +192,7 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
     setCurrentStep("details");
   };
 
-  // FIXED: Use enhanced Firebase service for admin auto-verification
+  // ENHANCED: Obstacle report submission with admin logging
   const handleSubmitReport = async () => {
     if (!selectedObstacle || !selectedSeverity || !location) {
       Alert.alert(
@@ -211,38 +215,51 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
         timePattern: "permanent" as const,
       };
 
-      // FIXED: Use enhanced Firebase service for admin detection and auto-verification
-      try {
-        const result = await enhancedFirebaseService.reportObstacleEnhanced(
-          obstacleData
-        );
+      // Submit obstacle report using enhanced Firebase service
+      const result = await enhancedFirebaseService.reportObstacleEnhanced(
+        obstacleData
+      );
 
-        if (result.success) {
-          Alert.alert(
-            "✅ Na-report na!",
-            result.message, // This will show admin verification status
-            [
-              { text: "Mag-report pa", onPress: resetForm },
-              { text: "Tapos na", onPress: resetForm },
-            ]
+      if (result.success) {
+        // 🔥 NEW: Log admin obstacle report if user is admin
+        try {
+          await logAdminObstacleReport(
+            result.obstacleId || "unknown_id",
+            selectedObstacle,
+            selectedSeverity,
+            location
           );
-        } else {
-          // Handle rate limiting or capability issues
-          Alert.alert("⚠️ Hindi Ma-report", result.message, [{ text: "OK" }]);
+        } catch (logError) {
+          console.warn("Failed to log admin obstacle report:", logError);
+          // Don't fail the report submission if logging fails
         }
-      } catch (cloudError: any) {
-        Alert.alert(
-          "📱 Na-save Locally",
-          `Na-save na ang report sa device mo. Kapag may internet, automatic na isesend sa cloud.`,
-          [{ text: "OK", onPress: resetForm }]
-        );
+
+        Alert.alert("✅ Na-report na!", result.message, [
+          {
+            text: "Mag-report Ulit",
+            style: "default",
+            onPress: resetForm,
+          },
+          {
+            text: "Bumalik sa Home",
+            style: "default",
+            onPress: () => navigation.goBack(),
+          },
+        ]);
+
+        // Show success vibration
+        Vibration.vibrate([100, 200, 100]);
+      } else {
+        Alert.alert("❌ Hindi Maayos ang Report", result.message, [
+          { text: "Subukan Muli" },
+        ]);
       }
     } catch (error: any) {
       console.error("Report submission failed:", error);
       Alert.alert(
-        "❌ Hindi Ma-report",
-        `May problema sa pag-report. Subukan ulit.`,
-        [{ text: "OK" }]
+        "❌ May Error",
+        `Hindi na-submit ang report: ${error.message}`,
+        [{ text: "Subukan Muli" }]
       );
     } finally {
       setIsSubmitting(false);
@@ -250,334 +267,493 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
   };
 
   const resetForm = () => {
+    setCurrentStep("select");
     setSelectedObstacle(null);
     setSelectedSeverity(null);
     setDescription("");
     setCapturedPhoto(null);
-    setCurrentStep("select");
+    setShowCamera(false);
+  };
+
+  const handleBack = () => {
+    switch (currentStep) {
+      case "photo":
+        setCurrentStep("select");
+        setSelectedObstacle(null);
+        break;
+      case "details":
+        setCurrentStep("photo");
+        setCapturedPhoto(null);
+        break;
+    }
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{
-          paddingBottom: Math.max(insets.bottom, 60) + 16,
-        }}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Clean Header */}
+    <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
+      {/* Header */}
+      <View style={styles.header}>
         <View
           style={[
-            styles.header,
-            {
-              paddingTop: Math.max(insets.top, 20) + 16,
-              paddingHorizontal: 20,
-              paddingBottom: 20,
-            },
+            styles.headerContent,
+            { paddingHorizontal: 20, paddingVertical: 16 },
           ]}
         >
-          <View style={styles.headerContent}>
-            <Text
-              style={[
-                styles.headerTitle,
-                { fontSize: isSmallScreen ? 22 : 26 },
-              ]}
-            >
-              I-report ang Hadlang
-            </Text>
-            <Text
-              style={[
-                styles.headerSubtitle,
-                { fontSize: isSmallScreen ? 14 : 16 },
-              ]}
-            >
-              Help the PWD community navigate Pasig
-            </Text>
-          </View>
-        </View>
-
-        {/* Modern Progress Bar */}
-        <View style={[styles.progressSection, { paddingHorizontal: 20 }]}>
-          <View style={styles.progressBarContainer}>
-            {[1, 2, 3].map((i) => (
-              <View
-                key={i}
-                style={[
-                  styles.progressBar,
-                  {
-                    backgroundColor:
-                      stepProgress.current >= i ? COLORS.softBlue : "#E5E7EB",
-                  },
-                ]}
-              />
-            ))}
-          </View>
-          <Text style={[styles.progressLabel, { color: COLORS.muted }]}>
-            {stepProgress.label}
+          <Text
+            style={[styles.headerTitle, { fontSize: isSmallScreen ? 20 : 24 }]}
+          >
+            I-report ang Hadlang
+          </Text>
+          <Text
+            style={[
+              styles.headerSubtitle,
+              { fontSize: isSmallScreen ? 14 : 16 },
+            ]}
+          >
+            Tulungang gawing accessible ang inyong komunidad
           </Text>
         </View>
+      </View>
 
-        <View style={{ paddingHorizontal: 20 }}>
+      {/* Progress Section */}
+      <View style={styles.progressSection}>
+        <View style={[styles.progressBarContainer, { paddingHorizontal: 20 }]}>
+          {[1, 2, 3].map((step) => (
+            <View
+              key={step}
+              style={[
+                styles.progressBar,
+                {
+                  backgroundColor:
+                    step <= stepProgress.current ? COLORS.softBlue : "#E5E7EB",
+                },
+              ]}
+            />
+          ))}
+        </View>
+        <Text style={[styles.progressLabel, { paddingHorizontal: 20 }]}>
+          Step {stepProgress.current} ng {stepProgress.total}:{" "}
+          {stepProgress.label}
+        </Text>
+      </View>
+
+      <ScrollView
+        style={{ flex: 1 }}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={{ paddingHorizontal: 20, paddingBottom: 40 }}>
           {/* Step 1: Select Obstacle Type */}
           {currentStep === "select" && (
-            <View style={{ marginBottom: 24 }}>
+            <View>
               <Text
                 style={[
                   styles.stepTitle,
                   { fontSize: isSmallScreen ? 18 : 20 },
                 ]}
               >
-                Ano ang nakita mong hadlang?
+                Anong uri ng hadlang?
               </Text>
-              <Text style={styles.stepSubtitle}>
-                Choose the type of accessibility obstacle
+              <Text
+                style={[
+                  styles.stepSubtitle,
+                  { fontSize: isSmallScreen ? 14 : 16 },
+                ]}
+              >
+                Piliin ang pinaka-angkop na uri ng accessibility obstacle na
+                nakita mo
               </Text>
 
-              <View style={styles.obstacleGrid}>
-                {OBSTACLE_TYPES.map((obstacle) => (
-                  <TouchableOpacity
-                    key={obstacle.key}
-                    style={[
-                      styles.obstacleCard,
-                      { borderColor: obstacle.color },
-                      isSmallScreen && { minHeight: 100 },
-                    ]}
-                    onPress={() => handleObstacleSelect(obstacle.key)}
-                    activeOpacity={0.8}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${obstacle.labelFil}. ${obstacle.description}`}
-                  >
+              {OBSTACLE_TYPES.map((obstacle) => (
+                <TouchableOpacity
+                  key={obstacle.key}
+                  style={[
+                    styles.card,
+                    {
+                      borderColor: obstacle.color,
+                      borderWidth: 1,
+                      marginBottom: 12,
+                    },
+                  ]}
+                  onPress={() => handleObstacleSelect(obstacle.key)}
+                  activeOpacity={0.8}
+                >
+                  <View style={{ flexDirection: "row", alignItems: "center" }}>
                     <View
-                      style={[
-                        styles.obstacleIcon,
-                        { backgroundColor: obstacle.color },
-                      ]}
+                      style={{
+                        width: 48,
+                        height: 48,
+                        borderRadius: 24,
+                        backgroundColor: obstacle.color + "20",
+                        justifyContent: "center",
+                        alignItems: "center",
+                        marginRight: 16,
+                      }}
                     >
                       <Ionicons
                         name={obstacle.icon}
                         size={24}
-                        color={COLORS.white}
+                        color={obstacle.color}
                       />
                     </View>
-                    <Text
-                      style={[
-                        styles.obstacleTitle,
-                        { fontSize: isSmallScreen ? 14 : 16 },
-                      ]}
-                    >
-                      {obstacle.labelFil}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.obstacleDescription,
-                        { fontSize: isSmallScreen ? 11 : 12 },
-                      ]}
-                    >
-                      {obstacle.description}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={{
+                          fontSize: 16,
+                          fontWeight: "600",
+                          color: COLORS.slate,
+                          marginBottom: 4,
+                        }}
+                      >
+                        {obstacle.labelFil}
+                      </Text>
+                      <Text
+                        style={{
+                          fontSize: 14,
+                          color: COLORS.muted,
+                          lineHeight: 18,
+                        }}
+                      >
+                        {obstacle.description}
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={20}
+                      color={COLORS.muted}
+                    />
+                  </View>
+                </TouchableOpacity>
+              ))}
             </View>
           )}
 
-          {/* Step 2: Photo Capture */}
+          {/* Step 2: Take Photo */}
           {currentStep === "photo" && selectedObstacleData && (
-            <View style={{ marginBottom: 24 }}>
+            <View>
               <Text
                 style={[
                   styles.stepTitle,
                   { fontSize: isSmallScreen ? 18 : 20 },
                 ]}
               >
-                Kumuha ng Larawan
+                Kumuha ng Photo
               </Text>
-              <Text style={styles.stepSubtitle}>
-                Take a photo so others can understand the obstacle
+              <Text
+                style={[
+                  styles.stepSubtitle,
+                  { fontSize: isSmallScreen ? 14 : 16 },
+                ]}
+              >
+                Larawan ng {selectedObstacleData.labelFil.toLowerCase()} para sa
+                mas malinaw na report
               </Text>
 
-              <View style={styles.photoSection}>
+              <View
+                style={[styles.card, { alignItems: "center", padding: 32 }]}
+              >
                 <View
-                  style={[
-                    styles.photoCard,
-                    { backgroundColor: selectedObstacleData.color + "15" },
-                  ]}
+                  style={{
+                    width: 80,
+                    height: 80,
+                    borderRadius: 40,
+                    backgroundColor: selectedObstacleData.color + "20",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    marginBottom: 16,
+                  }}
                 >
                   <Ionicons
                     name={selectedObstacleData.icon}
                     size={32}
                     color={selectedObstacleData.color}
                   />
-                  <Text
-                    style={[
-                      styles.photoCardTitle,
-                      { color: selectedObstacleData.color },
-                    ]}
-                  >
-                    {selectedObstacleData.labelFil}
-                  </Text>
-                  <Text style={styles.photoCardDescription}>
-                    {selectedObstacleData.description}
-                  </Text>
                 </View>
 
-                <View style={styles.photoActions}>
+                <Text
+                  style={{
+                    fontSize: 18,
+                    fontWeight: "600",
+                    color: COLORS.slate,
+                    marginBottom: 8,
+                  }}
+                >
+                  {selectedObstacleData.labelFil}
+                </Text>
+
+                <Text
+                  style={{
+                    fontSize: 14,
+                    color: COLORS.muted,
+                    textAlign: "center",
+                    marginBottom: 24,
+                  }}
+                >
+                  {selectedObstacleData.description}
+                </Text>
+
+                {capturedPhoto ? (
+                  <View style={{ alignItems: "center", marginBottom: 24 }}>
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={48}
+                      color={COLORS.success}
+                      style={{ marginBottom: 8 }}
+                    />
+                    <Text
+                      style={{
+                        fontSize: 14,
+                        color: COLORS.success,
+                        fontWeight: "500",
+                      }}
+                    >
+                      Photo na-capture na!
+                    </Text>
+                  </View>
+                ) : null}
+
+                <View style={{ flexDirection: "row", gap: 12 }}>
                   <TouchableOpacity
-                    style={[
-                      styles.primaryButton,
-                      { backgroundColor: COLORS.softBlue },
-                    ]}
+                    style={{
+                      backgroundColor: COLORS.softBlue,
+                      paddingHorizontal: 24,
+                      paddingVertical: 12,
+                      borderRadius: 8,
+                      flexDirection: "row",
+                      alignItems: "center",
+                    }}
                     onPress={() => setShowCamera(true)}
                     activeOpacity={0.8}
                   >
-                    <Ionicons name="camera" size={20} color={COLORS.white} />
-                    <Text style={styles.primaryButtonText}>
-                      Kumuha ng Larawan
+                    <Ionicons name="camera" size={16} color={COLORS.white} />
+                    <Text
+                      style={{
+                        color: COLORS.white,
+                        fontWeight: "600",
+                        marginLeft: 8,
+                      }}
+                    >
+                      {capturedPhoto ? "Palitan" : "Kumuha"}
                     </Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={[
-                      styles.secondaryButton,
-                      { backgroundColor: COLORS.muted },
-                    ]}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: COLORS.muted,
+                      paddingHorizontal: 24,
+                      paddingVertical: 12,
+                      borderRadius: 8,
+                    }}
                     onPress={handleSkipPhoto}
                     activeOpacity={0.8}
                   >
-                    <Text style={styles.secondaryButtonText}>
-                      Laktawan (Skip)
+                    <Text style={{ color: COLORS.muted, fontWeight: "500" }}>
+                      Skip
                     </Text>
                   </TouchableOpacity>
                 </View>
               </View>
+
+              <TouchableOpacity
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  paddingVertical: 16,
+                }}
+                onPress={handleBack}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="chevron-back" size={16} color={COLORS.muted} />
+                <Text style={{ color: COLORS.muted, marginLeft: 4 }}>
+                  Palitan ang obstacle type
+                </Text>
+              </TouchableOpacity>
             </View>
           )}
 
-          {/* Step 3: Details */}
+          {/* Step 3: Details Form */}
           {currentStep === "details" && selectedObstacleData && (
-            <View style={{ marginBottom: 24 }}>
+            <View>
               <Text
                 style={[
                   styles.stepTitle,
                   { fontSize: isSmallScreen ? 18 : 20 },
                 ]}
               >
-                Mga Detalye
+                Mga Detalye ng Report
               </Text>
-              <Text style={styles.stepSubtitle}>
-                Provide details about the obstacle severity
+              <Text
+                style={[
+                  styles.stepSubtitle,
+                  { fontSize: isSmallScreen ? 14 : 16 },
+                ]}
+              >
+                Dagdagan ng information para sa mas comprehensive na report
               </Text>
-
-              {/* Photo Preview */}
-              {capturedPhoto && (
-                <View style={[styles.photoPreview, { marginBottom: 20 }]}>
-                  <View style={styles.photoPreviewContent}>
-                    <Ionicons name="image" size={20} color={COLORS.success} />
-                    <View style={{ flex: 1, marginLeft: 12 }}>
-                      <Text style={styles.photoPreviewTitle}>
-                        ✅ Photo Captured
-                      </Text>
-                      <Text style={styles.photoPreviewSubtitle}>
-                        {(capturedPhoto.compressedSize / 1024).toFixed(1)}KB
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      style={styles.photoEditButton}
-                      onPress={() => setShowCamera(true)}
-                    >
-                      <Text style={styles.photoEditText}>Edit</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
 
               {/* Severity Selection */}
-              <View style={[styles.card, { marginBottom: 20 }]}>
-                <Text style={styles.cardTitle}>Gaano kalala?</Text>
-                <Text style={styles.cardSubtitle}>
-                  How severe is this obstacle?
+              <View style={[styles.card, { marginBottom: 16 }]}>
+                <Text
+                  style={{
+                    fontSize: 16,
+                    fontWeight: "600",
+                    color: COLORS.slate,
+                    marginBottom: 16,
+                  }}
+                >
+                  Gaano kahirap dumaan? *
                 </Text>
 
-                <View style={styles.severityGrid}>
-                  {SEVERITY_LEVELS.map((severity) => (
-                    <TouchableOpacity
-                      key={severity.key}
-                      style={[
-                        styles.severityOption,
-                        {
-                          borderColor:
-                            selectedSeverity === severity.key
-                              ? severity.color
-                              : "#E5E7EB",
-                          backgroundColor:
-                            selectedSeverity === severity.key
-                              ? severity.color + "15"
-                              : COLORS.white,
-                        },
-                      ]}
-                      onPress={() => setSelectedSeverity(severity.key)}
-                      activeOpacity={0.8}
-                    >
-                      <View
-                        style={[
-                          styles.severityDot,
-                          { backgroundColor: severity.color },
-                        ]}
-                      />
-                      <View style={{ flex: 1 }}>
-                        <Text
-                          style={[
-                            styles.severityTitle,
-                            {
-                              color:
-                                selectedSeverity === severity.key
-                                  ? severity.color
-                                  : COLORS.slate,
-                            },
-                          ]}
-                        >
-                          {severity.labelFil}
-                        </Text>
-                        <Text style={styles.severityDescription}>
-                          {severity.description}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-                </View>
+                {SEVERITY_LEVELS.map((level) => (
+                  <TouchableOpacity
+                    key={level.key}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      paddingVertical: 12,
+                      paddingHorizontal: 16,
+                      borderRadius: 8,
+                      marginBottom: 8,
+                      backgroundColor:
+                        selectedSeverity === level.key
+                          ? level.color + "20"
+                          : COLORS.lightGray,
+                      borderWidth: selectedSeverity === level.key ? 2 : 0,
+                      borderColor:
+                        selectedSeverity === level.key
+                          ? level.color
+                          : "transparent",
+                    }}
+                    onPress={() => setSelectedSeverity(level.key)}
+                    activeOpacity={0.8}
+                  >
+                    <View
+                      style={{
+                        width: 20,
+                        height: 20,
+                        borderRadius: 10,
+                        borderWidth: 2,
+                        borderColor: level.color,
+                        backgroundColor:
+                          selectedSeverity === level.key
+                            ? level.color
+                            : "transparent",
+                        marginRight: 12,
+                      }}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={{
+                          fontSize: 14,
+                          fontWeight: "600",
+                          color: COLORS.slate,
+                        }}
+                      >
+                        {level.labelFil}
+                      </Text>
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          color: COLORS.muted,
+                        }}
+                      >
+                        {level.description}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
               </View>
 
               {/* Description Input */}
-              <View style={[styles.card, { marginBottom: 20 }]}>
-                <Text style={styles.cardTitle}>Dagdag na paliwanag</Text>
-                <Text style={styles.cardSubtitle}>
-                  Additional description (optional)
+              <View style={[styles.card, { marginBottom: 16 }]}>
+                <Text
+                  style={{
+                    fontSize: 16,
+                    fontWeight: "600",
+                    color: COLORS.slate,
+                    marginBottom: 12,
+                  }}
+                >
+                  Dagdagang Detalye (Optional)
                 </Text>
-
                 <TextInput
+                  style={{
+                    borderWidth: 1,
+                    borderColor: "#E5E7EB",
+                    borderRadius: 8,
+                    padding: 12,
+                    minHeight: 80,
+                    textAlignVertical: "top",
+                    fontSize: 14,
+                    color: COLORS.slate,
+                  }}
+                  multiline
+                  placeholder="Halimbawa: 'May nakaharang na tricycle tapat ng Jollibee'"
+                  placeholderTextColor={COLORS.muted}
                   value={description}
                   onChangeText={setDescription}
-                  placeholder="Halimbawa: Laging may jeep na nakapark dito tuwing umaga..."
-                  placeholderTextColor={COLORS.muted}
-                  multiline
-                  numberOfLines={4}
-                  style={styles.textInput}
+                  maxLength={500}
                 />
+                <Text
+                  style={{
+                    fontSize: 12,
+                    color: COLORS.muted,
+                    textAlign: "right",
+                    marginTop: 4,
+                  }}
+                >
+                  {description.length}/500
+                </Text>
               </View>
 
-              {/* Action Buttons */}
-              <View style={styles.actionButtons}>
+              {/* Location Info */}
+              {location && (
+                <View style={[styles.card, { marginBottom: 24 }]}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      marginBottom: 8,
+                    }}
+                  >
+                    <Ionicons
+                      name="location"
+                      size={16}
+                      color={COLORS.success}
+                    />
+                    <Text
+                      style={{
+                        fontSize: 14,
+                        fontWeight: "600",
+                        color: COLORS.slate,
+                        marginLeft: 8,
+                      }}
+                    >
+                      Location Confirmed
+                    </Text>
+                  </View>
+                  <Text style={{ fontSize: 12, color: COLORS.muted }}>
+                    Lat: {location.latitude.toFixed(6)}, Long:{" "}
+                    {location.longitude.toFixed(6)}
+                  </Text>
+                </View>
+              )}
+
+              {/* Submit Button */}
+              <View style={{ gap: 12 }}>
                 <TouchableOpacity
-                  style={[
-                    styles.submitButton,
-                    {
-                      backgroundColor:
-                        selectedSeverity && !isSubmitting
-                          ? COLORS.success
-                          : COLORS.muted,
-                    },
-                  ]}
+                  style={{
+                    backgroundColor: selectedSeverity
+                      ? COLORS.softBlue
+                      : COLORS.muted,
+                    paddingVertical: 16,
+                    borderRadius: 8,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    opacity: isSubmitting ? 0.7 : 1,
+                  }}
                   onPress={handleSubmitReport}
                   disabled={!selectedSeverity || isSubmitting}
                   activeOpacity={0.8}
@@ -591,14 +767,26 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
                       color={COLORS.white}
                     />
                   )}
-                  <Text style={styles.submitButtonText}>
+                  <Text
+                    style={{
+                      color: COLORS.white,
+                      fontSize: 16,
+                      fontWeight: "600",
+                      marginLeft: 8,
+                    }}
+                  >
                     {isSubmitting ? "Nire-report..." : "I-submit ang Report"}
                   </Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={styles.backButton}
-                  onPress={() => setCurrentStep("photo")}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    paddingVertical: 12,
+                  }}
+                  onPress={handleBack}
                   activeOpacity={0.8}
                 >
                   <Ionicons
@@ -606,7 +794,9 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
                     size={16}
                     color={COLORS.muted}
                   />
-                  <Text style={styles.backButtonText}>Bumalik</Text>
+                  <Text style={{ color: COLORS.muted, marginLeft: 4 }}>
+                    Bumalik
+                  </Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -614,20 +804,37 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
 
           {/* Profile Info Card */}
           {profile && (
-            <View style={styles.profileCard}>
-              <View style={styles.profileHeader}>
+            <View style={[styles.card, { marginTop: 20 }]}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  marginBottom: 8,
+                }}
+              >
                 <Ionicons
                   name="information-circle"
                   size={20}
                   color={COLORS.softBlue}
                 />
-                <Text style={styles.profileTitle}>Iyong Profile</Text>
+                <Text
+                  style={{
+                    fontSize: 16,
+                    fontWeight: "600",
+                    color: COLORS.slate,
+                    marginLeft: 8,
+                  }}
+                >
+                  Inyong Profile
+                </Text>
               </View>
-              <Text style={styles.profileText}>
+              <Text
+                style={{ fontSize: 14, color: COLORS.slate, marginBottom: 4 }}
+              >
                 Device: {profile.type} •{" "}
                 {profile.avoidStairs ? "Iwas stairs" : "OK sa stairs"}
               </Text>
-              <Text style={styles.profileSubtext}>
+              <Text style={{ fontSize: 12, color: COLORS.muted }}>
                 Ang reports mo ay makikita ng mga kapareho mong user type
               </Text>
             </View>
@@ -636,12 +843,22 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
           {/* Reset Button */}
           {currentStep !== "select" && (
             <TouchableOpacity
-              style={styles.resetButton}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                paddingVertical: 16,
+                marginTop: 16,
+              }}
               onPress={resetForm}
               activeOpacity={0.8}
             >
               <Ionicons name="refresh" size={16} color={COLORS.navy} />
-              <Text style={styles.resetButtonText}>Simula Ulit</Text>
+              <Text
+                style={{ color: COLORS.navy, marginLeft: 8, fontWeight: "500" }}
+              >
+                Simula Ulit
+              </Text>
             </TouchableOpacity>
           )}
         </View>

@@ -1,6 +1,5 @@
 // src/components/AuthenticationSection.tsx
-// AUTHENTICATION SECTION - FIXED: Proper signOut method and removed adminRole error
-// Uses correct Firebase signOut and existing UserCapabilities interface
+// CLEANED: Removed app launch logging to prevent duplicates
 
 import React, { useState, useEffect } from "react";
 import {
@@ -19,7 +18,7 @@ import {
 } from "../services/enhancedFirebase";
 import { UserCapabilities } from "../services/UserCapabilitiesService";
 import UniversalLoginForm from "./UniversalLoginForm";
-import RegistrationForm from "./RegistrationForm"; // Import existing RegistrationForm
+import RegistrationForm from "./RegistrationForm";
 import {
   addAuthListener,
   removeAuthListener,
@@ -35,6 +34,13 @@ import {
   useUserProfile,
   createProfileWithDefaults,
 } from "../stores/userProfileStore";
+
+// 🔥 UPDATED: Only import sign-in and sign-out logging (app launch moved to App.tsx)
+import {
+  logAdminSignIn,
+  logAdminSignOut,
+  // logAdminAppLaunch - REMOVED to prevent duplicates
+} from "../services/mobileAdminLogger";
 
 const COLORS = {
   white: "#FFFFFF",
@@ -63,10 +69,18 @@ export default function AuthenticationSection({
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showRegistrationModal, setShowRegistrationModal] = useState(false);
 
-  // Get profile store methods
-  const { setProfile, reloadProfileAfterLogin } = useUserProfile();
+  // Track admin status for logging (sign-in/sign-out only)
+  const [isCurrentUserAdmin, setIsCurrentUserAdmin] = useState<boolean>(false);
+  const [adminRole, setAdminRole] = useState<
+    "lgu_admin" | "field_admin" | null
+  >(null);
+
+  // Use correct property names from your userProfileStore
+  const { profile, setProfile, reloadProfileAfterLogin } = useUserProfile();
 
   useEffect(() => {
+    // 🔥 REMOVED: logAdminAppLaunch() - now handled in App.tsx
+
     // Set up auth state listener
     const handleAuthStateChange = async (authState: AuthState) => {
       console.log(`AuthSection received auth change: ${authState.authType}`);
@@ -77,6 +91,17 @@ export default function AuthenticationSection({
         // Get capabilities based on auth state
         const status = await enhancedFirebaseService.getUserReportingStatus();
         setUserCapabilities(status.capabilities);
+
+        // Track admin status from auth state (for sign-in/sign-out logging only)
+        if (authState.authType === "admin") {
+          setIsCurrentUserAdmin(true);
+          setAdminRole(
+            (authState.adminRole as "lgu_admin" | "field_admin") || null
+          );
+        } else {
+          setIsCurrentUserAdmin(false);
+          setAdminRole(null);
+        }
 
         if (onAuthStateChange) {
           onAuthStateChange(status.capabilities.authType);
@@ -97,7 +122,7 @@ export default function AuthenticationSection({
     return () => {
       removeAuthListener("auth-section");
     };
-  }, []);
+  }, [onAuthStateChange]);
 
   const loadUserStatus = async () => {
     try {
@@ -118,80 +143,84 @@ export default function AuthenticationSection({
   };
 
   const handleLoginSuccess = async (
-    userType: "admin" | "registered",
-    userInfo: any
+    userType: "registered" | "admin",
+    user: any
   ) => {
     console.log(`Authentication successful in section: ${userType}`);
 
     setShowLoginModal(false);
 
-    // Clear cache and refresh auth state through coordinator
-    clearAuthCache();
-    await refreshAuthState();
+    try {
+      // 🔥 UPDATED: Log admin sign-in (but not app launch)
+      if (userType === "admin") {
+        setIsCurrentUserAdmin(true);
 
-    // Reload profile after login
-    await reloadProfileAfterLogin();
+        // Extract admin role if available from user object
+        const role = user?.customClaims?.role as "lgu_admin" | "field_admin";
+        setAdminRole(role);
 
-    // Save auth state for next session
-    await saveAuthState(
-      userType,
-      userInfo?.email,
-      userType === "admin" ? userInfo?.customClaims?.role : undefined
-    );
+        // Log the sign-in (app launch is handled separately in App.tsx)
+        await logAdminSignIn();
+      }
 
-    console.log("Auth cache cleared, state refreshed, and persistence updated");
+      // Clear cache and refresh auth state through coordinator
+      clearAuthCache();
+      await refreshAuthState();
 
-    const message =
-      userType === "admin"
-        ? "Admin access enabled! You now have unlimited reporting and validation powers."
-        : "Welcome back! You now have unlimited reporting and can track your reports.";
+      // Reload profile after login
+      await reloadProfileAfterLogin();
 
-    Alert.alert("Welcome!", message);
+      // FIXED: Use correct saveAuthState signature (without callback)
+      await saveAuthState(
+        userType,
+        user?.email,
+        userType === "admin" ? user?.customClaims?.role : undefined
+      );
+
+      console.log(
+        "Auth cache cleared, state refreshed, and persistence updated"
+      );
+
+      const message =
+        userType === "admin"
+          ? "Admin access enabled! You now have unlimited reporting and validation powers."
+          : "Welcome back! You now have unlimited reporting and can track your reports.";
+
+      Alert.alert("Welcome!", message);
+    } catch (error) {
+      console.error("Login post-processing failed:", error);
+      Alert.alert(
+        "Login Successful",
+        "You're now signed in, but there was an issue with profile setup."
+      );
+    }
   };
 
-  const handleRegistrationSuccess = async (user: any) => {
-    console.log(`Registration successful in section for user:`, user?.email);
-
-    // FIXED: Close modal first, then handle the rest
-    setShowRegistrationModal(false);
-
+  const handleRegistrationSuccess = async () => {
     try {
+      setShowRegistrationModal(false);
+
       // Clear cache and refresh auth state
       clearAuthCache();
       await refreshAuthState();
 
       // Create a default profile for the new user if they don't have one
       try {
-        // Check if user already has a profile from the registration process
         await reloadProfileAfterLogin();
 
         // If no profile exists after reload, create a default one
-        const currentProfile = useUserProfile.getState().profile;
-        if (!currentProfile) {
+        if (!profile) {
           console.log("🔄 Creating default profile for new user");
-          const defaultProfile = createProfileWithDefaults("none", {
-            // Basic accessibility-friendly defaults
-            preferShade: true,
-            maxWalkingDistance: 1000, // 1km default
-            avoidCrowds: true,
-            // Let user customize later in profile screen
-          });
+          const defaultProfile = createProfileWithDefaults("none");
           setProfile(defaultProfile);
         }
       } catch (error) {
         console.error("Failed to create default profile:", error);
-        // Continue anyway - user can create profile later
       }
 
-      // Save auth state for next session
-      await saveAuthState("registered", user?.email);
-
-      console.log("Registration complete: auth cache cleared, state refreshed");
-
-      // FIXED: Show success alert after everything is done
       Alert.alert(
         "Welcome to WAISPATH!",
-        "Your account has been created successfully. You now have unlimited reporting and can help make Pasig City more accessible!",
+        "Your account has been created successfully. You now have unlimited reporting access.",
         [{ text: "Get Started", style: "default" }]
       );
     } catch (error) {
@@ -203,7 +232,6 @@ export default function AuthenticationSection({
     }
   };
 
-  // FIXED: Use the same signOut method as the current AuthenticationSection
   const handleSignOut = async () => {
     Alert.alert(
       "Sign Out",
@@ -215,13 +243,20 @@ export default function AuthenticationSection({
           style: "destructive",
           onPress: async () => {
             try {
+              // 🔥 KEPT: Log admin sign-out BEFORE signing out
+              if (isCurrentUserAdmin) {
+                await logAdminSignOut();
+                setIsCurrentUserAdmin(false);
+                setAdminRole(null);
+              }
+
               // Clear auth state persistence
               await clearAuthState();
 
               // Clear cache
               clearAuthCache();
 
-              // Sign out from Firebase (using the same method as current code)
+              // Sign out from Firebase
               const { getUnifiedFirebaseAuth } = await import(
                 "../config/firebaseConfig"
               );
@@ -278,12 +313,15 @@ export default function AuthenticationSection({
     );
   }
 
-  // FIXED: Use the same getUserBadgeInfo pattern as existing code
+  // Get badge info with admin role details
   const getBadgeInfo = () => {
     switch (userCapabilities.authType) {
       case "admin":
+        const roleText = adminRole
+          ? `OFFICIAL (${adminRole.replace("_", " ").toUpperCase()})`
+          : "OFFICIAL (LGU ADMIN)";
         return {
-          text: "OFFICIAL (LGU ADMIN)", // Use generic admin text since we don't have specific role
+          text: roleText,
           color: COLORS.success,
           icon: "shield-checkmark" as const,
         };
@@ -303,7 +341,6 @@ export default function AuthenticationSection({
     }
   };
 
-  // Define account features based on auth type
   const features = [
     {
       icon: "infinite" as keyof typeof Ionicons.glyphMap,
@@ -311,115 +348,82 @@ export default function AuthenticationSection({
         userCapabilities.authType === "admin"
           ? "Unlimited official reporting"
           : userCapabilities.authType === "registered"
-          ? `${userCapabilities.dailyReportLimit} reports per day`
-          : "1 report per day",
-      available: userCapabilities.canReport,
+          ? "Unlimited community reporting"
+          : "Limited daily reporting",
     },
     {
       icon: "camera" as keyof typeof Ionicons.glyphMap,
-      text: "Photo uploads",
-      available: userCapabilities.canUploadPhotos,
+      text:
+        userCapabilities.authType !== "anonymous"
+          ? "Photo attachments enabled"
+          : "No photo attachments",
+    },
+    {
+      icon: "checkmark-circle" as keyof typeof Ionicons.glyphMap,
+      text:
+        userCapabilities.authType === "admin"
+          ? "Auto-verified reports"
+          : userCapabilities.authType === "registered"
+          ? "Community validation"
+          : "Anonymous validation",
     },
     {
       icon: "analytics" as keyof typeof Ionicons.glyphMap,
-      text: "Report tracking",
-      available: userCapabilities.canTrackReports,
-    },
-    {
-      icon: "people" as keyof typeof Ionicons.glyphMap,
-      text: "Community validation",
-      available: userCapabilities.canValidateReports,
-    },
-    {
-      icon: "shield-checkmark" as keyof typeof Ionicons.glyphMap,
-      text: "Admin verification",
-      available: userCapabilities.canAccessAdminFeatures,
+      text:
+        userCapabilities.authType !== "anonymous"
+          ? "Report tracking & history"
+          : "No report tracking",
     },
   ];
 
-  const badgeInfo = getBadgeInfo();
+  const badge = getBadgeInfo();
 
   return (
     <View style={[styles.container, style]}>
-      <View style={styles.header}>
-        {/* User Status Badge */}
-        <View style={styles.badgeContainer}>
-          <View style={[styles.badge, { backgroundColor: badgeInfo.color }]}>
-            <Ionicons
-              name={badgeInfo.icon}
-              size={14}
-              color={COLORS.white}
-              style={styles.badgeIcon}
-            />
-            <Text style={styles.badgeText}>{badgeInfo.text}</Text>
-          </View>
-        </View>
-
-        {/* Authentication Actions */}
-        <View style={styles.actionContainer}>
-          {userCapabilities.authType === "anonymous" ? (
-            <View style={styles.authButtonsContainer}>
-              {/* Sign In Button */}
-              <TouchableOpacity
-                style={styles.signInButton}
-                onPress={handleOpenLogin}
-              >
-                <Ionicons name="log-in" size={18} color={COLORS.softBlue} />
-                <Text style={styles.signInButtonText}>Sign In</Text>
-              </TouchableOpacity>
-
-              {/* Register Button */}
-              <TouchableOpacity
-                style={styles.registerButton}
-                onPress={handleOpenRegistration}
-              >
-                <Ionicons name="person-add" size={18} color={COLORS.white} />
-                <Text style={styles.registerButtonText}>Register</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <TouchableOpacity
-              style={styles.signOutButton}
-              onPress={handleSignOut}
-            >
-              <Ionicons name="log-out" size={18} color={COLORS.muted} />
-              <Text style={styles.signOutButtonText}>Sign Out</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+      {/* Account Status Badge */}
+      <View style={[styles.badge, { backgroundColor: badge.color }]}>
+        <Ionicons name={badge.icon} size={16} color={COLORS.white} />
+        <Text style={styles.badgeText}>{badge.text}</Text>
       </View>
 
+      {/* Features List */}
       <View style={styles.featuresContainer}>
-        <Text style={styles.featuresTitle}>Account Features</Text>
         {features.map((feature, index) => (
-          <View key={index} style={styles.feature}>
+          <View key={index} style={styles.featureRow}>
             <Ionicons
               name={feature.icon}
-              size={18}
-              color={feature.available ? COLORS.success : COLORS.muted}
+              size={20}
+              color={COLORS.softBlue}
+              style={styles.featureIcon}
             />
-            <Text
-              style={[
-                styles.featureText,
-                !feature.available && styles.featureTextDisabled,
-              ]}
-            >
-              {feature.text}
-            </Text>
-            {!feature.available && (
-              <Ionicons name="lock-closed" size={14} color={COLORS.muted} />
-            )}
+            <Text style={styles.featureText}>{feature.text}</Text>
           </View>
         ))}
+      </View>
 
-        {userCapabilities?.authType === "anonymous" && (
+      {/* Action Buttons */}
+      <View style={styles.buttonContainer}>
+        {userCapabilities.authType === "anonymous" ? (
+          <>
+            <TouchableOpacity
+              style={[styles.button, styles.primaryButton]}
+              onPress={handleOpenRegistration}
+            >
+              <Text style={styles.primaryButtonText}>Create Account</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.button, styles.secondaryButton]}
+              onPress={handleOpenLogin}
+            >
+              <Text style={styles.secondaryButtonText}>Sign In</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
           <TouchableOpacity
-            style={styles.upgradePrompt}
-            onPress={handleOpenRegistration}
+            style={[styles.button, styles.signOutButton]}
+            onPress={handleSignOut}
           >
-            <Text style={styles.upgradePromptText}>
-              Create account for unlimited access →
-            </Text>
+            <Text style={styles.signOutButtonText}>Sign Out</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -429,14 +433,15 @@ export default function AuthenticationSection({
         visible={showLoginModal}
         animationType="slide"
         presentationStyle="pageSheet"
+        onRequestClose={() => setShowLoginModal(false)}
       >
-        <UniversalLoginForm
-          mode={
-            userCapabilities?.authType === "anonymous" ? "upgrade" : "login"
-          }
-          onLoginSuccess={handleLoginSuccess}
-          onCancel={() => setShowLoginModal(false)}
-        />
+        <SafeAreaView style={styles.modalContainer}>
+          <UniversalLoginForm
+            mode="login"
+            onLoginSuccess={handleLoginSuccess}
+            onCancel={() => setShowLoginModal(false)}
+          />
+        </SafeAreaView>
       </Modal>
 
       {/* Registration Modal */}
@@ -444,17 +449,15 @@ export default function AuthenticationSection({
         visible={showRegistrationModal}
         animationType="slide"
         presentationStyle="pageSheet"
+        onRequestClose={() => setShowRegistrationModal(false)}
       >
-        <RegistrationForm
-          onRegistrationSuccess={handleRegistrationSuccess}
-          onCancel={() => setShowRegistrationModal(false)}
-          onSwitchToLogin={handleSwitchToLogin}
-          mode={
-            userCapabilities?.authType === "anonymous"
-              ? "upgrade"
-              : "standalone"
-          }
-        />
+        <SafeAreaView style={styles.modalContainer}>
+          <RegistrationForm
+            onRegistrationSuccess={handleRegistrationSuccess}
+            onCancel={() => setShowRegistrationModal(false)}
+            onSwitchToLogin={handleSwitchToLogin}
+          />
+        </SafeAreaView>
       </Modal>
     </View>
   );
@@ -462,124 +465,100 @@ export default function AuthenticationSection({
 
 const styles = StyleSheet.create({
   container: {
+    padding: 16,
     backgroundColor: COLORS.white,
     borderRadius: 12,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
+    marginHorizontal: 16,
+    marginVertical: 8,
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   loadingContainer: {
     padding: 20,
     alignItems: "center",
   },
   loadingText: {
-    fontSize: 16,
+    fontSize: 14,
     color: COLORS.muted,
-  },
-  header: {
-    marginBottom: 20,
-  },
-  badgeContainer: {
-    marginBottom: 16,
   },
   badge: {
     flexDirection: "row",
     alignItems: "center",
-    alignSelf: "flex-start",
+    justifyContent: "center",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
-  },
-  badgeIcon: {
-    marginRight: 6,
+    marginBottom: 16,
+    alignSelf: "center",
   },
   badgeText: {
+    color: COLORS.white,
     fontSize: 12,
     fontWeight: "600",
-    color: COLORS.white,
-    textTransform: "uppercase",
-  },
-  actionContainer: {
-    alignItems: "flex-start",
-  },
-  authButtonsContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  signInButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: COLORS.white,
-    borderWidth: 2,
-    borderColor: COLORS.softBlue,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  signInButtonText: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: COLORS.softBlue,
-    marginLeft: 6,
-  },
-  registerButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: COLORS.softBlue,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  registerButtonText: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: COLORS.white,
-    marginLeft: 6,
-  },
-  signOutButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  signOutButtonText: {
-    fontSize: 14,
-    color: COLORS.muted,
     marginLeft: 6,
   },
   featuresContainer: {
-    borderTopWidth: 1,
-    borderTopColor: "#E5E7EB",
-    paddingTop: 16,
+    marginBottom: 20,
   },
-  featuresTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: COLORS.slate,
-    marginBottom: 12,
-  },
-  feature: {
+  featureRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 10,
+    marginBottom: 12,
+  },
+  featureIcon: {
+    marginRight: 12,
+    width: 20,
   },
   featureText: {
     fontSize: 14,
     color: COLORS.slate,
-    marginLeft: 10,
     flex: 1,
   },
-  featureTextDisabled: {
-    color: COLORS.muted,
+  buttonContainer: {
+    gap: 12,
   },
-  upgradePrompt: {
-    marginTop: 8,
-    paddingVertical: 8,
+  button: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    alignItems: "center",
   },
-  upgradePromptText: {
-    fontSize: 14,
+  primaryButton: {
+    backgroundColor: COLORS.softBlue,
+  },
+  primaryButtonText: {
+    color: COLORS.white,
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  secondaryButton: {
+    backgroundColor: COLORS.lightGray,
+    borderWidth: 1,
+    borderColor: COLORS.softBlue,
+  },
+  secondaryButtonText: {
     color: COLORS.softBlue,
-    fontWeight: "500",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  signOutButton: {
+    backgroundColor: COLORS.lightGray,
+    borderWidth: 1,
+    borderColor: COLORS.warning,
+  },
+  signOutButtonText: {
+    color: COLORS.warning,
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: COLORS.white,
   },
 });

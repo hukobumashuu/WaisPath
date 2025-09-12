@@ -1,6 +1,6 @@
-// App.tsx - FIXED: Auth-first initialization to skip onboarding for existing users
+// App.tsx - FIXED: App launch logging added to main initialization
 import "./global.css";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createStackNavigator } from "@react-navigation/stack";
@@ -21,6 +21,8 @@ import ReportScreen from "./src/screens/ReportScreen";
 import { useUserProfile } from "./src/stores/userProfileStore";
 // Auth coordinator
 import { initializeAuthCoordinator } from "./src/services/AuthStateCoordinator";
+// 🔥 NEW: Mobile admin logger
+import { logAdminAppLaunch } from "./src/services/mobileAdminLogger";
 
 // Temporary placeholder for future screens
 const PlaceholderScreen = ({ title }: { title: string }) => (
@@ -119,19 +121,35 @@ const MainTabNavigator = () => {
 export default function App() {
   const { profile, isFirstTime, isLoading, loadProfile } = useUserProfile();
   const [appReady, setAppReady] = useState(false);
+  // 🔥 NEW: Track if we've logged app launch to prevent duplicates
+  const appLaunchLoggedRef = useRef(false);
 
   useEffect(() => {
     const initializeApp = async () => {
       try {
-        // FIXED: Initialize auth coordinator FIRST to restore auth state
+        // Initialize auth coordinator FIRST to restore auth state
         console.log("🔐 Initializing auth coordinator first...");
         await initializeAuthCoordinator();
         console.log("🔄 Auth coordinator initialized - auth state ready");
 
-        // FIXED: Load profile AFTER auth is ready (so it can detect authenticated users)
+        // Load profile AFTER auth is ready (so it can detect authenticated users)
         console.log("📱 Loading profile with auth context...");
         await loadProfile();
         console.log("📱 App initialized with profile system");
+
+        // 🔥 NEW: Log admin app launch after auth is ready
+        if (!appLaunchLoggedRef.current) {
+          // Add a small delay to ensure auth state is fully settled
+          setTimeout(async () => {
+            try {
+              await logAdminAppLaunch();
+              appLaunchLoggedRef.current = true;
+              console.log("🚀 App launch logging attempted");
+            } catch (error) {
+              console.warn("⚠️ Failed to log app launch:", error);
+            }
+          }, 1000); // 1 second delay to ensure auth is fully ready
+        }
       } catch (error) {
         console.warn("⚠️ App initialization failed:", error);
       } finally {
@@ -142,7 +160,7 @@ export default function App() {
     initializeApp();
   }, [loadProfile]);
 
-  // FIXED: Add effect to react to isFirstTime changes during login
+  // Add effect to react to isFirstTime changes during login
   useEffect(() => {
     if (appReady && !isLoading) {
       console.log(
@@ -172,7 +190,7 @@ export default function App() {
     );
   }
 
-  // FIXED: This now reacts to isFirstTime changes in real-time
+  // This now reacts to isFirstTime changes in real-time
   return (
     <SafeAreaProvider>
       <NavigationContainer>

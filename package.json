@@ -35,7 +35,9 @@
     "react-native-screens": "3.31.1",
     "stream-browserify": "^3.0.0",
     "zustand": "^4.5.4",
-    "expo-speech": "~12.0.2"
+    "expo-speech": "~12.0.2",
+    "expo-device": "~6.0.2",
+    "expo-application": "~5.9.1"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",
