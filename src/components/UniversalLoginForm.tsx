@@ -1,6 +1,5 @@
 // src/components/UniversalLoginForm.tsx
-// 🔐 FIXED LOGIN FORM - Properly handles existing accounts during upgrade
-// KEY FIX: Handle auth/email-already-in-use by switching to existing account
+// FIXED: Force token refresh to get latest admin claims after login
 
 import React, { useState } from "react";
 import {
@@ -59,7 +58,6 @@ export default function UniversalLoginForm({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [isNewUser, setIsNewUser] = useState(false);
 
   const handleSubmit = async () => {
     if (!email.trim() || !password.trim()) {
@@ -76,7 +74,7 @@ export default function UniversalLoginForm({
 
       if (result.success) {
         clearAuthCache();
-        console.log("🧹 Auth cache cleared after successful login");
+        console.log("Auth cache cleared after successful login");
 
         const welcomeMessage =
           result.userType === "admin"
@@ -90,7 +88,7 @@ export default function UniversalLoginForm({
 
         setTimeout(async () => {
           await enhancedFirebaseService.getCurrentUserContext();
-          console.log("🔄 User context refreshed after login");
+          console.log("User context refreshed after login");
         }, 500);
       } else {
         Alert.alert(
@@ -106,7 +104,60 @@ export default function UniversalLoginForm({
     }
   };
 
-  // 🔥 FIXED: Smart authentication logic that handles existing accounts
+  /**
+   * FIXED: Verify admin account status during login
+   */
+  const verifyAdminAccountStatus = async (
+    email: string
+  ): Promise<{
+    isValid: boolean;
+    status: string;
+    message: string;
+    role?: string;
+  }> => {
+    try {
+      console.log(`Verifying admin status for: ${email}`);
+
+      const response = await fetch("/api/admin/verify-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+
+      if (!response.ok) {
+        console.warn(`Status verification failed: HTTP ${response.status}`);
+        return {
+          isValid: true, // Allow login on API errors (fail open for reliability)
+          status: "unknown",
+          message: "Status verification unavailable, proceeding with login",
+        };
+      }
+
+      const result = await response.json();
+      console.log(`Admin status result:`, result);
+
+      const isValid =
+        result.status === "active" || result.status === "not_admin";
+
+      return {
+        isValid,
+        status: result.status,
+        message: result.message,
+        role: result.role,
+      };
+    } catch (error) {
+      console.error("Status verification error:", error);
+      return {
+        isValid: true, // Fail open - don't block login on network errors
+        status: "unknown",
+        message: "Status verification failed, proceeding with login",
+      };
+    }
+  };
+
+  /**
+   * FIXED: Authentication with FORCED token refresh and admin status validation
+   */
   const performAuthentication = async (
     email: string,
     password: string,
@@ -122,10 +173,10 @@ export default function UniversalLoginForm({
       let userCredential;
 
       if (authMode === "upgrade") {
-        // 🔥 KEY FIX: Handle upgrade mode properly
+        // Handle upgrade mode properly
         if (auth.currentUser && auth.currentUser.isAnonymous) {
           console.log(
-            "🔄 Attempting to upgrade anonymous user to registered account"
+            "Attempting to upgrade anonymous user to registered account"
           );
 
           try {
@@ -136,18 +187,18 @@ export default function UniversalLoginForm({
               credential
             );
             console.log(
-              "✅ Anonymous account successfully linked to email/password"
+              "Anonymous account successfully linked to email/password"
             );
           } catch (linkError: any) {
             if (linkError.code === "auth/email-already-in-use") {
-              // 🔥 FIX: Email already exists - sign out anonymous and sign in to existing account
+              // Email already exists - sign out anonymous and sign in to existing account
               console.log(
-                "⚠️ Email already in use - switching to existing account"
+                "Email already in use - switching to existing account"
               );
 
               // Sign out the anonymous user
               await signOut(auth);
-              console.log("🔄 Anonymous user signed out");
+              console.log("Anonymous user signed out");
 
               // Sign in to the existing account
               userCredential = await signInWithEmailAndPassword(
@@ -155,119 +206,107 @@ export default function UniversalLoginForm({
                 email,
                 password
               );
-              console.log("✅ Signed in to existing account");
+              console.log("Signed in to existing account");
 
-              // Show user-friendly message
               Alert.alert(
                 "Account Found",
                 "We found your existing account and signed you in. Your anonymous data will be preserved in your profile."
               );
-            } else if (linkError.code === "auth/wrong-password") {
-              throw new Error("Incorrect password for this email address");
-            } else if (linkError.code === "auth/invalid-credential") {
-              throw new Error("Invalid email or password");
             } else {
               throw linkError;
             }
           }
         } else {
-          // No anonymous user, just do regular login
-          console.log("⚠️ No anonymous user found, attempting regular login");
-          try {
-            userCredential = await signInWithEmailAndPassword(
-              auth,
-              email,
-              password
-            );
-          } catch (loginError: any) {
-            if (loginError.code === "auth/user-not-found") {
-              // User doesn't exist, create new account
-              userCredential = await createUserWithEmailAndPassword(
-                auth,
-                email,
-                password
-              );
-              setIsNewUser(true);
-              console.log("✅ New user account created");
-            } else {
-              throw loginError;
-            }
-          }
-        }
-      } else {
-        // Standard login mode
-        try {
+          // No anonymous user - just sign in normally
           userCredential = await signInWithEmailAndPassword(
             auth,
             email,
             password
           );
-        } catch (loginError: any) {
-          if (loginError.code === "auth/user-not-found") {
-            // Offer to create account
-            const createAccount = await new Promise<boolean>((resolve) => {
-              Alert.alert(
-                "Account Not Found",
-                "No account exists with this email. Would you like to create a new account?",
-                [
-                  { text: "Cancel", onPress: () => resolve(false) },
-                  { text: "Create Account", onPress: () => resolve(true) },
-                ]
-              );
-            });
-
-            if (createAccount) {
-              userCredential = await createUserWithEmailAndPassword(
-                auth,
-                email,
-                password
-              );
-              setIsNewUser(true);
-              console.log("✅ New user account created via login attempt");
-            } else {
-              throw loginError;
-            }
-          } else {
-            throw loginError;
-          }
         }
+      } else {
+        // Standard login mode
+        userCredential = await signInWithEmailAndPassword(
+          auth,
+          email,
+          password
+        );
       }
 
       const user = userCredential.user;
+      console.log(`Firebase authentication successful for: ${user.email}`);
 
-      // Check admin status via custom claims
-      const tokenResult = await user.getIdTokenResult();
+      // CRITICAL FIX: Force token refresh to get latest claims
+      console.log("Force refreshing token to get latest admin claims...");
+      const tokenResult = await user.getIdTokenResult(true); // true = forceRefresh
       const claims = tokenResult.claims;
+      console.log("Fresh token claims:", claims);
 
-      if (claims.admin === true) {
-        const adminRole = claims.role as string;
-        console.log(`🏛️ Admin detected: ${adminRole}`);
+      // FIRST: Check for deactivated flag BEFORE checking admin status
+      if (claims.deactivated === true) {
+        console.log(`Account deactivated via custom claims: ${user.email}`);
+        await signOut(auth);
+        return {
+          success: false,
+          userType: "registered",
+          user: null,
+          message:
+            "Your account has been deactivated. Please contact your administrator.",
+        };
+      }
 
-        // Update rate limiting for admin
-        await enhancedFirebaseService.upgradeUserToAdmin(user.uid, adminRole);
+      // SECOND: Check if user is admin
+      const isAdmin = claims.admin === true;
+      let adminRole = undefined;
+
+      if (isAdmin) {
+        console.log(`Admin user detected: ${user.email}`);
+
+        // Verify admin account status via API for double verification
+        const statusCheck = await verifyAdminAccountStatus(user.email!);
+
+        if (!statusCheck.isValid) {
+          // Admin account is deactivated or suspended
+          console.log(`Admin account ${statusCheck.status}: ${user.email}`);
+
+          // Sign out the user immediately
+          await signOut(auth);
+
+          return {
+            success: false,
+            userType: "admin",
+            user: null,
+            message: statusCheck.message,
+          };
+        }
+
+        adminRole = claims.role as string;
+        console.log(`Admin status verified: ${adminRole}`);
 
         return {
           success: true,
           userType: "admin",
-          user,
+          user: {
+            uid: user.uid,
+            email: user.email,
+            customClaims: claims,
+          },
           adminRole,
-          message: `✅ Admin login successful: ${adminRole}`,
+          message: `Admin login successful - ${adminRole
+            ?.replace("_", " ")
+            ?.toUpperCase()}`,
         };
       } else {
-        // Regular user
-        console.log("👤 Regular user authenticated");
-
-        // Update rate limiting for registered user
-        await enhancedFirebaseService.upgradeUserToRegistered(user.uid);
-
+        // Regular registered user
+        console.log(`Registered user authenticated: ${user.email}`);
         return {
           success: true,
           userType: "registered",
-          user,
-          adminRole: undefined,
-          message: isNewUser
-            ? "Account created successfully"
-            : "User login successful",
+          user: {
+            uid: user.uid,
+            email: user.email,
+          },
+          message: "User login successful",
         };
       }
     } catch (error: any) {
@@ -311,7 +350,7 @@ export default function UniversalLoginForm({
       );
       const auth = await getUnifiedFirebaseAuth();
 
-      console.log("🔐 Unified Firebase Auth obtained");
+      console.log("Unified Firebase Auth obtained");
       return auth;
     } catch (error) {
       console.error("Failed to get Firebase Auth instance:", error);
@@ -416,23 +455,23 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   title: {
-    fontSize: 28,
-    fontWeight: "700",
+    fontSize: 24,
+    fontWeight: "bold",
     color: COLORS.slate,
-    textAlign: "center",
-    marginTop: 20,
+    marginTop: 12,
     marginBottom: 8,
+    textAlign: "center",
   },
   subtitle: {
     fontSize: 16,
     color: COLORS.muted,
     textAlign: "center",
     lineHeight: 22,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
   },
   form: {
-    flex: 1,
     padding: 24,
+    flex: 1,
   },
   inputGroup: {
     marginBottom: 20,
@@ -444,27 +483,27 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   input: {
-    borderWidth: 1.5,
-    borderColor: "#E2E8F0",
+    borderWidth: 2,
+    borderColor: COLORS.lightGray,
     borderRadius: 12,
     padding: 16,
     fontSize: 16,
-    backgroundColor: COLORS.white,
     color: COLORS.slate,
+    backgroundColor: COLORS.white,
   },
   submitButton: {
     backgroundColor: COLORS.softBlue,
     borderRadius: 12,
     padding: 18,
     alignItems: "center",
-    marginTop: 12,
+    marginTop: 8,
   },
   submitButtonDisabled: {
     backgroundColor: COLORS.muted,
   },
   submitButtonText: {
     color: COLORS.white,
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: "600",
   },
 });

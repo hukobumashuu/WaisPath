@@ -1,5 +1,5 @@
 // src/services/AuthStateCoordinator.ts
-// AUTH STATE COORDINATOR - Unified Auth Management (Complete Remake)
+// FIXED: Auth State Coordinator with deactivated user detection during auto-restore
 
 import { getUnifiedFirebaseAuth } from "../config/firebaseConfig";
 
@@ -69,22 +69,59 @@ class AuthStateCoordinator {
     let adminRole: string | undefined;
 
     try {
-      // Check if user has admin claims
-      const tokenResult = await user.getIdTokenResult();
+      // CRITICAL FIX: Force token refresh to get latest claims during auto-restore
+      console.log("Checking user claims during auth state build...");
+      const tokenResult = await user.getIdTokenResult(true); // Force refresh
       const claims = tokenResult.claims;
 
+      console.log("User claims during auth state build:", {
+        admin: claims.admin,
+        deactivated: claims.deactivated,
+        email: user.email,
+      });
+
+      // FIRST: Check for deactivated flag before anything else
+      if (claims.deactivated === true) {
+        console.log(
+          `DEACTIVATED USER DETECTED during auto-restore: ${user.email}`
+        );
+        console.log("Signing out deactivated user automatically...");
+
+        // Sign out the deactivated user immediately
+        const { signOut } = await import("firebase/auth");
+        await signOut(user.auth || user._auth);
+
+        // Return anonymous state
+        return {
+          user: null,
+          isAuthenticated: false,
+          isAdmin: false,
+          authType: "anonymous",
+          timestamp: Date.now(),
+        };
+      }
+
+      // SECOND: Check admin status only if not deactivated
       if (claims.admin === true) {
         authType = "admin";
         isAdmin = true;
         adminRole = claims.role as string;
+        console.log(
+          `Admin user restored from session: ${user.email} (${adminRole})`
+        );
       } else if (!user.isAnonymous && user.email) {
         authType = "registered";
+        console.log(`Registered user restored from session: ${user.email}`);
       }
     } catch (error) {
-      console.warn("Failed to get user claims:", error);
+      console.warn("Failed to get user claims during auth state build:", error);
+
       // Fallback to basic auth type detection
       if (!user.isAnonymous && user.email) {
         authType = "registered";
+        console.log(
+          `User restored from session (no claims check): ${user.email}`
+        );
       }
     }
 

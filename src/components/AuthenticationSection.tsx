@@ -1,5 +1,6 @@
 // src/components/AuthenticationSection.tsx
-// CLEANED: Removed app launch logging to prevent duplicates
+// ENHANCED: Added admin status monitoring integration
+// Automatically starts/stops monitoring based on admin login/logout
 
 import React, { useState, useEffect } from "react";
 import {
@@ -35,12 +36,11 @@ import {
   createProfileWithDefaults,
 } from "../stores/userProfileStore";
 
-// 🔥 UPDATED: Only import sign-in and sign-out logging (app launch moved to App.tsx)
-import {
-  logAdminSignIn,
-  logAdminSignOut,
-  // logAdminAppLaunch - REMOVED to prevent duplicates
-} from "../services/mobileAdminLogger";
+// ENHANCED: Import admin status monitoring
+import { adminStatusChecker } from "../services/adminStatusChecker";
+
+// Import existing logging (keep existing functionality)
+import { logAdminSignIn, logAdminSignOut } from "../services/mobileAdminLogger";
 
 const COLORS = {
   white: "#FFFFFF",
@@ -69,18 +69,17 @@ export default function AuthenticationSection({
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showRegistrationModal, setShowRegistrationModal] = useState(false);
 
-  // Track admin status for logging (sign-in/sign-out only)
+  // Track admin status for logging and monitoring
   const [isCurrentUserAdmin, setIsCurrentUserAdmin] = useState<boolean>(false);
   const [adminRole, setAdminRole] = useState<
     "lgu_admin" | "field_admin" | null
   >(null);
+  const [adminEmail, setAdminEmail] = useState<string | null>(null);
 
-  // Use correct property names from your userProfileStore
+  // Use correct property names from userProfileStore
   const { profile, setProfile, reloadProfileAfterLogin } = useUserProfile();
 
   useEffect(() => {
-    // 🔥 REMOVED: logAdminAppLaunch() - now handled in App.tsx
-
     // Set up auth state listener
     const handleAuthStateChange = async (authState: AuthState) => {
       console.log(`AuthSection received auth change: ${authState.authType}`);
@@ -92,15 +91,33 @@ export default function AuthenticationSection({
         const status = await enhancedFirebaseService.getUserReportingStatus();
         setUserCapabilities(status.capabilities);
 
-        // Track admin status from auth state (for sign-in/sign-out logging only)
+        // ENHANCED: Handle admin status monitoring
         if (authState.authType === "admin") {
+          const email = authState.user?.email;
+          const role = authState.adminRole as "lgu_admin" | "field_admin";
+
           setIsCurrentUserAdmin(true);
-          setAdminRole(
-            (authState.adminRole as "lgu_admin" | "field_admin") || null
-          );
+          setAdminRole(role);
+          setAdminEmail(email);
+
+          // Start admin status monitoring
+          if (email) {
+            console.log(`🔍 Starting admin status monitoring for: ${email}`);
+            adminStatusChecker.startMonitoring(email, true);
+          }
         } else {
+          // Non-admin user or signed out
           setIsCurrentUserAdmin(false);
           setAdminRole(null);
+          setAdminEmail(null);
+
+          // FIXED: Single stop call only when needed
+          if (isCurrentUserAdmin) {
+            console.log(
+              "Stopping admin status monitoring (user changed to non-admin)"
+            );
+            adminStatusChecker.stopMonitoring();
+          }
         }
 
         if (onAuthStateChange) {
@@ -121,6 +138,8 @@ export default function AuthenticationSection({
 
     return () => {
       removeAuthListener("auth-section");
+      // Clean up monitoring on component unmount
+      adminStatusChecker.stopMonitoring();
     };
   }, [onAuthStateChange]);
 
@@ -151,16 +170,25 @@ export default function AuthenticationSection({
     setShowLoginModal(false);
 
     try {
-      // 🔥 UPDATED: Log admin sign-in (but not app launch)
+      // ENHANCED: Handle admin login with status monitoring
       if (userType === "admin") {
-        setIsCurrentUserAdmin(true);
-
-        // Extract admin role if available from user object
+        const email = user?.email;
         const role = user?.customClaims?.role as "lgu_admin" | "field_admin";
-        setAdminRole(role);
 
-        // Log the sign-in (app launch is handled separately in App.tsx)
+        setIsCurrentUserAdmin(true);
+        setAdminRole(role);
+        setAdminEmail(email);
+
+        // Log the sign-in (existing functionality)
         await logAdminSignIn();
+
+        // ENHANCED: Start status monitoring immediately
+        if (email) {
+          console.log(
+            `🔍 Starting admin status monitoring after login: ${email}`
+          );
+          adminStatusChecker.startMonitoring(email, true);
+        }
       }
 
       // Clear cache and refresh auth state through coordinator
@@ -170,7 +198,7 @@ export default function AuthenticationSection({
       // Reload profile after login
       await reloadProfileAfterLogin();
 
-      // FIXED: Use correct saveAuthState signature (without callback)
+      // Save auth state for persistence
       await saveAuthState(
         userType,
         user?.email,
@@ -186,37 +214,37 @@ export default function AuthenticationSection({
           ? "Admin access enabled! You now have unlimited reporting and validation powers."
           : "Welcome back! You now have unlimited reporting and can track your reports.";
 
-      Alert.alert("Welcome!", message);
+      Alert.alert("Welcome!", message, [
+        { text: "Get Started", style: "default" },
+      ]);
     } catch (error) {
       console.error("Login post-processing failed:", error);
       Alert.alert(
-        "Login Successful",
-        "You're now signed in, but there was an issue with profile setup."
+        "Login Complete",
+        "You're signed in but there was an issue with setup. Please restart the app if needed."
       );
     }
   };
 
-  const handleRegistrationSuccess = async () => {
-    try {
-      setShowRegistrationModal(false);
+  const handleRegistrationSuccess = async (user: any) => {
+    console.log("Registration successful in section");
+    setShowRegistrationModal(false);
 
-      // Clear cache and refresh auth state
+    try {
+      // Clear cache and refresh state
       clearAuthCache();
       await refreshAuthState();
 
-      // Create a default profile for the new user if they don't have one
-      try {
-        await reloadProfileAfterLogin();
-
-        // If no profile exists after reload, create a default one
-        if (!profile) {
-          console.log("🔄 Creating default profile for new user");
-          const defaultProfile = createProfileWithDefaults("none");
-          setProfile(defaultProfile);
-        }
-      } catch (error) {
-        console.error("Failed to create default profile:", error);
+      // Save user profile after registration
+      if (user && user.email) {
+        const defaultProfile = createProfileWithDefaults("none");
+        setProfile(defaultProfile);
       }
+
+      await reloadProfileAfterLogin();
+
+      // Save auth state
+      await saveAuthState("registered", user?.email);
 
       Alert.alert(
         "Welcome to WAISPATH!",
@@ -243,11 +271,16 @@ export default function AuthenticationSection({
           style: "destructive",
           onPress: async () => {
             try {
-              // 🔥 KEPT: Log admin sign-out BEFORE signing out
+              // ENHANCED: Stop admin status monitoring before signout
+              console.log("🛑 Stopping admin status monitoring before signout");
+              adminStatusChecker.stopMonitoring();
+
+              // Log admin sign-out BEFORE signing out
               if (isCurrentUserAdmin) {
                 await logAdminSignOut();
                 setIsCurrentUserAdmin(false);
                 setAdminRole(null);
+                setAdminEmail(null);
               }
 
               // Clear auth state persistence
@@ -318,92 +351,84 @@ export default function AuthenticationSection({
     switch (userCapabilities.authType) {
       case "admin":
         const roleText = adminRole
-          ? `OFFICIAL (${adminRole.replace("_", " ").toUpperCase()})`
-          : "OFFICIAL (LGU ADMIN)";
+          ? adminRole === "lgu_admin"
+            ? "LGU Admin"
+            : "Field Admin"
+          : "Admin";
         return {
           text: roleText,
-          color: COLORS.success,
-          icon: "shield-checkmark" as const,
+          bgColor: COLORS.success,
+          textColor: COLORS.white,
+          icon: "shield-checkmark",
         };
       case "registered":
         return {
-          text: "REGISTERED USER",
-          color: COLORS.softBlue,
-          icon: "person" as const,
+          text: "Registered User",
+          bgColor: COLORS.softBlue,
+          textColor: COLORS.white,
+          icon: "person",
         };
       case "anonymous":
       default:
         return {
-          text: "GUEST USER",
-          color: COLORS.warning,
-          icon: "person-outline" as const,
+          text: "Guest User",
+          bgColor: COLORS.chipBg,
+          textColor: COLORS.navy,
+          icon: "person-outline",
         };
     }
   };
 
-  const features = [
-    {
-      icon: "infinite" as keyof typeof Ionicons.glyphMap,
-      text:
-        userCapabilities.authType === "admin"
-          ? "Unlimited official reporting"
-          : userCapabilities.authType === "registered"
-          ? "Unlimited community reporting"
-          : "Limited daily reporting",
-    },
-    {
-      icon: "camera" as keyof typeof Ionicons.glyphMap,
-      text:
-        userCapabilities.authType !== "anonymous"
-          ? "Photo attachments enabled"
-          : "No photo attachments",
-    },
-    {
-      icon: "checkmark-circle" as keyof typeof Ionicons.glyphMap,
-      text:
-        userCapabilities.authType === "admin"
-          ? "Auto-verified reports"
-          : userCapabilities.authType === "registered"
-          ? "Community validation"
-          : "Anonymous validation",
-    },
-    {
-      icon: "analytics" as keyof typeof Ionicons.glyphMap,
-      text:
-        userCapabilities.authType !== "anonymous"
-          ? "Report tracking & history"
-          : "No report tracking",
-    },
-  ];
-
-  const badge = getBadgeInfo();
+  const badgeInfo = getBadgeInfo();
+  const isLoggedIn = userCapabilities.authType !== "anonymous";
 
   return (
     <View style={[styles.container, style]}>
-      {/* Account Status Badge */}
-      <View style={[styles.badge, { backgroundColor: badge.color }]}>
-        <Ionicons name={badge.icon} size={16} color={COLORS.white} />
-        <Text style={styles.badgeText}>{badge.text}</Text>
+      {/* User Status Badge */}
+      <View style={[styles.badge, { backgroundColor: badgeInfo.bgColor }]}>
+        <Ionicons
+          name={badgeInfo.icon as any}
+          size={16}
+          color={badgeInfo.textColor}
+        />
+        <Text style={[styles.badgeText, { color: badgeInfo.textColor }]}>
+          {badgeInfo.text}
+        </Text>
+        {/* ENHANCED: Add monitoring indicator for admins */}
+        {isCurrentUserAdmin && (
+          <View style={styles.monitoringIndicator}>
+            <View style={styles.monitoringDot} />
+          </View>
+        )}
       </View>
 
-      {/* Features List */}
-      <View style={styles.featuresContainer}>
-        {features.map((feature, index) => (
-          <View key={index} style={styles.featureRow}>
-            <Ionicons
-              name={feature.icon}
-              size={20}
-              color={COLORS.softBlue}
-              style={styles.featureIcon}
-            />
-            <Text style={styles.featureText}>{feature.text}</Text>
-          </View>
-        ))}
+      {/* Account Info */}
+      <View style={styles.accountInfo}>
+        <Text style={styles.accountTitle}>
+          {isLoggedIn ? "Account Active" : "Limited Access"}
+        </Text>
+        <Text style={styles.accountDescription}>
+          {userCapabilities.authType === "admin"
+            ? `${adminRole
+                ?.replace("_", " ")
+                .toUpperCase()} with full system access`
+            : userCapabilities.authType === "registered"
+            ? "Unlimited reporting and tracking"
+            : `${
+                userCapabilities.dailyReportLimit === 1
+                  ? "1"
+                  : userCapabilities.dailyReportLimit
+              } reports remaining today`}
+        </Text>
+        {/* ENHANCED: Show admin email for clarity */}
+        {isCurrentUserAdmin && adminEmail && (
+          <Text style={styles.adminEmail}>Signed in as: {adminEmail}</Text>
+        )}
       </View>
 
       {/* Action Buttons */}
       <View style={styles.buttonContainer}>
-        {userCapabilities.authType === "anonymous" ? (
+        {!isLoggedIn ? (
           <>
             <TouchableOpacity
               style={[styles.button, styles.primaryButton]}
@@ -495,38 +520,56 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 20,
     marginBottom: 16,
-    alignSelf: "center",
+    position: "relative",
   },
   badgeText: {
-    color: COLORS.white,
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: "600",
-    marginLeft: 6,
+    marginLeft: 4,
   },
-  featuresContainer: {
+  // ENHANCED: Monitoring indicator styles
+  monitoringIndicator: {
+    position: "absolute",
+    right: 8,
+    top: 6,
+  },
+  monitoringDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: COLORS.white,
+    opacity: 0.8,
+  },
+  accountInfo: {
+    alignItems: "center",
     marginBottom: 20,
   },
-  featureRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  featureIcon: {
-    marginRight: 12,
-    width: 20,
-  },
-  featureText: {
-    fontSize: 14,
+  accountTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
     color: COLORS.slate,
-    flex: 1,
+    marginBottom: 4,
+  },
+  accountDescription: {
+    fontSize: 14,
+    color: COLORS.muted,
+    textAlign: "center",
+    lineHeight: 20,
+  },
+  // ENHANCED: Admin email display
+  adminEmail: {
+    fontSize: 12,
+    color: COLORS.muted,
+    marginTop: 4,
+    fontStyle: "italic",
   },
   buttonContainer: {
     gap: 12,
   },
   button: {
-    paddingVertical: 12,
     paddingHorizontal: 24,
-    borderRadius: 8,
+    paddingVertical: 14,
+    borderRadius: 12,
     alignItems: "center",
   },
   primaryButton: {
@@ -539,7 +582,7 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     backgroundColor: COLORS.lightGray,
-    borderWidth: 1,
+    borderWidth: 2,
     borderColor: COLORS.softBlue,
   },
   secondaryButtonText: {
@@ -550,12 +593,12 @@ const styles = StyleSheet.create({
   signOutButton: {
     backgroundColor: COLORS.lightGray,
     borderWidth: 1,
-    borderColor: COLORS.warning,
+    borderColor: COLORS.muted,
   },
   signOutButtonText: {
-    color: COLORS.warning,
+    color: COLORS.muted,
     fontSize: 16,
-    fontWeight: "600",
+    fontWeight: "500",
   },
   modalContainer: {
     flex: 1,
