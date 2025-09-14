@@ -1,8 +1,12 @@
 // src/services/textToSpeechService.ts
-// COMPLETE FIXED: Queue-based TTS system - ensures all obstacles get announced
+// 🔥 COMPLETE FIX: Multi-obstacle tracking with distance-based expiration
 
 import * as Speech from "expo-speech";
-import { AccessibilityObstacle, UserMobilityProfile } from "../types";
+import {
+  AccessibilityObstacle,
+  UserMobilityProfile,
+  UserLocation,
+} from "../types";
 
 interface TTSSettings {
   enabled: boolean;
@@ -16,6 +20,15 @@ interface QueueItem {
   distance: number;
   userProfile: UserMobilityProfile;
   priority: number; // Lower number = higher priority
+  queuedAt: number; // Timestamp when added to queue
+}
+
+// 🔥 NEW: Track multiple obstacles with timestamps and locations
+interface AnnouncedObstacle {
+  obstacleId: string;
+  announcedAt: number;
+  announcedDistance: number;
+  location: { latitude: number; longitude: number };
 }
 
 class TextToSpeechService {
@@ -26,13 +39,21 @@ class TextToSpeechService {
   };
 
   private isSpeaking = false;
-  private lastAnnouncedObstacle: string | null = null;
-  private lastAnnouncementTime = 0;
-  private readonly MIN_ANNOUNCEMENT_INTERVAL = 10000; // 10 seconds between same obstacle
 
-  // 🔥 NEW: TTS Queue system to ensure all obstacles get announced
+  // 🔥 REPLACED: Single obstacle tracking with multi-obstacle Map
+  private recentlyAnnouncedObstacles = new Map<string, AnnouncedObstacle>();
+
+  // 🔥 NEW: More granular timing controls
+  private readonly OBSTACLE_COOLDOWN_TIME = 5000; // 5 seconds between same obstacle
+  private readonly DISTANCE_MOVEMENT_THRESHOLD = 15; // 15 meters movement resets announcements
+  private readonly MAX_TRACKED_OBSTACLES = 50; // Prevent memory leaks
+
+  // TTS Queue system
   private announcementQueue: QueueItem[] = [];
   private isProcessingQueue = false;
+
+  // 🔥 NEW: Track user location for distance-based expiration
+  private lastUserLocation: UserLocation | null = null;
 
   /**
    * Initialize TTS and check availability
@@ -50,8 +71,27 @@ class TextToSpeechService {
   }
 
   /**
-   * ENHANCED: Main method - Queue-based announcement system
-   * Ensures all critical obstacles get announced, prioritized by distance
+   * 🔥 NEW: Update user location for distance-based obstacle expiration
+   */
+  updateUserLocation(location: UserLocation): void {
+    const previousLocation = this.lastUserLocation;
+    this.lastUserLocation = location;
+
+    // If user moved significantly, clean up distant obstacle tracking
+    if (previousLocation) {
+      const distanceMoved = this.calculateDistance(previousLocation, location);
+      if (distanceMoved > this.DISTANCE_MOVEMENT_THRESHOLD) {
+        this.cleanupDistantObstacles(location);
+      }
+    }
+
+    // Periodic cleanup to prevent memory leaks
+    this.cleanupExpiredObstacles();
+  }
+
+  /**
+   * 🔥 ENHANCED: Main method with improved duplicate detection
+   * Now supports multiple obstacles with individual tracking
    */
   async announceProximityAlert(
     obstacle: AccessibilityObstacle,
@@ -73,42 +113,53 @@ class TextToSpeechService {
         return;
       }
 
-      // Prevent duplicate announcements for same obstacle
-      const obstacleKey = `${obstacle.id}_${Math.floor(distance / 10) * 10}`;
-      const now = Date.now();
-
-      if (
-        this.lastAnnouncedObstacle === obstacleKey &&
-        now - this.lastAnnouncementTime < this.MIN_ANNOUNCEMENT_INTERVAL
-      ) {
+      // 🔥 IMPROVED: More specific duplicate detection with individual obstacle tracking
+      if (this.isDuplicateAnnouncement(obstacle, distance)) {
         console.log(
-          `🔊 TTS: Skipping duplicate announcement for ${obstacleKey}`
+          `🔊 TTS: Skipping duplicate announcement for ${obstacle.type} (${obstacle.id})`
         );
         return;
       }
 
-      // 🔥 NEW: Add to queue instead of skipping
-      const priority = distance < 3 ? 1 : distance < 10 ? 2 : 3; // Closer = higher priority
+      // 🔥 IMPROVED: Priority calculation with urgency factors
+      const priority = this.calculateAnnouncementPriority(
+        distance,
+        obstacle.severity
+      );
 
-      // 🔥 REMOVED: No need to check alreadyQueued since we check above
+      // 🔥 IMPROVED: Check if already in queue to prevent queue duplicates
+      const alreadyQueued = this.announcementQueue.some(
+        (item) => item.obstacle.id === obstacle.id
+      );
+
+      if (alreadyQueued) {
+        console.log(
+          `🔊 TTS: Obstacle ${obstacle.type} already in queue, updating priority if needed`
+        );
+        this.updateQueuePriority(obstacle.id, priority, distance);
+        return;
+      }
+
+      // Add to queue
       this.announcementQueue.push({
         obstacle,
         distance,
         userProfile,
         priority,
+        queuedAt: Date.now(),
       });
 
-      // Sort queue by priority (lower number = higher priority)
-      this.announcementQueue.sort(
-        (a: QueueItem, b: QueueItem) =>
-          a.priority - b.priority || a.distance - b.distance
-      );
+      // 🔥 IMPROVED: Sort queue by priority AND distance
+      this.announcementQueue.sort((a, b) => {
+        if (a.priority !== b.priority) return a.priority - b.priority;
+        return a.distance - b.distance; // Closer obstacles first within same priority
+      });
 
       console.log(
         `🔊 TTS: Added ${obstacle.type} at ${distance}m to queue (priority ${priority})`
       );
 
-      // Start processing queue
+      // Start processing queue if not already processing
       this.processAnnouncementQueue();
     } catch (error) {
       console.error("🔊 TTS: announceProximityAlert failed:", error);
@@ -116,7 +167,99 @@ class TextToSpeechService {
   }
 
   /**
-   * 🔥 NEW: Process the announcement queue
+   * 🔥 NEW: Improved duplicate detection with individual obstacle tracking
+   */
+  private isDuplicateAnnouncement(
+    obstacle: AccessibilityObstacle,
+    currentDistance: number
+  ): boolean {
+    const recentAnnouncement = this.recentlyAnnouncedObstacles.get(obstacle.id);
+
+    if (!recentAnnouncement) {
+      return false; // Not announced before
+    }
+
+    const now = Date.now();
+    const timeSinceAnnouncement = now - recentAnnouncement.announcedAt;
+
+    // Allow re-announcement if enough time has passed
+    if (timeSinceAnnouncement > this.OBSTACLE_COOLDOWN_TIME) {
+      return false;
+    }
+
+    // Allow re-announcement if user got significantly closer to the obstacle
+    const distanceChange = Math.abs(
+      currentDistance - recentAnnouncement.announcedDistance
+    );
+    if (distanceChange > 10) {
+      // More than 10 meters change
+      return false;
+    }
+
+    return true; // Is duplicate
+  }
+
+  /**
+   * 🔥 NEW: Calculate announcement priority based on distance and severity
+   */
+  private calculateAnnouncementPriority(
+    distance: number,
+    severity: AccessibilityObstacle["severity"]
+  ): number {
+    let priority = 3; // Default priority
+
+    // Distance-based priority (closer = higher priority = lower number)
+    if (distance < 3) priority = 1; // Immediate danger
+    else if (distance < 8) priority = 2; // High priority
+    else if (distance < 20) priority = 3; // Medium priority
+    else priority = 4; // Low priority
+
+    // Severity adjustment
+    if (severity === "blocking") priority = Math.max(1, priority - 1);
+    else if (severity === "high") priority = Math.max(1, priority);
+    else if (severity === "low") priority = Math.min(4, priority + 1);
+
+    return priority;
+  }
+
+  /**
+   * 🔥 NEW: Update existing queue item priority if needed
+   */
+  private updateQueuePriority(
+    obstacleId: string,
+    newPriority: number,
+    newDistance: number
+  ): void {
+    const existingIndex = this.announcementQueue.findIndex(
+      (item) => item.obstacle.id === obstacleId
+    );
+
+    if (existingIndex !== -1) {
+      const existingItem = this.announcementQueue[existingIndex];
+
+      // Update if new priority is higher (lower number) or distance is closer
+      if (
+        newPriority < existingItem.priority ||
+        newDistance < existingItem.distance
+      ) {
+        existingItem.priority = newPriority;
+        existingItem.distance = newDistance;
+
+        // Re-sort queue
+        this.announcementQueue.sort((a, b) => {
+          if (a.priority !== b.priority) return a.priority - b.priority;
+          return a.distance - b.distance;
+        });
+
+        console.log(
+          `🔊 TTS: Updated queue priority for ${existingItem.obstacle.type} to ${newPriority}`
+        );
+      }
+    }
+  }
+
+  /**
+   * 🔥 ENHANCED: Process the announcement queue with better error handling
    */
   private async processAnnouncementQueue(): Promise<void> {
     if (this.isProcessingQueue || this.announcementQueue.length === 0) {
@@ -124,31 +267,24 @@ class TextToSpeechService {
     }
 
     this.isProcessingQueue = true;
+    console.log(
+      `🔊 TTS: Processing queue with ${this.announcementQueue.length} items`
+    );
 
     while (this.announcementQueue.length > 0) {
-      // If currently speaking, wait for it to finish
-      if (this.isSpeaking) {
-        // For very urgent obstacles (< 3m), interrupt current speech
-        const nextItem = this.announcementQueue[0];
-        if (nextItem.distance < 3) {
-          console.log(
-            `🚨 URGENT: Interrupting TTS for obstacle at ${nextItem.distance}m`
-          );
-          this.stopSpeaking();
-          await new Promise((resolve) => setTimeout(resolve, 200));
-        } else {
-          // Wait for current speech to finish
-          await new Promise<void>((resolve) => {
-            const checkSpeaking = () => {
-              if (!this.isSpeaking) {
-                resolve();
-              } else {
-                setTimeout(checkSpeaking, 100);
-              }
-            };
-            checkSpeaking();
-          });
-        }
+      // 🔥 IMPROVED: Handle interruptions for urgent obstacles
+      const nextItem = this.announcementQueue[0];
+
+      // If currently speaking and next item is urgent, interrupt
+      if (this.isSpeaking && nextItem.priority === 1) {
+        console.log(
+          `🚨 URGENT: Interrupting TTS for ${nextItem.obstacle.type} at ${nextItem.distance}m`
+        );
+        this.stopSpeaking();
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      } else if (this.isSpeaking) {
+        // Wait for current speech to finish for non-urgent items
+        await this.waitForSpeechToComplete();
       }
 
       // Get next item from queue
@@ -156,6 +292,16 @@ class TextToSpeechService {
       if (!item) break;
 
       try {
+        // 🔥 IMPROVED: Check if item is still relevant (not too old)
+        const itemAge = Date.now() - item.queuedAt;
+        if (itemAge > 30000) {
+          // 30 seconds old
+          console.log(
+            `🔊 TTS: Skipping stale queue item for ${item.obstacle.type} (${itemAge}ms old)`
+          );
+          continue;
+        }
+
         // Generate and speak announcement
         const announcement = this.generateSimplifiedAnnouncement(
           item.obstacle,
@@ -165,20 +311,16 @@ class TextToSpeechService {
         console.log(`🔊 TTS: Generated announcement: "${announcement}"`);
         await this.speak(announcement);
 
-        // Track to prevent duplicates
-        const obstacleKey = `${item.obstacle.id}_${
-          Math.floor(item.distance / 10) * 10
-        }`;
-        this.lastAnnouncedObstacle = obstacleKey;
-        this.lastAnnouncementTime = Date.now();
+        // 🔥 IMPROVED: Track announcement with location and distance
+        this.trackAnnouncedObstacle(item.obstacle, item.distance);
 
         console.log(
-          `🔊 TTS: Announced obstacle ${item.obstacle.type} at ${item.distance}m`
+          `🔊 TTS: Successfully announced ${item.obstacle.type} at ${item.distance}m`
         );
 
         // Small delay between announcements to prevent rushing
         if (this.announcementQueue.length > 0) {
-          await new Promise((resolve) => setTimeout(resolve, 300));
+          await new Promise((resolve) => setTimeout(resolve, 500));
         }
       } catch (error) {
         console.error("🔊 TTS: Failed to announce queued obstacle:", error);
@@ -187,11 +329,142 @@ class TextToSpeechService {
     }
 
     this.isProcessingQueue = false;
+    console.log("🔊 TTS: Queue processing completed");
   }
 
   /**
-   * 🔥 NEW: Simplified announcement generation - removes duplicate text
-   * Just says obstacle type + distance, no extra descriptive text
+   * 🔥 NEW: Track announced obstacle with improved data structure
+   */
+  private trackAnnouncedObstacle(
+    obstacle: AccessibilityObstacle,
+    distance: number
+  ): void {
+    this.recentlyAnnouncedObstacles.set(obstacle.id, {
+      obstacleId: obstacle.id,
+      announcedAt: Date.now(),
+      announcedDistance: distance,
+      location: obstacle.location,
+    });
+
+    // Prevent memory leaks by limiting tracked obstacles
+    if (this.recentlyAnnouncedObstacles.size > this.MAX_TRACKED_OBSTACLES) {
+      this.cleanupOldestTrackedObstacles();
+    }
+  }
+
+  /**
+   * 🔥 NEW: Clean up obstacles that are too far from current user location
+   */
+  private cleanupDistantObstacles(userLocation: UserLocation): void {
+    const distantObstacles: string[] = [];
+
+    this.recentlyAnnouncedObstacles.forEach((announced, obstacleId) => {
+      const obstacleDistance = this.calculateDistance(
+        userLocation,
+        announced.location
+      );
+
+      // Remove tracking for obstacles more than 100m away
+      if (obstacleDistance > 100) {
+        distantObstacles.push(obstacleId);
+      }
+    });
+
+    distantObstacles.forEach((id) => {
+      this.recentlyAnnouncedObstacles.delete(id);
+    });
+
+    if (distantObstacles.length > 0) {
+      console.log(
+        `🔊 TTS: Cleaned up ${distantObstacles.length} distant obstacle trackings`
+      );
+    }
+  }
+
+  /**
+   * 🔥 NEW: Clean up expired obstacle announcements
+   */
+  private cleanupExpiredObstacles(): void {
+    const now = Date.now();
+    const expiredObstacles: string[] = [];
+
+    this.recentlyAnnouncedObstacles.forEach((announced, obstacleId) => {
+      const age = now - announced.announcedAt;
+
+      // Remove tracking for obstacles announced more than 2 minutes ago
+      if (age > 120000) {
+        expiredObstacles.push(obstacleId);
+      }
+    });
+
+    expiredObstacles.forEach((id) => {
+      this.recentlyAnnouncedObstacles.delete(id);
+    });
+
+    if (expiredObstacles.length > 0) {
+      console.log(
+        `🔊 TTS: Cleaned up ${expiredObstacles.length} expired obstacle trackings`
+      );
+    }
+  }
+
+  /**
+   * 🔥 NEW: Clean up oldest tracked obstacles to prevent memory leaks
+   */
+  private cleanupOldestTrackedObstacles(): void {
+    const entries = Array.from(this.recentlyAnnouncedObstacles.entries());
+    entries.sort((a, b) => a[1].announcedAt - b[1].announcedAt);
+
+    // Remove oldest 10 entries
+    const toRemove = entries.slice(0, 10);
+    toRemove.forEach(([id]) => {
+      this.recentlyAnnouncedObstacles.delete(id);
+    });
+
+    console.log(
+      `🔊 TTS: Cleaned up ${toRemove.length} oldest obstacle trackings`
+    );
+  }
+
+  /**
+   * 🔥 NEW: Calculate distance between two geographical points
+   */
+  private calculateDistance(
+    point1: { latitude: number; longitude: number },
+    point2: { latitude: number; longitude: number }
+  ): number {
+    const R = 6371e3; // Earth's radius in meters
+    const φ1 = (point1.latitude * Math.PI) / 180;
+    const φ2 = (point2.latitude * Math.PI) / 180;
+    const Δφ = ((point2.latitude - point1.latitude) * Math.PI) / 180;
+    const Δλ = ((point2.longitude - point1.longitude) * Math.PI) / 180;
+
+    const a =
+      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c; // Distance in meters
+  }
+
+  /**
+   * 🔥 NEW: Wait for current speech to complete
+   */
+  private async waitForSpeechToComplete(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const checkSpeaking = () => {
+        if (!this.isSpeaking) {
+          resolve();
+        } else {
+          setTimeout(checkSpeaking, 100);
+        }
+      };
+      checkSpeaking();
+    });
+  }
+
+  /**
+   * Simplified announcement generation
    */
   private generateSimplifiedAnnouncement(
     obstacle: AccessibilityObstacle,
@@ -200,19 +473,17 @@ class TextToSpeechService {
     const distanceText = Math.round(distance);
     const obstacleType = this.getObstacleTypeInEnglish(obstacle.type);
 
-    // 🔥 SIMPLIFIED: Just obstacle and distance - user can see details on screen
     return `${obstacleType} in ${distanceText} meters ahead.`;
   }
 
   /**
-   * FIXED: Core speech function with enhanced error handling and logging
+   * Core speech function with enhanced error handling
    */
   private async speak(text: string): Promise<void> {
     try {
       console.log(`🔊 TTS: Speaking: "${text}"`);
       this.isSpeaking = true;
 
-      // 🔥 CRITICAL FIX: Use proper Promise handling for Speech.speak
       return new Promise<void>((resolve, reject) => {
         Speech.speak(text, {
           language: "en-US",
@@ -244,14 +515,13 @@ class TextToSpeechService {
   }
 
   /**
-   * FIXED: Check if obstacle is relevant for user's mobility type
-   * Updated with comprehensive obstacle type coverage
+   * Check if obstacle is relevant for user's mobility type
    */
   private isObstacleRelevantForUser(
     obstacle: AccessibilityObstacle,
     userProfile: UserMobilityProfile
   ): boolean {
-    // 🔥 FIX: ALL obstacles are relevant to ALL users for safety
+    // All obstacles are relevant to all users for safety
     const allObstacleTypes = [
       "stairs_no_ramp",
       "narrow_passage",
@@ -267,12 +537,11 @@ class TextToSpeechService {
       "other",
     ];
 
-    // Always announce obstacles that could affect navigation
     return allObstacleTypes.includes(obstacle.type);
   }
 
   /**
-   * FIXED: Convert obstacle type to readable English with comprehensive coverage
+   * Convert obstacle type to readable English
    */
   private getObstacleTypeInEnglish(type: string): string {
     const types: Record<string, string> = {
@@ -300,7 +569,6 @@ class TextToSpeechService {
     this.settings.enabled = !this.settings.enabled;
     console.log(`🔊 TTS ${this.settings.enabled ? "enabled" : "disabled"}`);
 
-    // Stop current speech when disabling and clear queue
     if (!this.settings.enabled) {
       this.stopSpeaking();
       this.clearQueue();
@@ -329,12 +597,13 @@ class TextToSpeechService {
   }
 
   /**
-   * 🔥 NEW: Clear the announcement queue
+   * Clear the announcement queue and tracking
    */
   private clearQueue(): void {
     this.announcementQueue = [];
     this.isProcessingQueue = false;
-    console.log("🔊 TTS: Queue cleared");
+    this.recentlyAnnouncedObstacles.clear();
+    console.log("🔊 TTS: Queue and tracking cleared");
   }
 
   /**
@@ -353,16 +622,33 @@ class TextToSpeechService {
   }
 
   /**
-   * Test TTS functionality with comprehensive obstacle types
+   * 🔥 NEW: Debug method to get current tracking state
+   */
+  getDebugInfo(): {
+    queueLength: number;
+    trackedObstacles: number;
+    isProcessing: boolean;
+    isSpeaking: boolean;
+  } {
+    return {
+      queueLength: this.announcementQueue.length,
+      trackedObstacles: this.recentlyAnnouncedObstacles.size,
+      isProcessing: this.isProcessingQueue,
+      isSpeaking: this.isSpeaking,
+    };
+  }
+
+  /**
+   * Test TTS functionality
    */
   async testTTS(): Promise<void> {
     await this.speak(
-      "Text to speech is working correctly for WAISPATH navigation. Testing obstacle announcements."
+      "Text to speech is working correctly for WAISPATH navigation."
     );
   }
 
   /**
-   * 🧪 TESTING: Test specific obstacle announcement
+   * Test specific obstacle announcement
    */
   async testObstacleAnnouncement(
     obstacleType: string,
