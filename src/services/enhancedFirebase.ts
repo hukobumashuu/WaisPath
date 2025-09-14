@@ -1,13 +1,13 @@
 // src/services/enhancedFirebase.ts
-// ENHANCED: Complete Firebase service with admin status monitoring integration
-// ALL TYPESCRIPT ERRORS FIXED
+// FINAL FIX: All 3 issues resolved - Rate limit display, duplicate logs, anonymous photos
+// Device-based rate limiting + proper status display + photo upload fix
 
 import { firebaseServices } from "./firebase";
 import {
-  rateLimitService,
+  deviceRateLimitService,
   UserAuthType,
-  RateLimitResult,
-} from "./RateLimitService";
+  DeviceRateLimitResult,
+} from "./DeviceRateLimitService";
 import {
   userCapabilitiesService,
   UserCapabilities,
@@ -38,11 +38,11 @@ interface EnhancedObstacleData {
   timePattern?: "permanent" | "morning" | "afternoon" | "evening" | "weekend";
 }
 
-// Enhanced reporting result
+// FIXED: Enhanced reporting result with device-based rate limiting
 interface EnhancedReportingResult {
   success: boolean;
   obstacleId?: string;
-  rateLimitInfo: RateLimitResult;
+  rateLimitInfo: DeviceRateLimitResult;
   userCapabilities: UserCapabilities;
   message: string;
 }
@@ -53,6 +53,7 @@ interface UserContext {
   authType: UserAuthType;
   capabilities: UserCapabilities;
   adminCapabilities?: AdminCapabilities;
+  rateLimitInfo?: DeviceRateLimitResult; // NEW: Include rate limit info
 }
 
 class EnhancedFirebaseService {
@@ -64,7 +65,14 @@ class EnhancedFirebaseService {
     claims: any;
   } | null = null;
 
+  // NEW: Cache for user context to prevent duplicate calls
+  private userContextCache: {
+    context: UserContext;
+    timestamp: number;
+  } | null = null;
+
   private readonly CACHE_TTL = 30000; // 30 seconds cache
+  private readonly USER_CONTEXT_CACHE_TTL = 5000; // 5 seconds for user context (shorter to show updated rate limits)
 
   /**
    * Get current Firebase user with unified auth
@@ -128,6 +136,7 @@ class EnhancedFirebaseService {
    */
   public clearAuthCache(): void {
     this.unifiedAuthCache = null;
+    this.userContextCache = null; // NEW: Clear user context cache too
 
     // ENHANCED: Stop status monitoring when clearing cache
     adminStatusChecker.stopMonitoring();
@@ -136,10 +145,19 @@ class EnhancedFirebaseService {
   }
 
   /**
-   * ENHANCED: Get current user context with status monitoring integration (FIXED)
+   * FIXED: Get current user context with caching to prevent duplicate calls
    */
   async getCurrentUserContext(): Promise<UserContext> {
     try {
+      // NEW: Check user context cache first to prevent duplicate calls
+      if (
+        this.userContextCache &&
+        Date.now() - this.userContextCache.timestamp <
+          this.USER_CONTEXT_CACHE_TTL
+      ) {
+        return this.userContextCache.context;
+      }
+
       // STEP 1: Get current user from unified auth state
       const currentUser = await this.getCurrentFirebaseUser();
 
@@ -149,11 +167,19 @@ class EnhancedFirebaseService {
         // Ensure monitoring is stopped for anonymous users (single call)
         adminStatusChecker.stopMonitoring();
 
-        return {
+        const anonymousContext: UserContext = {
           uid: "unknown",
           authType: "anonymous",
           capabilities: this.getDefaultCapabilities(),
         };
+
+        // Cache the context
+        this.userContextCache = {
+          context: anonymousContext,
+          timestamp: Date.now(),
+        };
+
+        return anonymousContext;
       }
 
       // STEP 2: Check if user is admin using FRESH cached claims
@@ -177,12 +203,20 @@ class EnhancedFirebaseService {
           }
         }
 
-        return {
+        const adminContext: UserContext = {
           uid: currentUser.uid,
           authType: "admin",
           capabilities,
           adminCapabilities,
         };
+
+        // Cache the context
+        this.userContextCache = {
+          context: adminContext,
+          timestamp: Date.now(),
+        };
+
+        return adminContext;
       }
 
       // STEP 3: Check if user is registered (has email and not anonymous)
@@ -190,104 +224,78 @@ class EnhancedFirebaseService {
         currentUser && !currentUser.isAnonymous && currentUser.email;
       const authType: UserAuthType = isRegistered ? "registered" : "anonymous";
 
-      // ENHANCED: Stop monitoring for non-admin users (single call)
+      // Ensure monitoring is stopped for non-admin users (single call)
       adminStatusChecker.stopMonitoring();
 
-      console.log(
-        `${authType} user context: ${currentUser.email || "anonymous"}`
+      const capabilities = userCapabilitiesService.getUserCapabilities(
+        authType,
+        undefined
       );
 
-      return {
-        uid: currentUser.uid,
-        authType,
-        capabilities: userCapabilitiesService.getUserCapabilities(authType),
-      };
-    } catch (error) {
-      console.error("Failed to get user context:", error);
+      // FIXED: Get device-based rate limit info for accurate display
+      const rateLimitInfo = await deviceRateLimitService.checkReportingLimits(
+        currentUser.uid || "anonymous_user",
+        authType
+      );
 
-      // Ensure monitoring is stopped on errors
+      console.log(
+        `${authType} user context: ${
+          currentUser.email || currentUser.uid || "anonymous"
+        } - ${rateLimitInfo.remaining} reports remaining`
+      );
+
+      const userContext: UserContext = {
+        uid: currentUser.uid || "anonymous_user",
+        authType,
+        capabilities,
+        rateLimitInfo, // NEW: Include rate limit info in context
+      };
+
+      // Cache the context
+      this.userContextCache = {
+        context: userContext,
+        timestamp: Date.now(),
+      };
+
+      return userContext;
+    } catch (error) {
+      console.error("Failed to get current user context:", error);
+
+      // Fallback to anonymous context
       adminStatusChecker.stopMonitoring();
 
-      return {
+      const fallbackContext: UserContext = {
         uid: "unknown",
         authType: "anonymous",
         capabilities: this.getDefaultCapabilities(),
       };
+
+      // Cache the fallback context
+      this.userContextCache = {
+        context: fallbackContext,
+        timestamp: Date.now(),
+      };
+
+      return fallbackContext;
     }
   }
 
   /**
-   * NEW: Manual admin status check method
-   * Allows components to trigger immediate status verification
-   */
-  async checkAdminStatus(): Promise<{
-    success: boolean;
-    status: string;
-    message: string;
-  }> {
-    try {
-      const currentUser = await this.getCurrentFirebaseUser();
-
-      if (!currentUser || !currentUser.email) {
-        return {
-          success: false,
-          status: "not_authenticated",
-          message: "User not authenticated",
-        };
-      }
-
-      // Check if current user is admin
-      if (!this.unifiedAuthCache?.isAdmin) {
-        return {
-          success: true,
-          status: "not_admin",
-          message: "User is not an admin",
-        };
-      }
-
-      // Trigger manual status check
-      const result = await adminStatusChecker.manualCheck();
-
-      if (!result) {
-        return {
-          success: false,
-          status: "check_failed",
-          message: "Failed to check admin status",
-        };
-      }
-
-      return {
-        success: true,
-        status: result.status,
-        message: result.message,
-      };
-    } catch (error) {
-      console.error("Manual admin status check failed:", error);
-      return {
-        success: false,
-        status: "error",
-        message: "Status check error",
-      };
-    }
-  }
-
-  /**
-   * NEW: Get admin status monitoring info
-   * Useful for debugging and status displays
-   */
-  getAdminMonitoringInfo() {
-    return adminStatusChecker.getMonitoringInfo();
-  }
-
-  /**
-   * Get default capabilities for anonymous users
+   * Get default capabilities for anonymous users - FIXED to allow photos
    */
   private getDefaultCapabilities(): UserCapabilities {
-    return userCapabilitiesService.getUserCapabilities("anonymous");
+    const capabilities =
+      userCapabilitiesService.getUserCapabilities("anonymous");
+
+    // FIXED: Allow anonymous users to upload photos (they can take them, just can't see them in reports)
+    return {
+      ...capabilities,
+      canUploadPhotos: true, // CHANGED: Allow anonymous photo upload
+    };
   }
 
   /**
-   * Get user reporting status with enhanced capabilities
+   * FIXED: Get user reporting status with device-based rate limiting info
    */
   async getUserReportingStatus(): Promise<{
     capabilities: UserCapabilities;
@@ -314,7 +322,7 @@ class EnhancedFirebaseService {
   }
 
   /**
-   * Enhanced obstacle reporting with rate limiting and admin monitoring
+   * FIXED: Enhanced obstacle reporting with device-based rate limiting and anonymous photo support
    */
   async reportObstacleEnhanced(
     obstacleData: EnhancedObstacleData
@@ -323,8 +331,8 @@ class EnhancedFirebaseService {
       // Get current user context
       const context = await this.getCurrentUserContext();
 
-      // FIXED: Use correct method name
-      const rateLimitCheck = await rateLimitService.checkReportingLimits(
+      // FIXED: Use device-based rate limiting service
+      const rateLimitCheck = await deviceRateLimitService.checkReportingLimits(
         context.uid,
         context.authType
       );
@@ -336,7 +344,7 @@ class EnhancedFirebaseService {
           rateLimitInfo: rateLimitCheck,
           userCapabilities: context.capabilities,
           message:
-            "Daily report limit reached. Register for unlimited reporting!",
+            "Daily report limit reached on this device. Register for unlimited reporting!",
         };
       }
 
@@ -350,12 +358,9 @@ class EnhancedFirebaseService {
         };
       }
 
-      // Check if user can upload photos
-      if (obstacleData.photoBase64 && !context.capabilities.canUploadPhotos) {
-        // Remove photo for anonymous users but continue with report
-        obstacleData.photoBase64 = undefined;
-        console.warn("Photo removed - anonymous users cannot upload photos");
-      }
+      // FIXED: Allow anonymous users to upload photos
+      // Photos will be stored but anonymous users won't see them in their reports
+      // This is better UX than removing photos after they took the effort to capture them
 
       // FIXED: Handle potential null return from getCurrentAdminUser()
       let adminUser: AdminUser | undefined = undefined;
@@ -376,8 +381,11 @@ class EnhancedFirebaseService {
         adminUser, // Now properly typed as AdminUser | undefined
       });
 
-      // Record the report for rate limiting
-      await rateLimitService.recordReport(context.uid, context.authType);
+      // Record the report for device-based rate limiting
+      await deviceRateLimitService.recordReport(context.uid, context.authType);
+
+      // FIXED: Clear user context cache after successful report to show updated count
+      this.userContextCache = null;
 
       // Generate success message
       const message = this.generateSuccessMessage(
@@ -455,10 +463,10 @@ class EnhancedFirebaseService {
   }
 
   /**
-   * Show rate limit alert with upgrade options
+   * Show device-based rate limit alert with upgrade options
    */
   showRateLimitAlert(
-    rateLimitInfo: RateLimitResult,
+    rateLimitInfo: DeviceRateLimitResult,
     onRegister?: () => void,
     onCancel?: () => void
   ): void {
@@ -468,7 +476,7 @@ class EnhancedFirebaseService {
     ) {
       Alert.alert(
         "Daily Limit Reached",
-        "You've used your daily report. Register now for unlimited reporting with photos and report tracking!",
+        "You've used your daily report on this device. Register now for unlimited reporting with photos and report tracking!",
         [
           {
             text: "Maybe Later",
@@ -490,11 +498,23 @@ class EnhancedFirebaseService {
   }
 
   /**
-   * Upgrade user from anonymous to registered
+   * Upgrade user from anonymous to registered with device data transfer
    */
   async upgradeUserToRegistered(userUID?: string): Promise<boolean> {
     try {
-      // This would integrate with your user upgrade flow
+      if (userUID) {
+        // Transfer device-based anonymous data to user account
+        await deviceRateLimitService.upgradeUserType(
+          "anonymous",
+          "registered",
+          userUID
+        );
+        console.log("Device data transferred to registered user account");
+      }
+
+      // Clear context cache to refresh rate limits
+      this.userContextCache = null;
+
       console.log("Upgrading user to registered status");
       return true;
     } catch (error) {
@@ -508,6 +528,9 @@ class EnhancedFirebaseService {
    */
   async upgradeUserToAdmin(userUID: string, adminRole: any): Promise<boolean> {
     try {
+      // Clear context cache to refresh permissions
+      this.userContextCache = null;
+
       // This would integrate with your admin setup flow
       console.log("Upgrading user to admin status");
       return true;
@@ -531,11 +554,11 @@ class EnhancedFirebaseService {
       case "registered":
         return remaining > 0
           ? `Obstacle reported successfully! ${remaining} reports remaining today`
-          : "Obstacle reported successfully! Register for unlimited reporting";
+          : "Obstacle reported successfully!";
 
       case "anonymous":
         return remaining > 0
-          ? `Obstacle reported successfully! ${remaining} report remaining today`
+          ? `Obstacle reported successfully! ${remaining} report remaining today on this device`
           : "Obstacle reported successfully! Register for unlimited reporting";
 
       default:
@@ -544,14 +567,51 @@ class EnhancedFirebaseService {
   }
 
   /**
-   * Cleanup - Call periodically to clean old rate limit data
+   * Cleanup - Call periodically to clean old device rate limit data
    */
   async performMaintenance(): Promise<void> {
     try {
-      await rateLimitService.cleanupOldData(7);
-      console.log("🧹 Enhanced Firebase service maintenance completed");
+      await deviceRateLimitService.cleanupOldData(7);
+      console.log(
+        "🧹 Enhanced Firebase service maintenance completed (device-based)"
+      );
     } catch (error) {
       console.error("Maintenance failed:", error);
+    }
+  }
+
+  /**
+   * FIXED: Force refresh user context (for AuthenticationSection)
+   */
+  async refreshUserContext(): Promise<UserContext> {
+    // Clear cache to force fresh data
+    this.userContextCache = null;
+    return await this.getCurrentUserContext();
+  }
+
+  /**
+   * 🧪 TESTING: Get device rate limit debug info
+   */
+  async getDeviceRateLimitDebugInfo(): Promise<any> {
+    try {
+      return await deviceRateLimitService.getDebugInfo();
+    } catch (error) {
+      console.error("Failed to get debug info:", error);
+      return null;
+    }
+  }
+
+  /**
+   * 🧪 TESTING: Clear all device rate limit data
+   */
+  async clearAllDeviceRateLimits(): Promise<void> {
+    try {
+      await deviceRateLimitService.clearAllRateLimitData();
+      // Clear context cache after clearing data
+      this.userContextCache = null;
+      console.log("🧹 All device rate limit data cleared");
+    } catch (error) {
+      console.error("Failed to clear device rate limits:", error);
     }
   }
 }
@@ -573,7 +633,7 @@ export const verifyObstacleWithPermissionCheck = (
 ) => enhancedFirebaseService.verifyObstacleEnhanced(obstacleId, verification);
 
 export const showRateLimitNotification = (
-  rateLimitInfo: RateLimitResult,
+  rateLimitInfo: DeviceRateLimitResult,
   onRegister?: () => void,
   onCancel?: () => void
 ) =>
@@ -592,3 +652,14 @@ export const upgradeToAdminUser = (userUID: string, adminRole: any) =>
 
 // Export cache management
 export const clearAuthCache = () => enhancedFirebaseService.clearAuthCache();
+
+// NEW: Force refresh context
+export const refreshUserContext = () =>
+  enhancedFirebaseService.refreshUserContext();
+
+// 🧪 TESTING EXPORTS
+export const getDeviceRateLimitDebugInfo = () =>
+  enhancedFirebaseService.getDeviceRateLimitDebugInfo();
+
+export const clearAllDeviceRateLimits = () =>
+  enhancedFirebaseService.clearAllDeviceRateLimits();

@@ -1,7 +1,7 @@
 // src/screens/ReportScreen.tsx
-// COMPLETE: Enhanced ReportScreen with admin obstacle report logging
+// FIXED: Enhanced ReportScreen with automatic form reset after submission and correct styles
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   SafeAreaView,
   View,
@@ -173,6 +173,18 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
     }
   }, [currentStep]);
 
+  // 🔥 FIXED: Complete form reset function
+  const resetForm = useCallback(() => {
+    setCurrentStep("select");
+    setSelectedObstacle(null);
+    setSelectedSeverity(null);
+    setDescription("");
+    setCapturedPhoto(null);
+    setShowCamera(false);
+    setIsSubmitting(false);
+    console.log("🔄 Report form reset to initial state");
+  }, []);
+
   const handleObstacleSelect = (obstacleType: ObstacleType) => {
     setSelectedObstacle(obstacleType);
     setCurrentStep("photo");
@@ -192,7 +204,7 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
     setCurrentStep("details");
   };
 
-  // ENHANCED: Obstacle report submission with admin logging
+  // 🔥 FIXED: Enhanced obstacle report submission with automatic form reset
   const handleSubmitReport = async () => {
     if (!selectedObstacle || !selectedSeverity || !location) {
       Alert.alert(
@@ -234,18 +246,33 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
           // Don't fail the report submission if logging fails
         }
 
+        // 🔥 FIXED: Automatically reset form after successful submission
         Alert.alert("✅ Na-report na!", result.message, [
           {
             text: "Mag-report Ulit",
             style: "default",
-            onPress: resetForm,
+            onPress: () => {
+              resetForm();
+              // Small delay to ensure form reset completes
+              setTimeout(() => getCurrentLocation(), 100);
+            },
           },
           {
             text: "Bumalik sa Home",
             style: "default",
-            onPress: () => navigation.goBack(),
+            onPress: () => {
+              resetForm(); // Reset form before navigating
+              navigation.goBack();
+            },
           },
         ]);
+
+        // 🔥 NEW: Auto-reset form immediately after successful submission
+        // This ensures the form is reset regardless of which button the user chooses
+        setTimeout(() => {
+          resetForm();
+          console.log("🔄 Form auto-reset after successful submission");
+        }, 500); // Small delay to allow alert to show
 
         // Show success vibration
         Vibration.vibrate([100, 200, 100]);
@@ -264,15 +291,6 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  const resetForm = () => {
-    setCurrentStep("select");
-    setSelectedObstacle(null);
-    setSelectedSeverity(null);
-    setDescription("");
-    setCapturedPhoto(null);
-    setShowCamera(false);
   };
 
   const handleBack = () => {
@@ -324,25 +342,24 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
                 styles.progressBar,
                 {
                   backgroundColor:
-                    step <= stepProgress.current ? COLORS.softBlue : "#E5E7EB",
+                    step <= stepProgress.current
+                      ? COLORS.softBlue
+                      : COLORS.muted,
                 },
               ]}
             />
           ))}
         </View>
+
         <Text style={[styles.progressLabel, { paddingHorizontal: 20 }]}>
-          Step {stepProgress.current} ng {stepProgress.total}:{" "}
+          Step {stepProgress.current} of {stepProgress.total}:{" "}
           {stepProgress.label}
         </Text>
       </View>
 
-      <ScrollView
-        style={{ flex: 1 }}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View style={{ paddingHorizontal: 20, paddingBottom: 40 }}>
-          {/* Step 1: Select Obstacle Type */}
+      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+        <View style={{ paddingHorizontal: 20, paddingBottom: 100 }}>
+          {/* Step 1: Obstacle Type Selection */}
           {currentStep === "select" && (
             <View>
               <Text
@@ -359,63 +376,39 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
                   { fontSize: isSmallScreen ? 14 : 16 },
                 ]}
               >
-                Piliin ang pinaka-angkop na uri ng accessibility obstacle na
-                nakita mo
+                Piliin ang pinakamalapit na description
               </Text>
 
               {OBSTACLE_TYPES.map((obstacle) => (
                 <TouchableOpacity
                   key={obstacle.key}
-                  style={[
-                    styles.card,
-                    {
-                      borderColor: obstacle.color,
-                      borderWidth: 1,
-                      marginBottom: 12,
-                    },
-                  ]}
+                  style={[styles.obstacleCard]}
                   onPress={() => handleObstacleSelect(obstacle.key)}
                   activeOpacity={0.8}
                 >
                   <View style={{ flexDirection: "row", alignItems: "center" }}>
                     <View
-                      style={{
-                        width: 48,
-                        height: 48,
-                        borderRadius: 24,
-                        backgroundColor: obstacle.color + "20",
-                        justifyContent: "center",
-                        alignItems: "center",
-                        marginRight: 16,
-                      }}
+                      style={[
+                        styles.obstacleIcon,
+                        { backgroundColor: obstacle.color },
+                      ]}
                     >
                       <Ionicons
                         name={obstacle.icon}
                         size={24}
-                        color={obstacle.color}
+                        color={COLORS.white}
                       />
                     </View>
-                    <View style={{ flex: 1 }}>
-                      <Text
-                        style={{
-                          fontSize: 16,
-                          fontWeight: "600",
-                          color: COLORS.slate,
-                          marginBottom: 4,
-                        }}
-                      >
+
+                    <View style={{ flex: 1, marginLeft: 12 }}>
+                      <Text style={styles.obstacleTitle}>
                         {obstacle.labelFil}
                       </Text>
-                      <Text
-                        style={{
-                          fontSize: 14,
-                          color: COLORS.muted,
-                          lineHeight: 18,
-                        }}
-                      >
+                      <Text style={styles.obstacleDescription}>
                         {obstacle.description}
                       </Text>
                     </View>
+
                     <Ionicons
                       name="chevron-forward"
                       size={20}
@@ -427,7 +420,7 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
             </View>
           )}
 
-          {/* Step 2: Take Photo */}
+          {/* Step 2: Photo Capture */}
           {currentStep === "photo" && selectedObstacleData && (
             <View>
               <Text
@@ -444,28 +437,25 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
                   { fontSize: isSmallScreen ? 14 : 16 },
                 ]}
               >
-                Larawan ng {selectedObstacleData.labelFil.toLowerCase()} para sa
-                mas malinaw na report
+                Para sa {selectedObstacleData.labelFil.toLowerCase()}
               </Text>
 
-              <View
-                style={[styles.card, { alignItems: "center", padding: 32 }]}
-              >
+              <View style={[styles.card, { alignItems: "center" }]}>
                 <View
-                  style={{
-                    width: 80,
-                    height: 80,
-                    borderRadius: 40,
-                    backgroundColor: selectedObstacleData.color + "20",
-                    justifyContent: "center",
-                    alignItems: "center",
-                    marginBottom: 16,
-                  }}
+                  style={[
+                    styles.obstacleIcon,
+                    {
+                      backgroundColor: selectedObstacleData.color,
+                      width: 60,
+                      height: 60,
+                      marginBottom: 16,
+                    },
+                  ]}
                 >
                   <Ionicons
                     name={selectedObstacleData.icon}
-                    size={32}
-                    color={selectedObstacleData.color}
+                    size={30}
+                    color={COLORS.white}
                   />
                 </View>
 
@@ -475,6 +465,7 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
                     fontWeight: "600",
                     color: COLORS.slate,
                     marginBottom: 8,
+                    textAlign: "center",
                   }}
                 >
                   {selectedObstacleData.labelFil}
@@ -484,34 +475,53 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
                   style={{
                     fontSize: 14,
                     color: COLORS.muted,
-                    textAlign: "center",
                     marginBottom: 24,
+                    textAlign: "center",
+                    lineHeight: 20,
                   }}
                 >
-                  {selectedObstacleData.description}
+                  Ang photo ay makakatulong sa iba na makita ang hadlang. Hindi
+                  required pero recommended.
                 </Text>
 
                 {capturedPhoto ? (
-                  <View style={{ alignItems: "center", marginBottom: 24 }}>
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={48}
-                      color={COLORS.success}
-                      style={{ marginBottom: 8 }}
-                    />
-                    <Text
+                  <View style={{ width: "100%", alignItems: "center" }}>
+                    <View
                       style={{
-                        fontSize: 14,
-                        color: COLORS.success,
-                        fontWeight: "500",
+                        width: "100%",
+                        height: 200,
+                        borderRadius: 12,
+                        backgroundColor: COLORS.lightGray,
+                        marginBottom: 16,
+                        alignItems: "center",
+                        justifyContent: "center",
                       }}
                     >
-                      Photo na-capture na!
-                    </Text>
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={48}
+                        color={COLORS.success}
+                      />
+                      <Text
+                        style={{
+                          color: COLORS.success,
+                          fontWeight: "600",
+                          marginTop: 8,
+                        }}
+                      >
+                        Photo Saved!
+                      </Text>
+                    </View>
                   </View>
                 ) : null}
 
-                <View style={{ flexDirection: "row", gap: 12 }}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    gap: 12,
+                    width: "100%",
+                  }}
+                >
                   <TouchableOpacity
                     style={{
                       backgroundColor: COLORS.softBlue,
@@ -520,15 +530,17 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
                       borderRadius: 8,
                       flexDirection: "row",
                       alignItems: "center",
+                      flex: 1,
+                      justifyContent: "center",
                     }}
                     onPress={() => setShowCamera(true)}
                     activeOpacity={0.8}
                   >
-                    <Ionicons name="camera" size={16} color={COLORS.white} />
+                    <Ionicons name="camera" size={20} color={COLORS.white} />
                     <Text
                       style={{
                         color: COLORS.white,
-                        fontWeight: "600",
+                        fontWeight: "500",
                         marginLeft: 8,
                       }}
                     >
@@ -619,11 +631,11 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
                         selectedSeverity === level.key
                           ? level.color + "20"
                           : COLORS.lightGray,
-                      borderWidth: selectedSeverity === level.key ? 2 : 0,
+                      borderWidth: selectedSeverity === level.key ? 2 : 1,
                       borderColor:
                         selectedSeverity === level.key
                           ? level.color
-                          : "transparent",
+                          : COLORS.muted,
                     }}
                     onPress={() => setSelectedSeverity(level.key)}
                     activeOpacity={0.8}
@@ -633,19 +645,22 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
                         width: 20,
                         height: 20,
                         borderRadius: 10,
-                        borderWidth: 2,
-                        borderColor: level.color,
                         backgroundColor:
                           selectedSeverity === level.key
                             ? level.color
-                            : "transparent",
+                            : COLORS.white,
+                        borderWidth: 2,
+                        borderColor:
+                          selectedSeverity === level.key
+                            ? level.color
+                            : COLORS.muted,
                         marginRight: 12,
                       }}
                     />
                     <View style={{ flex: 1 }}>
                       <Text
                         style={{
-                          fontSize: 14,
+                          fontSize: 16,
                           fontWeight: "600",
                           color: COLORS.slate,
                         }}
@@ -656,6 +671,7 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
                         style={{
                           fontSize: 12,
                           color: COLORS.muted,
+                          marginTop: 2,
                         }}
                       >
                         {level.description}
@@ -665,8 +681,8 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
                 ))}
               </View>
 
-              {/* Description Input */}
-              <View style={[styles.card, { marginBottom: 16 }]}>
+              {/* Description */}
+              <View style={[styles.card, { marginBottom: 24 }]}>
                 <Text
                   style={{
                     fontSize: 16,
@@ -675,85 +691,32 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
                     marginBottom: 12,
                   }}
                 >
-                  Dagdagang Detalye (Optional)
+                  Additional Details (Optional)
                 </Text>
                 <TextInput
-                  style={{
-                    borderWidth: 1,
-                    borderColor: "#E5E7EB",
-                    borderRadius: 8,
-                    padding: 12,
-                    minHeight: 80,
-                    textAlignVertical: "top",
-                    fontSize: 14,
-                    color: COLORS.slate,
-                  }}
+                  style={styles.textInput}
                   multiline
-                  placeholder="Halimbawa: 'May nakaharang na tricycle tapat ng Jollibee'"
-                  placeholderTextColor={COLORS.muted}
+                  numberOfLines={4}
                   value={description}
                   onChangeText={setDescription}
-                  maxLength={500}
+                  placeholder="Dagdagan ng detalye tungkol sa hadlang..."
+                  placeholderTextColor={COLORS.muted}
                 />
-                <Text
-                  style={{
-                    fontSize: 12,
-                    color: COLORS.muted,
-                    textAlign: "right",
-                    marginTop: 4,
-                  }}
-                >
-                  {description.length}/500
-                </Text>
               </View>
 
-              {/* Location Info */}
-              {location && (
-                <View style={[styles.card, { marginBottom: 24 }]}>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      marginBottom: 8,
-                    }}
-                  >
-                    <Ionicons
-                      name="location"
-                      size={16}
-                      color={COLORS.success}
-                    />
-                    <Text
-                      style={{
-                        fontSize: 14,
-                        fontWeight: "600",
-                        color: COLORS.slate,
-                        marginLeft: 8,
-                      }}
-                    >
-                      Location Confirmed
-                    </Text>
-                  </View>
-                  <Text style={{ fontSize: 12, color: COLORS.muted }}>
-                    Lat: {location.latitude.toFixed(6)}, Long:{" "}
-                    {location.longitude.toFixed(6)}
-                  </Text>
-                </View>
-              )}
-
               {/* Submit Button */}
-              <View style={{ gap: 12 }}>
+              <View style={{ marginBottom: 24 }}>
                 <TouchableOpacity
-                  style={{
-                    backgroundColor: selectedSeverity
-                      ? COLORS.softBlue
-                      : COLORS.muted,
-                    paddingVertical: 16,
-                    borderRadius: 8,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    opacity: isSubmitting ? 0.7 : 1,
-                  }}
+                  style={[
+                    styles.submitButton,
+                    {
+                      backgroundColor:
+                        selectedSeverity && !isSubmitting
+                          ? COLORS.softBlue
+                          : COLORS.muted,
+                      opacity: isSubmitting ? 0.7 : 1,
+                    },
+                  ]}
                   onPress={handleSubmitReport}
                   disabled={!selectedSeverity || isSubmitting}
                   activeOpacity={0.8}
@@ -767,25 +730,13 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
                       color={COLORS.white}
                     />
                   )}
-                  <Text
-                    style={{
-                      color: COLORS.white,
-                      fontSize: 16,
-                      fontWeight: "600",
-                      marginLeft: 8,
-                    }}
-                  >
+                  <Text style={styles.submitButtonText}>
                     {isSubmitting ? "Nire-report..." : "I-submit ang Report"}
                   </Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    paddingVertical: 12,
-                  }}
+                  style={styles.backButton}
                   onPress={handleBack}
                   activeOpacity={0.8}
                 >
@@ -794,9 +745,7 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
                     size={16}
                     color={COLORS.muted}
                   />
-                  <Text style={{ color: COLORS.muted, marginLeft: 4 }}>
-                    Bumalik
-                  </Text>
+                  <Text style={styles.backButtonText}>Bumalik</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -804,37 +753,20 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
 
           {/* Profile Info Card */}
           {profile && (
-            <View style={[styles.card, { marginTop: 20 }]}>
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  marginBottom: 8,
-                }}
-              >
+            <View style={styles.profileCard}>
+              <View style={styles.profileHeader}>
                 <Ionicons
                   name="information-circle"
                   size={20}
                   color={COLORS.softBlue}
                 />
-                <Text
-                  style={{
-                    fontSize: 16,
-                    fontWeight: "600",
-                    color: COLORS.slate,
-                    marginLeft: 8,
-                  }}
-                >
-                  Inyong Profile
-                </Text>
+                <Text style={styles.profileTitle}>Inyong Profile</Text>
               </View>
-              <Text
-                style={{ fontSize: 14, color: COLORS.slate, marginBottom: 4 }}
-              >
+              <Text style={styles.profileText}>
                 Device: {profile.type} •{" "}
                 {profile.avoidStairs ? "Iwas stairs" : "OK sa stairs"}
               </Text>
-              <Text style={{ fontSize: 12, color: COLORS.muted }}>
+              <Text style={styles.profileSubtext}>
                 Ang reports mo ay makikita ng mga kapareho mong user type
               </Text>
             </View>
@@ -843,22 +775,12 @@ export default function ReportScreen({ navigation }: ReportScreenProps) {
           {/* Reset Button */}
           {currentStep !== "select" && (
             <TouchableOpacity
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "center",
-                paddingVertical: 16,
-                marginTop: 16,
-              }}
+              style={styles.resetButton}
               onPress={resetForm}
               activeOpacity={0.8}
             >
               <Ionicons name="refresh" size={16} color={COLORS.navy} />
-              <Text
-                style={{ color: COLORS.navy, marginLeft: 8, fontWeight: "500" }}
-              >
-                Simula Ulit
-              </Text>
+              <Text style={styles.resetButtonText}>Simula Ulit</Text>
             </TouchableOpacity>
           )}
         </View>
