@@ -33,7 +33,7 @@ export class ProximityDetectionService {
     routeTolerance: 15, // 15m tolerance for "on route"
     updateInterval: 5000, // 5 second updates
     minimumMovement: 10, // 10m minimum movement
-    maxAlerts: 3, // Maximum alerts to return
+    maxAlerts: 2, // Maximum alerts to return
   };
 
   private lastDetectionLocation?: UserLocation;

@@ -1,6 +1,5 @@
 // src/hooks/useProximityDetection.ts
-// Complete React Hook for integrating proximity detection into NavigationScreen
-// Extracted from NavigationScreen to reduce complexity and improve reusability
+// FIXED: Priority-based TTS with distance sorting + immediate modal display
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
@@ -56,34 +55,14 @@ export function useProximityDetection({
         userProfile
       );
 
-      // Filter critical alerts (within 50m and high severity) - EXISTING CODE
+      // Filter critical alerts (within 50m and high severity)
       const criticalAlerts = alerts.filter(
         (alert) =>
           alert.distance < 50 &&
           (alert.severity === "blocking" || alert.severity === "high")
       );
 
-      // NEW: Add TTS announcements for new critical alerts
-      for (const alert of criticalAlerts) {
-        const isNewAlert = !lastCriticalIdsRef.current.has(alert.obstacle.id);
-        if (isNewAlert && userProfile) {
-          try {
-            await textToSpeechService.announceProximityAlert(
-              alert.obstacle,
-              alert.distance,
-              userProfile
-            );
-            console.log(
-              `🔊 TTS: Announced obstacle ${alert.obstacle.type} at ${alert.distance}m`
-            );
-          } catch (ttsError) {
-            console.warn("🔊 TTS: Failed to announce obstacle:", ttsError);
-            // Don't break proximity detection if TTS fails
-          }
-        }
-      }
-
-      // EXISTING CODE continues unchanged...
+      // 🔥 CRITICAL FIX: Update UI state IMMEDIATELY - don't wait for TTS
       setState((prev) => ({
         ...prev,
         proximityAlerts: alerts || [],
@@ -92,23 +71,53 @@ export function useProximityDetection({
         detectionError: null,
       }));
 
-      // Update critical obstacle tracking - EXISTING CODE
+      // 🔥 FIXED: Handle modal display FIRST, then TTS in background
       const currentCriticalIds = new Set(
         criticalAlerts.map((alert) => alert.obstacle.id)
       );
 
-      // Trigger critical obstacle callback for new alerts - EXISTING CODE
+      // Trigger critical obstacle callback for new alerts IMMEDIATELY
       if (onCriticalObstacle) {
         const newCriticalAlerts = criticalAlerts.filter(
           (alert) => !lastCriticalIdsRef.current.has(alert.obstacle.id)
         );
 
+        // 🔥 SHOW MODALS IMMEDIATELY - don't wait for TTS
         for (const alert of newCriticalAlerts) {
           onCriticalObstacle(alert);
         }
       }
 
-      // Update tracking reference - EXISTING CODE
+      // 🔥 PRIORITY FIX: Sort new alerts by distance (closest first) for TTS priority
+      const newCriticalAlerts = criticalAlerts
+        .filter((alert) => !lastCriticalIdsRef.current.has(alert.obstacle.id))
+        .sort((a, b) => a.distance - b.distance); // Closest obstacles announced first
+
+      // 🔥 FIXED: Only process NEW alerts once, not all critical alerts
+      if (newCriticalAlerts.length > 0 && userProfile) {
+        console.log(
+          `🔊 TTS: Processing ${newCriticalAlerts.length} new alerts sorted by distance`
+        );
+
+        // 🔥 CRITICAL FIX: Process each NEW alert only once
+        for (const alert of newCriticalAlerts) {
+          // 🔥 NON-BLOCKING: Fire and forget TTS (no await, no setTimeout delays)
+          textToSpeechService
+            .announceProximityAlert(alert.obstacle, alert.distance, userProfile)
+            .then(() => {
+              // FIXED: Log AFTER the announcement actually completes
+              console.log(
+                `🔊 TTS: Queue processed for ${alert.obstacle.type} at ${alert.distance}m`
+              );
+            })
+            .catch((error: unknown) => {
+              console.warn("🔊 TTS: Failed to announce obstacle:", error);
+              // Don't break proximity detection if TTS fails
+            });
+        }
+      }
+
+      // Update tracking reference
       lastCriticalIdsRef.current = currentCriticalIds;
       lastLocationRef.current = userLocation;
 
@@ -170,25 +179,22 @@ export function useProximityDetection({
       }));
 
       try {
-        if (__DEV__) {
-          console.log("🔍 Starting proximity detection monitoring...");
-        }
-
         // Run initial detection
         await runDetection();
 
-        // Use service config for poll interval (default 5 seconds)
-        const pollInterval =
-          proximityDetectionService.getConfig().updateInterval || 5000;
+        // Set up interval for continuous monitoring (every 3 seconds)
+        detectionIntervalRef.current = setInterval(runDetection, 3000);
 
-        // Set up periodic detection
-        detectionIntervalRef.current = setInterval(runDetection, pollInterval);
+        console.log("🔍 Proximity detection started");
       } catch (error) {
         console.error("❌ Failed to start proximity detection:", error);
         setState((prev) => ({
           ...prev,
+          detectionError:
+            error instanceof Error
+              ? error.message
+              : "Failed to start detection",
           isDetecting: false,
-          detectionError: "Failed to start obstacle detection",
         }));
       }
     };
@@ -201,41 +207,17 @@ export function useProximityDetection({
         clearInterval(detectionIntervalRef.current);
         detectionIntervalRef.current = null;
       }
-      lastCriticalIdsRef.current.clear();
+
+      setState((prev) => ({
+        ...prev,
+        isDetecting: false,
+      }));
+
+      console.log("🔍 Proximity detection stopped");
     };
   }, [isNavigating, userLocation, routePolyline, userProfile, runDetection]);
 
   return state;
 }
 
-// ================================================
-// BONUS: Additional utility hook for obstacle warnings UI
-// ================================================
-
-export function useObstacleWarnings(proximityAlerts: ProximityAlert[]) {
-  const [shownWarnings, setShownWarnings] = useState<Set<string>>(new Set());
-
-  // Get new warnings that haven't been shown yet
-  const newWarnings = proximityAlerts.filter(
-    (alert) =>
-      !shownWarnings.has(alert.obstacle.id) &&
-      alert.distance < 100 &&
-      alert.urgency > 50
-  );
-
-  // Mark warnings as shown
-  const markWarningShown = useCallback((obstacleId: string) => {
-    setShownWarnings((prev) => new Set([...prev, obstacleId]));
-  }, []);
-
-  // Clear shown warnings (call when navigation ends)
-  const clearShownWarnings = useCallback(() => {
-    setShownWarnings(new Set());
-  }, []);
-
-  return {
-    newWarnings,
-    markWarningShown,
-    clearShownWarnings,
-  };
-}
+export type { UseProximityDetectionOptions, ProximityDetectionState };

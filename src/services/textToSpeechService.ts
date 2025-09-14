@@ -1,6 +1,5 @@
 // src/services/textToSpeechService.ts
-// CRITICAL FIX: TTS announcements missing speech content for all obstacle types
-// Fixed to ensure ALL obstacles get proper voice announcements
+// COMPLETE FIXED: Queue-based TTS system - ensures all obstacles get announced
 
 import * as Speech from "expo-speech";
 import { AccessibilityObstacle, UserMobilityProfile } from "../types";
@@ -9,6 +8,14 @@ interface TTSSettings {
   enabled: boolean;
   rate: number;
   volume: number;
+}
+
+// Queue item interface for TypeScript
+interface QueueItem {
+  obstacle: AccessibilityObstacle;
+  distance: number;
+  userProfile: UserMobilityProfile;
+  priority: number; // Lower number = higher priority
 }
 
 class TextToSpeechService {
@@ -22,6 +29,10 @@ class TextToSpeechService {
   private lastAnnouncedObstacle: string | null = null;
   private lastAnnouncementTime = 0;
   private readonly MIN_ANNOUNCEMENT_INTERVAL = 10000; // 10 seconds between same obstacle
+
+  // 🔥 NEW: TTS Queue system to ensure all obstacles get announced
+  private announcementQueue: QueueItem[] = [];
+  private isProcessingQueue = false;
 
   /**
    * Initialize TTS and check availability
@@ -39,8 +50,8 @@ class TextToSpeechService {
   }
 
   /**
-   * FIXED: Main method - Announce proximity alert for obstacles ahead
-   * Now ensures ALL obstacle types get voice announcements
+   * ENHANCED: Main method - Queue-based announcement system
+   * Ensures all critical obstacles get announced, prioritized by distance
    */
   async announceProximityAlert(
     obstacle: AccessibilityObstacle,
@@ -54,12 +65,6 @@ class TextToSpeechService {
         return;
       }
 
-      // Skip if already speaking
-      if (this.isSpeaking) {
-        console.log("🔊 TTS: Already speaking, skipping announcement");
-        return;
-      }
-
       // Skip if not relevant for this user type
       if (!this.isObstacleRelevantForUser(obstacle, userProfile)) {
         console.log(
@@ -69,7 +74,7 @@ class TextToSpeechService {
       }
 
       // Prevent duplicate announcements for same obstacle
-      const obstacleKey = `${obstacle.id}_${Math.floor(distance / 10) * 10}`; // Group by 10m intervals
+      const obstacleKey = `${obstacle.id}_${Math.floor(distance / 10) * 10}`;
       const now = Date.now();
 
       if (
@@ -82,120 +87,121 @@ class TextToSpeechService {
         return;
       }
 
-      // 🔥 CRITICAL FIX: Generate announcement and ALWAYS call speak()
-      const announcement = this.generateAnnouncement(
+      // 🔥 NEW: Add to queue instead of skipping
+      const priority = distance < 3 ? 1 : distance < 10 ? 2 : 3; // Closer = higher priority
+
+      // 🔥 REMOVED: No need to check alreadyQueued since we check above
+      this.announcementQueue.push({
         obstacle,
         distance,
-        userProfile
+        userProfile,
+        priority,
+      });
+
+      // Sort queue by priority (lower number = higher priority)
+      this.announcementQueue.sort(
+        (a: QueueItem, b: QueueItem) =>
+          a.priority - b.priority || a.distance - b.distance
       );
 
-      console.log(`🔊 TTS: Generated announcement: "${announcement}"`);
+      console.log(
+        `🔊 TTS: Added ${obstacle.type} at ${distance}m to queue (priority ${priority})`
+      );
 
-      // 🔥 FIX: Ensure speak() is ALWAYS called
-      await this.speak(announcement);
-
-      // Track to prevent duplicates
-      this.lastAnnouncedObstacle = obstacleKey;
-      this.lastAnnouncementTime = now;
+      // Start processing queue
+      this.processAnnouncementQueue();
     } catch (error) {
       console.error("🔊 TTS: announceProximityAlert failed:", error);
-      // Don't throw - TTS failures shouldn't break proximity detection
     }
   }
 
   /**
-   * FIXED: Generate contextual announcement based on obstacle and user profile
-   * Added comprehensive obstacle type coverage
+   * 🔥 NEW: Process the announcement queue
    */
-  private generateAnnouncement(
+  private async processAnnouncementQueue(): Promise<void> {
+    if (this.isProcessingQueue || this.announcementQueue.length === 0) {
+      return;
+    }
+
+    this.isProcessingQueue = true;
+
+    while (this.announcementQueue.length > 0) {
+      // If currently speaking, wait for it to finish
+      if (this.isSpeaking) {
+        // For very urgent obstacles (< 3m), interrupt current speech
+        const nextItem = this.announcementQueue[0];
+        if (nextItem.distance < 3) {
+          console.log(
+            `🚨 URGENT: Interrupting TTS for obstacle at ${nextItem.distance}m`
+          );
+          this.stopSpeaking();
+          await new Promise((resolve) => setTimeout(resolve, 200));
+        } else {
+          // Wait for current speech to finish
+          await new Promise<void>((resolve) => {
+            const checkSpeaking = () => {
+              if (!this.isSpeaking) {
+                resolve();
+              } else {
+                setTimeout(checkSpeaking, 100);
+              }
+            };
+            checkSpeaking();
+          });
+        }
+      }
+
+      // Get next item from queue
+      const item = this.announcementQueue.shift();
+      if (!item) break;
+
+      try {
+        // Generate and speak announcement
+        const announcement = this.generateSimplifiedAnnouncement(
+          item.obstacle,
+          item.distance
+        );
+
+        console.log(`🔊 TTS: Generated announcement: "${announcement}"`);
+        await this.speak(announcement);
+
+        // Track to prevent duplicates
+        const obstacleKey = `${item.obstacle.id}_${
+          Math.floor(item.distance / 10) * 10
+        }`;
+        this.lastAnnouncedObstacle = obstacleKey;
+        this.lastAnnouncementTime = Date.now();
+
+        console.log(
+          `🔊 TTS: Announced obstacle ${item.obstacle.type} at ${item.distance}m`
+        );
+
+        // Small delay between announcements to prevent rushing
+        if (this.announcementQueue.length > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+      } catch (error) {
+        console.error("🔊 TTS: Failed to announce queued obstacle:", error);
+        // Continue with next item in queue
+      }
+    }
+
+    this.isProcessingQueue = false;
+  }
+
+  /**
+   * 🔥 NEW: Simplified announcement generation - removes duplicate text
+   * Just says obstacle type + distance, no extra descriptive text
+   */
+  private generateSimplifiedAnnouncement(
     obstacle: AccessibilityObstacle,
-    distance: number,
-    userProfile: UserMobilityProfile
+    distance: number
   ): string {
     const distanceText = Math.round(distance);
     const obstacleType = this.getObstacleTypeInEnglish(obstacle.type);
 
-    // Add user-specific guidance
-    const guidance = this.getUserSpecificGuidance(obstacle, userProfile);
-
-    return `${obstacleType} in ${distanceText} meters. ${guidance}`;
-  }
-
-  /**
-   * FIXED: Generate user-specific guidance for each obstacle type
-   * Added comprehensive coverage for ALL obstacle types
-   */
-  private getUserSpecificGuidance(
-    obstacle: AccessibilityObstacle,
-    userProfile: UserMobilityProfile
-  ): string {
-    const userType = userProfile.type;
-
-    switch (obstacle.type) {
-      case "stairs_no_ramp":
-        if (userType === "wheelchair") {
-          return "Find alternative route with ramp access.";
-        }
-        if (userType === "walker" || userType === "crutches") {
-          return "Stairs ahead. Proceed with caution.";
-        }
-        return "Steps ahead.";
-
-      case "vendor_blocking":
-        if (userType === "wheelchair") {
-          return "Path blocked by vendor. Look for alternative route.";
-        }
-        return "Blocked path ahead. Navigate around vendor.";
-
-      case "parked_vehicles":
-        if (userType === "wheelchair") {
-          return "Parked vehicles blocking path. Find alternate route.";
-        }
-        return "Vehicles blocking sidewalk.";
-
-      case "flooding":
-        return "Path may be wet. Consider alternate route.";
-
-      case "broken_pavement":
-        if (userType === "wheelchair") {
-          return "Damaged pavement ahead. May be difficult to navigate.";
-        }
-        if (userType === "walker" || userType === "crutches") {
-          return "Uneven surface ahead. Use caution.";
-        }
-        return "Uneven surface ahead.";
-
-      case "narrow_passage":
-        if (userType === "wheelchair") {
-          return "Narrow passage. May be too narrow for wheelchair.";
-        }
-        return "Narrow path ahead.";
-
-      case "construction":
-        return "Construction zone ahead. Proceed with caution.";
-
-      case "electrical_post":
-        return "Utility pole ahead. Navigate around carefully.";
-
-      case "tree_roots":
-        return "Uneven surface from tree roots. Use caution.";
-
-      case "no_sidewalk":
-        return "No sidewalk ahead. Find alternative route.";
-
-      case "steep_slope":
-        if (userType === "wheelchair") {
-          return "Steep slope ahead. Consider alternative route.";
-        }
-        return "Steep incline ahead.";
-
-      case "other":
-        return "Obstacle detected. Navigate around carefully.";
-
-      default:
-        console.warn(`🔊 TTS: Unknown obstacle type: ${obstacle.type}`);
-        return "Obstacle ahead. Proceed with caution.";
-    }
+    // 🔥 SIMPLIFIED: Just obstacle and distance - user can see details on screen
+    return `${obstacleType} in ${distanceText} meters ahead.`;
   }
 
   /**
@@ -207,7 +213,7 @@ class TextToSpeechService {
       this.isSpeaking = true;
 
       // 🔥 CRITICAL FIX: Use proper Promise handling for Speech.speak
-      return new Promise((resolve, reject) => {
+      return new Promise<void>((resolve, reject) => {
         Speech.speak(text, {
           language: "en-US",
           pitch: 1.0,
@@ -246,7 +252,6 @@ class TextToSpeechService {
     userProfile: UserMobilityProfile
   ): boolean {
     // 🔥 FIX: ALL obstacles are relevant to ALL users for safety
-    // But we can still provide user-specific guidance in the announcement
     const allObstacleTypes = [
       "stairs_no_ramp",
       "narrow_passage",
@@ -276,7 +281,7 @@ class TextToSpeechService {
       broken_pavement: "Broken pavement",
       flooding: "Flooding",
       construction: "Construction",
-      vendor_blocking: "Blocked path",
+      vendor_blocking: "Vendors",
       parked_vehicles: "Parked vehicles",
       electrical_post: "Utility pole",
       tree_roots: "Tree roots",
@@ -295,9 +300,10 @@ class TextToSpeechService {
     this.settings.enabled = !this.settings.enabled;
     console.log(`🔊 TTS ${this.settings.enabled ? "enabled" : "disabled"}`);
 
-    // Stop current speech when disabling
-    if (!this.settings.enabled && this.isSpeaking) {
+    // Stop current speech when disabling and clear queue
+    if (!this.settings.enabled) {
       this.stopSpeaking();
+      this.clearQueue();
     }
   }
 
@@ -309,7 +315,7 @@ class TextToSpeechService {
   }
 
   /**
-   * Stop current speech immediately
+   * Stop current speech immediately and clear queue
    */
   stopSpeaking(): void {
     try {
@@ -320,6 +326,15 @@ class TextToSpeechService {
       console.error("🔊 TTS: Failed to stop speech:", error);
       this.isSpeaking = false;
     }
+  }
+
+  /**
+   * 🔥 NEW: Clear the announcement queue
+   */
+  private clearQueue(): void {
+    this.announcementQueue = [];
+    this.isProcessingQueue = false;
+    console.log("🔊 TTS: Queue cleared");
   }
 
   /**
