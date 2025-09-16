@@ -75,6 +75,11 @@ interface FirebaseService {
       adminUser: AdminUser,
       notes?: string
     ) => Promise<void>;
+    // ADD THESE TWO MISSING METHODS:
+    getUserReports: (userId: string) => Promise<AccessibilityObstacle[]>;
+    getObstacleById: (
+      obstacleId: string
+    ) => Promise<AccessibilityObstacle | null>;
   };
 }
 
@@ -683,6 +688,164 @@ class SimpleFirebaseService implements FirebaseService {
       } catch (error: any) {
         console.error("Failed to update obstacle status:", error);
         throw new Error(`Failed to update obstacle: ${error.message}`);
+      }
+    },
+
+    getUserReports: async (
+      userId: string
+    ): Promise<AccessibilityObstacle[]> => {
+      await this.ensureInitialized();
+
+      const { collection, query, where, getDocs, orderBy } = await import(
+        "firebase/firestore"
+      );
+
+      try {
+        console.log("Getting reports for user:", userId);
+
+        const reportsQuery = query(
+          collection(this.db, "obstacles"),
+          where("reportedBy", "==", userId),
+          orderBy("reportedAt", "desc") // Most recent first
+        );
+
+        const querySnapshot = await getDocs(reportsQuery);
+        const reports: AccessibilityObstacle[] = [];
+
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+
+          // Convert Firestore timestamps to Date objects
+          const report: AccessibilityObstacle = {
+            id: data.id || doc.id,
+            location: data.location,
+            type: data.type,
+            severity: data.severity,
+            description: data.description,
+            reportedBy: data.reportedBy,
+            reportedAt: data.reportedAt?.toDate() || new Date(),
+            verified: data.verified || false,
+            status: data.status || "pending",
+            upvotes: data.upvotes || 0,
+            downvotes: data.downvotes || 0,
+            reportsCount: data.reportsCount || 1,
+            timePattern: data.timePattern || "permanent",
+            photoBase64: data.photoBase64,
+
+            // Optional timestamps
+            lastVerifiedAt: data.lastVerifiedAt?.toDate(),
+
+            // Admin fields
+            adminReported: data.adminReported,
+            adminRole: data.adminRole,
+            adminEmail: data.adminEmail,
+            autoVerified: data.autoVerified,
+
+            // Additional fields from your type
+            reviewedBy: data.reviewedBy,
+            reviewedAt: data.reviewedAt?.toDate(),
+            adminNotes: data.adminNotes,
+            confidenceScore: data.confidenceScore,
+          };
+
+          reports.push(report);
+        });
+
+        console.log(`Found ${reports.length} reports for user ${userId}`);
+        return reports;
+      } catch (error: any) {
+        console.error("Failed to get user reports:", error);
+        throw new Error(`Failed to load your reports: ${error.message}`);
+      }
+    },
+
+    getObstacleById: async (
+      obstacleId: string
+    ): Promise<AccessibilityObstacle | null> => {
+      await this.ensureInitialized();
+
+      const { collection, query, where, getDocs, doc, getDoc } = await import(
+        "firebase/firestore"
+      );
+
+      try {
+        // First try to get by document ID
+        const docRef = doc(this.db, "obstacles", obstacleId);
+        const docSnapshot = await getDoc(docRef);
+
+        if (docSnapshot.exists()) {
+          const data = docSnapshot.data();
+          return {
+            id: data.id || docSnapshot.id,
+            location: data.location,
+            type: data.type,
+            severity: data.severity,
+            description: data.description,
+            reportedBy: data.reportedBy,
+            reportedAt: data.reportedAt?.toDate() || new Date(),
+            verified: data.verified || false,
+            status: data.status || "pending",
+            upvotes: data.upvotes || 0,
+            downvotes: data.downvotes || 0,
+            reportsCount: data.reportsCount || 1,
+            timePattern: data.timePattern || "permanent",
+            photoBase64: data.photoBase64,
+            lastVerifiedAt: data.lastVerifiedAt?.toDate(),
+            adminReported: data.adminReported,
+            adminRole: data.adminRole,
+            adminEmail: data.adminEmail,
+            autoVerified: data.autoVerified,
+            reviewedBy: data.reviewedBy,
+            reviewedAt: data.reviewedAt?.toDate(),
+            adminNotes: data.adminNotes,
+            confidenceScore: data.confidenceScore,
+          };
+        }
+
+        // If not found by document ID, try querying by the 'id' field
+        const obstaclesQuery = query(
+          collection(this.db, "obstacles"),
+          where("id", "==", obstacleId)
+        );
+
+        const querySnapshot = await getDocs(obstaclesQuery);
+
+        if (!querySnapshot.empty) {
+          const docData = querySnapshot.docs[0];
+          const data = docData.data();
+
+          return {
+            id: data.id || docData.id,
+            location: data.location,
+            type: data.type,
+            severity: data.severity,
+            description: data.description,
+            reportedBy: data.reportedBy,
+            reportedAt: data.reportedAt?.toDate() || new Date(),
+            verified: data.verified || false,
+            status: data.status || "pending",
+            upvotes: data.upvotes || 0,
+            downvotes: data.downvotes || 0,
+            reportsCount: data.reportsCount || 1,
+            timePattern: data.timePattern || "permanent",
+            photoBase64: data.photoBase64,
+            lastVerifiedAt: data.lastVerifiedAt?.toDate(),
+            adminReported: data.adminReported,
+            adminRole: data.adminRole,
+            adminEmail: data.adminEmail,
+            autoVerified: data.autoVerified,
+            reviewedBy: data.reviewedBy,
+            reviewedAt: data.reviewedAt?.toDate(),
+            adminNotes: data.adminNotes,
+            confidenceScore: data.confidenceScore,
+          };
+        }
+
+        console.log("Obstacle not found:", obstacleId);
+        return null;
+      } catch (error: any) {
+        console.error("Failed to get obstacle by ID:", error);
+        throw new Error(`Failed to load report: ${error.message}`);
       }
     },
   };

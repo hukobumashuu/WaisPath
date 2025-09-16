@@ -99,9 +99,19 @@ export const CameraInterface: React.FC<CameraInterfaceProps> = ({
         skipProcessing: false,
       });
 
+      // FIXED: Check if photo exists before processing
+      if (!photo || !photo.uri) {
+        Alert.alert(
+          "❌ May Problema",
+          "Hindi nakuha ang larawan. Subukan ulit.\n(Photo capture failed. Please try again.)",
+          [{ text: "OK" }]
+        );
+        return;
+      }
+
       console.log("📸 Photo captured, processing...");
 
-      // Process photo (compress, save, validate)
+      // Process photo (compress, save, validate) - NOW SAFE
       const result = await cameraService.processPhoto(photo.uri);
 
       if (result.success && result.compressedPhoto) {
