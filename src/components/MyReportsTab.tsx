@@ -148,16 +148,28 @@ export const MyReportsTab: React.FC = () => {
     setIsRefreshing(false);
   }, [loadMyReports]);
 
-  // Navigate to report details - FIXED: Use correct navigation pattern
+  // FIXED: Navigate to report details using the root navigator
   const handleReportPress = (report: UserReport) => {
-    // For now, show alert - we'll implement ReportDetailsScreen later
-    Alert.alert(
-      "Report Details",
-      `${OBSTACLE_TYPE_LABELS[report.type] || report.type}\n\nStatus: ${
-        report.status || "pending"
-      }\n\nDescription: ${report.description}`,
-      [{ text: "OK" }]
-    );
+    try {
+      // Use the root navigator to navigate to ReportDetails
+      const rootNavigation = navigation.getParent();
+      if (rootNavigation) {
+        rootNavigation.navigate("ReportDetails", { reportId: report.id });
+      } else {
+        // Fallback to regular navigation
+        navigation.navigate("ReportDetails", { reportId: report.id });
+      }
+    } catch (error) {
+      console.error("Navigation error:", error);
+      // Fallback to showing details in alert if navigation fails
+      Alert.alert(
+        "Report Details",
+        `${OBSTACLE_TYPE_LABELS[report.type] || report.type}\n\nStatus: ${
+          report.status || "pending"
+        }\n\nDescription: ${report.description}`,
+        [{ text: "OK" }]
+      );
+    }
   };
 
   // Generate timeline for report status
@@ -348,7 +360,7 @@ export const MyReportsTab: React.FC = () => {
           style={styles.reportsScrollView}
           contentContainerStyle={[
             styles.reportsContainer,
-            { paddingBottom: insets.bottom + 20 },
+            { paddingBottom: insets.bottom + 100 }, // Increased padding to clear tab bar
           ]}
           showsVerticalScrollIndicator={false}
           refreshControl={

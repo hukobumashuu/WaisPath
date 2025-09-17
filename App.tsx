@@ -17,11 +17,13 @@ import HomeScreen from "./src/screens/HomeScreen";
 import NavigationScreen from "./src/screens/NavigationScreen";
 import UserProfileScreen from "./src/screens/UserProfileScreen";
 import ReportScreen from "./src/screens/ReportScreen";
+import { ReportDetailsScreen } from "./src/components/ReportDetailsScreen";
+
 // Store
 import { useUserProfile } from "./src/stores/userProfileStore";
 // Auth coordinator
 import { initializeAuthCoordinator } from "./src/services/AuthStateCoordinator";
-// 🔥 NEW: Mobile admin logger
+// Mobile admin logger
 import { logAdminAppLaunch } from "./src/services/mobileAdminLogger";
 
 // Temporary placeholder for future screens
@@ -121,7 +123,7 @@ const MainTabNavigator = () => {
 export default function App() {
   const { profile, isFirstTime, isLoading, loadProfile } = useUserProfile();
   const [appReady, setAppReady] = useState(false);
-  // 🔥 NEW: Track if we've logged app launch to prevent duplicates
+  // Track if we've logged app launch to prevent duplicates
   const appLaunchLoggedRef = useRef(false);
 
   useEffect(() => {
@@ -137,7 +139,7 @@ export default function App() {
         await loadProfile();
         console.log("📱 App initialized with profile system");
 
-        // 🔥 NEW: Log admin app launch after auth is ready
+        // Log admin app launch after auth is ready
         if (!appLaunchLoggedRef.current) {
           // Add a small delay to ensure auth state is fully settled
           setTimeout(async () => {
@@ -199,10 +201,22 @@ export default function App() {
           // First-time users or users without cloud profiles see onboarding
           <Stack.Navigator screenOptions={{ headerShown: false }}>
             <Stack.Screen name="Onboarding" component={UserProfileScreen} />
+            <Stack.Screen
+              name="ReportDetails"
+              component={ReportDetailsScreen}
+              options={{ headerShown: false }}
+            />
           </Stack.Navigator>
         ) : (
           // Existing users with cloud profiles OR users who just logged in go to main app
-          <MainTabNavigator />
+          <Stack.Navigator screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="MainTabs" component={MainTabNavigator} />
+            <Stack.Screen
+              name="ReportDetails"
+              component={ReportDetailsScreen}
+              options={{ headerShown: false }}
+            />
+          </Stack.Navigator>
         )}
       </NavigationContainer>
     </SafeAreaProvider>

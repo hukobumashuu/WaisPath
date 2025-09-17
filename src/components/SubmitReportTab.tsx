@@ -1,5 +1,5 @@
 // src/components/SubmitReportTab.tsx
-// CLEAN: Complete reporting functionality as a tab component
+// SIMPLIFIED: Android-focused reporting with fixed bottom navigation
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
@@ -28,11 +28,11 @@ import { ObstacleType } from "../types";
 import { CameraInterface } from "./CameraInterface";
 import { CompressedPhoto } from "../services/cameraService";
 
-// Import separated styles
+// Import dedicated styles for SubmitReportTab
 import {
-  reportScreenStyles as styles,
+  submitReportTabStyles as styles,
   COLORS,
-} from "../styles/reportScreenStyles";
+} from "../styles/submitReportTabStyles";
 
 const OBSTACLE_TYPES = [
   {
@@ -129,6 +129,9 @@ export const SubmitReportTab: React.FC<SubmitReportTabProps> = ({
   const { width: screenWidth } = useWindowDimensions();
   const isSmallScreen = screenWidth < 375;
 
+  // Calculate tab bar height for Android
+  const tabBarHeight = 60 + insets.bottom;
+
   // Form state
   const [currentStep, setCurrentStep] = useState<ReportStep>("select");
   const [selectedObstacle, setSelectedObstacle] = useState<ObstacleType | null>(
@@ -193,7 +196,7 @@ export const SubmitReportTab: React.FC<SubmitReportTabProps> = ({
     setCurrentStep("details");
   };
 
-  // Enhanced obstacle report submission with automatic form reset
+  // Enhanced obstacle report submission
   const handleSubmitReport = async () => {
     if (!selectedObstacle || !selectedSeverity || !location) {
       Alert.alert(
@@ -216,13 +219,11 @@ export const SubmitReportTab: React.FC<SubmitReportTabProps> = ({
         timePattern: "permanent" as const,
       };
 
-      // Submit obstacle report using enhanced Firebase service
       const result = await enhancedFirebaseService.reportObstacleEnhanced(
         obstacleData
       );
 
       if (result.success) {
-        // Log admin obstacle report if user is admin
         try {
           await logAdminObstacleReport(
             result.obstacleId || "unknown_id",
@@ -232,25 +233,22 @@ export const SubmitReportTab: React.FC<SubmitReportTabProps> = ({
           );
         } catch (logError) {
           console.warn("Failed to log admin obstacle report:", logError);
-          // Don't fail the report submission if logging fails
         }
 
-        // Automatically reset form after successful submission
         Alert.alert("✅ Na-report na!", result.message, [
           {
             text: "OK",
             onPress: () => {
-              resetForm(); // Reset to step 1
+              resetForm();
               Vibration.vibrate([100, 50, 100]);
             },
           },
         ]);
       } else {
-        // Handle rate limits and other failures
         if (result.rateLimitInfo && !result.rateLimitInfo.allowed) {
           enhancedFirebaseService.showRateLimitAlert(
             result.rateLimitInfo,
-            () => navigation.navigate("Profile"), // Navigate to registration
+            () => navigation.navigate("Profile"),
             undefined
           );
         } else {
@@ -281,7 +279,11 @@ export const SubmitReportTab: React.FC<SubmitReportTabProps> = ({
   };
 
   const renderObstacleSelection = () => (
-    <ScrollView style={styles.stepContent} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      style={styles.stepContent}
+      contentContainerStyle={{ paddingBottom: 140 }} // Consistent padding
+      showsVerticalScrollIndicator={false}
+    >
       <Text style={[styles.stepTitle, { fontSize: isSmallScreen ? 20 : 24 }]}>
         Anong uri ng hadlang?
       </Text>
@@ -297,23 +299,61 @@ export const SubmitReportTab: React.FC<SubmitReportTabProps> = ({
               styles.obstacleCard,
               selectedObstacle === obstacle.key && {
                 borderColor: obstacle.color,
-                backgroundColor: `${obstacle.color}10`,
+                backgroundColor: COLORS.white, // Keep it clean white
+                borderWidth: 3, // Thicker border for selected
+                shadowColor: obstacle.color, // Add colored shadow
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.3,
+                shadowRadius: 6,
+                elevation: 6,
               },
             ]}
             onPress={() => handleObstacleSelect(obstacle.key)}
             activeOpacity={0.8}
           >
             <View
-              style={[styles.obstacleIcon, { backgroundColor: obstacle.color }]}
+              style={[
+                styles.obstacleIcon,
+                {
+                  backgroundColor: obstacle.color,
+                  // Add glow effect for selected
+                  ...(selectedObstacle === obstacle.key && {
+                    shadowColor: obstacle.color,
+                    shadowOffset: { width: 0, height: 0 },
+                    shadowOpacity: 0.5,
+                    shadowRadius: 8,
+                    elevation: 8,
+                  }),
+                },
+              ]}
             >
               <Ionicons name={obstacle.icon} size={24} color={COLORS.white} />
             </View>
             <View style={styles.obstacleTextContainer}>
-              <Text style={styles.obstacleTitle}>{obstacle.labelFil}</Text>
+              <Text
+                style={[
+                  styles.obstacleTitle,
+                  selectedObstacle === obstacle.key && {
+                    color: obstacle.color,
+                    fontWeight: "700",
+                  },
+                ]}
+              >
+                {obstacle.labelFil}
+              </Text>
               <Text style={styles.obstacleDescription}>
                 {obstacle.description}
               </Text>
             </View>
+            {/* Add checkmark for selected */}
+            {selectedObstacle === obstacle.key && (
+              <Ionicons
+                name="checkmark-circle"
+                size={24}
+                color={obstacle.color}
+                style={{ marginLeft: 8 }}
+              />
+            )}
           </TouchableOpacity>
         ))}
       </View>
@@ -321,7 +361,11 @@ export const SubmitReportTab: React.FC<SubmitReportTabProps> = ({
   );
 
   const renderPhotoCapture = () => (
-    <View style={styles.stepContent}>
+    <ScrollView
+      style={styles.stepContent}
+      contentContainerStyle={{ paddingBottom: 140 }} // Increased padding for buttons
+      showsVerticalScrollIndicator={false}
+    >
       <Text style={[styles.stepTitle, { fontSize: isSmallScreen ? 20 : 24 }]}>
         Kumuha ng Photo
       </Text>
@@ -365,11 +409,15 @@ export const SubmitReportTab: React.FC<SubmitReportTabProps> = ({
           </TouchableOpacity>
         </View>
       )}
-    </View>
+    </ScrollView>
   );
 
   const renderDetailsInput = () => (
-    <ScrollView style={styles.stepContent} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      style={styles.stepContent}
+      contentContainerStyle={{ paddingBottom: 140 }} // Increased padding for buttons
+      showsVerticalScrollIndicator={false}
+    >
       <Text style={[styles.stepTitle, { fontSize: isSmallScreen ? 20 : 24 }]}>
         Mga Detalye
       </Text>
@@ -387,16 +435,39 @@ export const SubmitReportTab: React.FC<SubmitReportTabProps> = ({
               styles.severityCard,
               selectedSeverity === severity.key && {
                 borderColor: severity.color,
-                backgroundColor: `${severity.color}15`,
+                backgroundColor: COLORS.white, // Keep it clean white, just change border
+                borderWidth: 3, // Thicker border for selected state
               },
             ]}
             onPress={() => setSelectedSeverity(severity.key)}
           >
             <View
-              style={[styles.severityDot, { backgroundColor: severity.color }]}
+              style={[
+                styles.severityDot,
+                {
+                  backgroundColor: severity.color,
+                  // Add a glow effect for selected
+                  ...(selectedSeverity === severity.key && {
+                    shadowColor: severity.color,
+                    shadowOffset: { width: 0, height: 0 },
+                    shadowOpacity: 0.5,
+                    shadowRadius: 4,
+                    elevation: 4,
+                  }),
+                },
+              ]}
             />
             <View style={styles.severityTextContainer}>
-              <Text style={styles.severityTitle}>{severity.labelFil}</Text>
+              <Text
+                style={[
+                  styles.severityTitle,
+                  selectedSeverity === severity.key && {
+                    color: severity.color,
+                  },
+                ]}
+              >
+                {severity.labelFil}
+              </Text>
               <Text style={styles.severityDescription}>
                 {severity.description}
               </Text>
@@ -453,18 +524,21 @@ export const SubmitReportTab: React.FC<SubmitReportTabProps> = ({
       </View>
 
       {/* Step Content */}
-      {renderStepContent()}
+      <View style={{ flex: 1 }}>{renderStepContent()}</View>
 
-      {/* Navigation Buttons */}
-      <View
-        style={[
-          styles.navigationButtons,
-          { paddingBottom: insets.bottom + 16 },
-        ]}
-      >
-        {currentStep !== "select" && (
+      {/* Fixed Navigation Buttons - Only show on steps 2 and 3 */}
+      {currentStep !== "select" && (
+        <View
+          style={[
+            styles.navigationButtons,
+            {
+              paddingBottom: Math.max(insets.bottom + 16, 24), // Ensure it's always above tab bar
+              minHeight: 80, // Minimum height for buttons
+            },
+          ]}
+        >
           <TouchableOpacity
-            style={[styles.navButton, styles.backButton]}
+            style={styles.backButton}
             onPress={() => {
               if (currentStep === "details") {
                 setCurrentStep("photo");
@@ -476,27 +550,34 @@ export const SubmitReportTab: React.FC<SubmitReportTabProps> = ({
             <Ionicons name="chevron-back" size={20} color={COLORS.muted} />
             <Text style={styles.backButtonText}>Back</Text>
           </TouchableOpacity>
-        )}
 
-        {currentStep === "details" && (
-          <TouchableOpacity
-            style={[
-              styles.navButton,
-              styles.submitButton,
-              {
-                backgroundColor: isSubmitting ? COLORS.muted : COLORS.softBlue,
-              },
-            ]}
-            onPress={handleSubmitReport}
-            disabled={isSubmitting || !selectedSeverity}
-          >
-            <Text style={styles.submitButtonText}>
-              {isSubmitting ? "Nag-i-submit..." : "I-submit Report"}
-            </Text>
-            <Ionicons name="checkmark-circle" size={20} color={COLORS.white} />
-          </TouchableOpacity>
-        )}
-      </View>
+          {currentStep === "details" && (
+            <TouchableOpacity
+              style={[
+                styles.submitButton,
+                {
+                  backgroundColor: isSubmitting
+                    ? COLORS.muted
+                    : COLORS.softBlue,
+                  opacity: !selectedSeverity || isSubmitting ? 0.6 : 1,
+                },
+              ]}
+              onPress={handleSubmitReport}
+              disabled={isSubmitting || !selectedSeverity}
+            >
+              <Text style={styles.submitButtonText}>
+                {isSubmitting ? "Nag-i-submit..." : "I-submit Report"}
+              </Text>
+              <Ionicons
+                name={isSubmitting ? "hourglass" : "checkmark-circle"}
+                size={20}
+                color={COLORS.white}
+                style={{ marginLeft: 8 }}
+              />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
 
       {/* Camera Modal */}
       <Modal

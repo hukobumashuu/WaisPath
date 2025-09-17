@@ -1,5 +1,5 @@
 // src/screens/ReportDetailsScreen.tsx
-// FIXED: Detailed view of user's report with status timeline (like the mockup image)
+// IMPROVED: Detailed view of user's report with status timeline and isolated styles
 
 import React, { useState, useEffect } from "react";
 import {
@@ -10,6 +10,7 @@ import {
   ScrollView,
   Alert,
   useWindowDimensions,
+  ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -21,11 +22,11 @@ import { firebaseServices } from "../services/firebase";
 // Types
 import { AccessibilityObstacle } from "../types";
 
-// Styles
+// Isolated Styles
 import {
-  reportScreenStyles as styles,
+  reportDetailsStyles as styles,
   COLORS,
-} from "../styles/reportScreenStyles";
+} from "../styles/reportDetailsStyles";
 
 interface RouteParams {
   reportId: string;
@@ -42,7 +43,7 @@ interface TimelineEvent {
   isCompleted: boolean;
 }
 
-// FIXED: Complete obstacle type labels (same as MyReportsTab)
+// Complete obstacle type labels
 const OBSTACLE_TYPE_LABELS = {
   vendor_blocking: "May Nagtitinda",
   parked_vehicles: "Nakaharang na Sasakyan",
@@ -90,8 +91,9 @@ export const ReportDetailsScreen: React.FC = () => {
         );
 
         if (!reportData) {
-          Alert.alert("Error", "Report not found");
-          navigation.goBack();
+          Alert.alert("Error", "Report not found", [
+            { text: "OK", onPress: () => navigation.goBack() },
+          ]);
           return;
         }
 
@@ -99,8 +101,9 @@ export const ReportDetailsScreen: React.FC = () => {
         setTimeline(generateTimeline(reportData));
       } catch (error) {
         console.error("Failed to load report details:", error);
-        Alert.alert("Error", "Failed to load report details");
-        navigation.goBack();
+        Alert.alert("Error", "Failed to load report details", [
+          { text: "OK", onPress: () => navigation.goBack() },
+        ]);
       } finally {
         setIsLoading(false);
       }
@@ -109,7 +112,7 @@ export const ReportDetailsScreen: React.FC = () => {
     loadReportDetails();
   }, [reportId, navigation]);
 
-  // Generate timeline based on report status (matching mockup design)
+  // Generate timeline based on report status
   const generateTimeline = (
     reportData: AccessibilityObstacle
   ): TimelineEvent[] => {
@@ -121,7 +124,8 @@ export const ReportDetailsScreen: React.FC = () => {
       status: "submitted",
       timestamp: reportData.reportedAt,
       title: "Report received!",
-      description: "We'll update you soon.",
+      description:
+        "Your accessibility report has been successfully submitted to our system.",
       icon: "checkmark-circle",
       color: COLORS.success,
       isCompleted: true,
@@ -135,9 +139,9 @@ export const ReportDetailsScreen: React.FC = () => {
         timestamp:
           reportData.lastVerifiedAt ||
           new Date(reportData.reportedAt.getTime() + 24 * 60 * 60 * 1000),
-        title: "Your report is being reviewed.",
+        title: "Report under review",
         description:
-          "The team may reach out to confirm or request more details if needed.",
+          "Our accessibility team is reviewing your report and may reach out for additional details.",
         icon: "search",
         color: COLORS.softBlue,
         isCompleted:
@@ -152,30 +156,32 @@ export const ReportDetailsScreen: React.FC = () => {
         status: "verified",
         timestamp: new Date(
           reportData.reportedAt.getTime() + 2 * 24 * 60 * 60 * 1000
-        ), // +2 days
-        title: "We're working on the issue.",
-        description: "Issue is being addressed by the relevant team.",
+        ),
+        title: "Issue being addressed",
+        description:
+          "The relevant team has been notified and is working on resolving this accessibility issue.",
         icon: "construct",
         color: COLORS.warning,
         isCompleted: true,
       });
     }
 
-    // 4. Resolved (if status is resolved) - FIXED: Use lastVerifiedAt instead of resolvedAt
+    // 4. Resolved (if status is resolved)
     if (reportData.status === "resolved") {
       events.push({
         id: "resolved",
         status: "resolved",
         timestamp: reportData.lastVerifiedAt || new Date(),
         title: "Issue resolved!",
-        description: "Thank you for helping make Pasig more accessible.",
+        description:
+          "Thank you for helping make Pasig more accessible for persons with disabilities.",
         icon: "checkmark-done-circle",
         color: COLORS.success,
         isCompleted: true,
       });
     }
 
-    return events.reverse(); // Most recent first (matching mockup)
+    return events.reverse(); // Most recent first
   };
 
   const formatDate = (date: Date) => {
@@ -202,7 +208,7 @@ export const ReportDetailsScreen: React.FC = () => {
     if (!report) return null;
 
     const statusConfig = {
-      pending: { label: "Pending", color: COLORS.warning },
+      pending: { label: "Pending Review", color: COLORS.warning },
       verified: { label: "Under Review", color: COLORS.softBlue },
       resolved: { label: "Resolved", color: COLORS.success },
       false_report: { label: "Rejected", color: COLORS.muted },
@@ -224,21 +230,40 @@ export const ReportDetailsScreen: React.FC = () => {
     );
   };
 
+  // Loading state
   if (isLoading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <Text>Loading report details...</Text>
+          <ActivityIndicator size="large" color={COLORS.softBlue} />
+          <Text style={styles.loadingText}>Loading report details...</Text>
         </View>
       </SafeAreaView>
     );
   }
 
+  // Error state
   if (!report) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.errorContainer}>
-          <Text>Report not found</Text>
+          <Ionicons name="alert-circle" size={64} color={COLORS.error} />
+          <Text style={styles.errorText}>
+            Report not found or could not be loaded
+          </Text>
+          <TouchableOpacity
+            style={{
+              marginTop: 16,
+              padding: 12,
+              backgroundColor: COLORS.softBlue,
+              borderRadius: 8,
+            }}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={{ color: COLORS.white, fontWeight: "600" }}>
+              Go Back
+            </Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -246,11 +271,17 @@ export const ReportDetailsScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.detailsHeader}>
+      {/* Header with proper safe area */}
+      <View
+        style={[
+          styles.detailsHeader,
+          { paddingTop: Math.max(insets.top + 10, 20) },
+        ]}
+      >
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => navigation.goBack()}
+          activeOpacity={0.7}
         >
           <Ionicons name="chevron-back" size={24} color={COLORS.slate} />
         </TouchableOpacity>
@@ -276,7 +307,7 @@ export const ReportDetailsScreen: React.FC = () => {
         {/* Report Summary Card */}
         <View style={styles.reportSummaryCard}>
           <View style={styles.reportSummaryHeader}>
-            <View>
+            <View style={{ flex: 1 }}>
               <Text style={styles.reportSummaryType}>
                 {OBSTACLE_TYPE_LABELS[report.type] || report.type}
               </Text>
@@ -289,17 +320,18 @@ export const ReportDetailsScreen: React.FC = () => {
 
           {/* Severity */}
           <View style={styles.reportSummaryRow}>
-            <Text style={styles.reportSummaryLabel}>Severity:</Text>
+            <Text style={styles.reportSummaryLabel}>Severity Level</Text>
             <Text style={styles.reportSummaryValue}>
               {SEVERITY_LABELS[report.severity] ||
-                report.severity?.toUpperCase()}
+                report.severity?.toUpperCase() ||
+                "Not specified"}
             </Text>
           </View>
 
           {/* Description */}
           {report.description && (
             <View style={styles.reportSummaryRow}>
-              <Text style={styles.reportSummaryLabel}>Description:</Text>
+              <Text style={styles.reportSummaryLabel}>Description</Text>
               <Text style={styles.reportSummaryDescription}>
                 {report.description}
               </Text>
@@ -308,8 +340,10 @@ export const ReportDetailsScreen: React.FC = () => {
 
           {/* Location */}
           <View style={styles.reportSummaryRow}>
-            <Text style={styles.reportSummaryLabel}>Location:</Text>
-            <Text style={styles.reportSummaryValue}>
+            <Text style={styles.reportSummaryLabel}>Location Coordinates</Text>
+            <Text
+              style={[styles.reportSummaryValue, { fontFamily: "monospace" }]}
+            >
               {report.location.latitude.toFixed(6)},{" "}
               {report.location.longitude.toFixed(6)}
             </Text>
@@ -318,12 +352,12 @@ export const ReportDetailsScreen: React.FC = () => {
 
         {/* Report Timeline */}
         <View style={styles.timelineSection}>
-          <Text style={styles.timelineSectionTitle}>Report Timeline</Text>
+          <Text style={styles.timelineSectionTitle}>Report Progress</Text>
 
           <View style={styles.timelineContainer}>
             {timeline.map((event, index) => (
               <View key={event.id} style={styles.timelineItem}>
-                {/* Timeline Line */}
+                {/* Timeline Icon and Line */}
                 <View style={styles.timelineLineContainer}>
                   <View
                     style={[
@@ -331,14 +365,14 @@ export const ReportDetailsScreen: React.FC = () => {
                       {
                         backgroundColor: event.isCompleted
                           ? event.color
-                          : COLORS.muted + "40",
+                          : COLORS.lightGray,
                         borderColor: event.color,
                       },
                     ]}
                   >
                     <Ionicons
                       name={event.icon}
-                      size={16}
+                      size={20}
                       color={event.isCompleted ? COLORS.white : COLORS.muted}
                     />
                   </View>
@@ -348,7 +382,7 @@ export const ReportDetailsScreen: React.FC = () => {
                         styles.timelineLine,
                         {
                           backgroundColor: event.isCompleted
-                            ? event.color
+                            ? event.color + "60"
                             : COLORS.muted + "40",
                         },
                       ]}
@@ -385,7 +419,6 @@ export const ReportDetailsScreen: React.FC = () => {
                   </View>
 
                   <Text style={styles.timelineEventTitle}>{event.title}</Text>
-
                   <Text style={styles.timelineEventDescription}>
                     {event.description}
                   </Text>
@@ -395,26 +428,40 @@ export const ReportDetailsScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* Additional Actions */}
+        {/* Additional Information Section */}
         <View style={styles.actionsSection}>
-          <TouchableOpacity
-            style={[styles.secondaryButton, { borderColor: COLORS.softBlue }]}
-            onPress={() => {
-              // Navigate to map location
-              Alert.alert(
-                "Feature Coming Soon",
-                "View on map feature will be available in the next update."
-              );
-            }}
-          >
-            <Ionicons name="map" size={20} color={COLORS.softBlue} />
+          <Text style={styles.actionsSectionTitle}>Report Information</Text>
+
+          <View style={styles.reportSummaryRow}>
+            <Text style={styles.reportSummaryLabel}>Report ID</Text>
             <Text
-              style={[styles.secondaryButtonText, { color: COLORS.softBlue }]}
+              style={[
+                styles.reportSummaryValue,
+                { fontFamily: "monospace", fontSize: 14 },
+              ]}
             >
-              View on Map
+              {report.id}
             </Text>
-          </TouchableOpacity>
+          </View>
+
+          {report.reportedBy && (
+            <View style={styles.reportSummaryRow}>
+              <Text style={styles.reportSummaryLabel}>Reported By</Text>
+              <Text style={styles.reportSummaryValue}>
+                User ID: {report.reportedBy.substring(0, 8)}...
+              </Text>
+            </View>
+          )}
+
+          <View style={styles.reportSummaryRow}>
+            <Text style={styles.reportSummaryLabel}>Last Updated</Text>
+            <Text style={styles.reportSummaryValue}>
+              {formatFullDate(report.lastVerifiedAt || report.reportedAt)}
+            </Text>
+          </View>
         </View>
+
+        <View style={styles.spacer} />
       </ScrollView>
     </SafeAreaView>
   );
