@@ -1,5 +1,6 @@
 // src/hooks/useRouteCalculation.ts
-// FINAL FIX: Corrected method names and proper typing
+// SIMPLIFIED: Updated to use SimpleRouteComparison - NO MORE COMPLEX SCORING!
+// Clean interface that just shows obstacle counts to users
 
 import { useState, useCallback } from "react";
 import { Alert, Vibration } from "react-native";
@@ -9,19 +10,46 @@ import {
   UserMobilityProfile,
   AccessibilityObstacle,
 } from "../types";
-import { routeAnalysisService } from "../services/routeAnalysisService";
-import { sidewalkRouteAnalysisService } from "../services/sidewalkRouteAnalysisService";
+import {
+  routeAnalysisService,
+  SimpleRouteComparison,
+} from "../services/routeAnalysisService";
 import { routeObstacleService } from "../services/routeObstacleService";
 import { decodePolyline } from "../utils/mapUtils";
 import { SAMPLE_POIS } from "../constants/navigationConstants";
 
+// SIMPLIFIED: Clean state interface - no more complex scoring data!
 interface RouteCalculationState {
-  routeAnalysis: any;
+  routeAnalysis: SimpleUIRouteAnalysis | null; // Simplified for UI
   isCalculating: boolean;
   selectedDestination: UserLocation | null;
   destinationName: string;
-  routeObstacles: AccessibilityObstacle[];
-  nearbyObstacles: AccessibilityObstacle[];
+  routeObstacles: AccessibilityObstacle[]; // All obstacles from both routes
+  nearbyObstacles: AccessibilityObstacle[]; // Additional context obstacles
+}
+
+// SIMPLIFIED: What the UI actually needs - clean and simple!
+interface SimpleUIRouteAnalysis {
+  fastestRoute: {
+    polyline: UserLocation[];
+    duration: number; // seconds
+    distance: number; // meters
+    obstacleCount: number;
+    obstacles: AccessibilityObstacle[];
+  };
+  clearestRoute: {
+    polyline: UserLocation[];
+    duration: number; // seconds
+    distance: number; // meters
+    obstacleCount: number;
+    obstacles: AccessibilityObstacle[];
+  };
+  summary: {
+    recommendation: string; // Simple text for users
+    timeDifference: number; // seconds between routes
+    obstacleDifference: number; // obstacle count difference
+    fastestIsAlsoClearest: boolean; // Perfect scenario flag
+  };
 }
 
 interface UseRouteCalculationOptions {
@@ -84,22 +112,19 @@ export function useRouteCalculation({
       }));
 
       try {
-        console.log(
-          "🗺️ Calculating unified routes from current location to",
-          destName + "..."
-        );
+        console.log("🗺️ Calculating SIMPLIFIED routes to", destName + "...");
 
-        // Use the correct method name from RouteAnalysisService
+        // Use our new simplified route analysis service!
         const analysis = await routeAnalysisService.analyzeRoutes(
           location,
           destLocation,
           profile
         );
 
-        // Vibration feedback on completion
+        // Success vibration feedback
         Vibration.vibrate([100, 50, 100]);
 
-        if (!analysis || !analysis.fastestRoute || !analysis.accessibleRoute) {
+        if (!analysis || !analysis.fastestRoute || !analysis.clearestRoute) {
           Alert.alert(
             "Route Error",
             "Could not find suitable routes. Please try a different destination."
@@ -113,77 +138,93 @@ export function useRouteCalculation({
           return;
         }
 
-        // Extract obstacles from the analysis
+        console.log("✅ Got simplified route analysis!");
+        console.log(
+          `🚀 Fastest: ${Math.round(
+            analysis.fastestRoute.googleRoute.duration / 60
+          )}min, ${analysis.fastestRoute.obstacleCount} obstacles`
+        );
+        console.log(
+          `🛡️ Clearest: ${Math.round(
+            analysis.clearestRoute.googleRoute.duration / 60
+          )}min, ${analysis.clearestRoute.obstacleCount} obstacles`
+        );
+
+        // Extract all obstacles for map display
         const routeObstacles: AccessibilityObstacle[] = [
-          ...(analysis.fastestRoute.obstacles || []),
-          ...(analysis.accessibleRoute.obstacles || []),
+          ...analysis.fastestRoute.obstacles,
+          ...analysis.clearestRoute.obstacles,
         ];
 
-        // Get additional nearby obstacles for context
+        // Remove duplicates by ID
+        const deduplicatedObstacles = routeObstacles.filter(
+          (obstacle, index, self) =>
+            index === self.findIndex((t) => t.id === obstacle.id)
+        );
+
+        // Get additional nearby obstacles for context (optional)
         let nearbyObstacles: AccessibilityObstacle[] = [];
         try {
-          // Build polylines from google routes
-          const fastestPolyline =
-            analysis.fastestRoute.googleRoute?.polyline || [];
-          const accessiblePolyline =
-            analysis.accessibleRoute.googleRoute?.polyline || [];
+          const fastestPolyline = await convertRouteToPolyline(
+            analysis.fastestRoute.googleRoute
+          );
+          const clearestPolyline = await convertRouteToPolyline(
+            analysis.clearestRoute.googleRoute
+          );
 
+          // FIX: Use the interface that routeObstacleService expects (accessibleRoute)
           nearbyObstacles = await routeObstacleService.getRelevantObstacles(
             location,
             {
               fastestRoute: { polyline: fastestPolyline },
-              accessibleRoute: { polyline: accessiblePolyline },
+              accessibleRoute: { polyline: clearestPolyline }, // Use accessibleRoute name for compatibility
             }
           );
         } catch (obstacleError) {
           console.warn("Could not load nearby obstacles:", obstacleError);
         }
 
-        // Convert the analysis to the format expected by the UI
-        const unifiedAnalysis = {
+        // Convert to clean UI format - NO MORE COMPLEX DATA!
+        const cleanUIAnalysis: SimpleUIRouteAnalysis = {
           fastestRoute: {
-            polyline: Array.isArray(analysis.fastestRoute.googleRoute?.polyline)
-              ? analysis.fastestRoute.googleRoute.polyline
-              : typeof analysis.fastestRoute.googleRoute?.polyline === "string"
-              ? decodePolyline(analysis.fastestRoute.googleRoute.polyline)
-              : [location, destLocation],
-            duration: analysis.fastestRoute.googleRoute?.duration || 600,
-            distance: analysis.fastestRoute.googleRoute?.distance || 1000,
-            grade: analysis.fastestRoute.accessibilityScore?.grade || "B",
-            obstacles: analysis.fastestRoute.obstacles || [],
+            polyline: await convertRouteToPolyline(
+              analysis.fastestRoute.googleRoute
+            ),
+            duration: analysis.fastestRoute.googleRoute.duration,
+            distance: analysis.fastestRoute.googleRoute.distance,
+            obstacleCount: analysis.fastestRoute.obstacleCount,
+            obstacles: analysis.fastestRoute.obstacles,
           },
-          accessibleRoute: {
-            polyline: Array.isArray(
-              analysis.accessibleRoute.googleRoute?.polyline
-            )
-              ? analysis.accessibleRoute.googleRoute.polyline
-              : typeof analysis.accessibleRoute.googleRoute?.polyline ===
-                "string"
-              ? decodePolyline(analysis.accessibleRoute.googleRoute.polyline)
-              : [location, destLocation],
-            duration: analysis.accessibleRoute.googleRoute?.duration || 600,
-            distance: analysis.accessibleRoute.googleRoute?.distance || 1000,
-            grade: analysis.accessibleRoute.accessibilityScore?.grade || "A",
-            obstacles: analysis.accessibleRoute.obstacles || [],
+          clearestRoute: {
+            polyline: await convertRouteToPolyline(
+              analysis.clearestRoute.googleRoute
+            ),
+            duration: analysis.clearestRoute.googleRoute.duration,
+            distance: analysis.clearestRoute.googleRoute.distance,
+            obstacleCount: analysis.clearestRoute.obstacleCount,
+            obstacles: analysis.clearestRoute.obstacles,
           },
-          comparison: analysis.routeComparison || {
-            timeDifference: 300,
-            distanceDifference: 500,
-            accessibilityImprovement: 20,
-            recommendation: "Use accessible route for better accessibility",
+          summary: {
+            recommendation: analysis.summary.recommendation,
+            timeDifference: analysis.summary.timeDifference,
+            obstacleDifference: analysis.summary.obstacleDifference,
+            fastestIsAlsoClearest:
+              analysis.fastestRoute.googleRoute.id ===
+              analysis.clearestRoute.googleRoute.id,
           },
         };
 
-        // Center map on the route
+        // Center map on the clearest route (usually more interesting to see)
         if (
           mapRef.current &&
-          unifiedAnalysis.accessibleRoute.polyline?.length > 0
+          cleanUIAnalysis.clearestRoute.polyline.length > 0
         ) {
-          const polyline = unifiedAnalysis.accessibleRoute.polyline;
-          const coordinates = polyline.map((point: UserLocation) => ({
-            latitude: point.latitude,
-            longitude: point.longitude,
-          }));
+          const coordinates = cleanUIAnalysis.clearestRoute.polyline.map(
+            (point) => ({
+              latitude: point.latitude,
+              longitude: point.longitude,
+            })
+          );
 
           mapRef.current.fitToCoordinates(coordinates, {
             edgePadding: { top: 100, right: 50, bottom: 300, left: 50 },
@@ -191,19 +232,38 @@ export function useRouteCalculation({
           });
         }
 
+        // Update state with clean, simple data
         setState((prev) => ({
           ...prev,
-          routeAnalysis: unifiedAnalysis,
-          routeObstacles: routeObstacles,
+          routeAnalysis: cleanUIAnalysis,
+          routeObstacles: deduplicatedObstacles,
           nearbyObstacles: nearbyObstacles,
           selectedDestination: destLocation,
           destinationName: destName,
           isCalculating: false,
         }));
 
-        console.log("✅ Route calculation complete!");
+        console.log("✅ SIMPLIFIED route calculation complete!");
+
+        // Show user a quick summary
+        const fastestMin = Math.round(
+          cleanUIAnalysis.fastestRoute.duration / 60
+        );
+        const clearestMin = Math.round(
+          cleanUIAnalysis.clearestRoute.duration / 60
+        );
+
+        if (cleanUIAnalysis.summary.fastestIsAlsoClearest) {
+          console.log(
+            `🎉 Perfect! Same route is both fastest (${fastestMin}min) AND clearest (${cleanUIAnalysis.clearestRoute.obstacleCount} obstacles)`
+          );
+        } else {
+          console.log(
+            `⚖️ Choice: Fast (${fastestMin}min, ${cleanUIAnalysis.fastestRoute.obstacleCount} obstacles) vs Clear (${clearestMin}min, ${cleanUIAnalysis.clearestRoute.obstacleCount} obstacles)`
+          );
+        }
       } catch (error) {
-        console.error("❌ Error calculating routes:", error);
+        console.error("❌ Error calculating simplified routes:", error);
         Alert.alert(
           "Route Calculation Failed",
           "Unable to calculate routes. Please check your connection and try again."
@@ -221,18 +281,25 @@ export function useRouteCalculation({
 
   const handlePOIPress = useCallback(
     (poi: any) => {
-      console.log("🏢 Selected POI:", poi.name, "- Auto-calculating routes...");
+      console.log(
+        "🏢 Selected POI:",
+        poi.name,
+        "- Auto-calculating simplified routes..."
+      );
       calculateUnifiedRoutes(poi);
     },
     [calculateUnifiedRoutes]
   );
 
-  const updateRouteAnalysis = useCallback((newAnalysis: any) => {
-    setState((prev) => ({
-      ...prev,
-      routeAnalysis: newAnalysis,
-    }));
-  }, []);
+  const updateRouteAnalysis = useCallback(
+    (newAnalysis: SimpleUIRouteAnalysis) => {
+      setState((prev) => ({
+        ...prev,
+        routeAnalysis: newAnalysis,
+      }));
+    },
+    []
+  );
 
   return {
     routeAnalysis: state.routeAnalysis,
@@ -245,4 +312,53 @@ export function useRouteCalculation({
     handlePOIPress,
     updateRouteAnalysis,
   };
+}
+
+// =====================================================
+// UTILITY FUNCTIONS - Keep polyline conversion working
+// =====================================================
+
+/**
+ * Convert GoogleRoute to polyline - handle different formats
+ */
+async function convertRouteToPolyline(
+  googleRoute: any
+): Promise<UserLocation[]> {
+  try {
+    // If already an array of coordinates, return as-is
+    if (Array.isArray(googleRoute.polyline)) {
+      return googleRoute.polyline;
+    }
+
+    // If encoded string, decode it
+    if (typeof googleRoute.polyline === "string") {
+      return decodePolyline(googleRoute.polyline);
+    }
+
+    // Fallback: use route steps if available
+    if (googleRoute.steps && googleRoute.steps.length > 0) {
+      console.log("Using route steps as fallback polyline");
+      const stepPoints: UserLocation[] = [];
+
+      googleRoute.steps.forEach((step: any) => {
+        if (step.startLocation) {
+          stepPoints.push(step.startLocation);
+        }
+      });
+
+      // Add final end location
+      const lastStep = googleRoute.steps[googleRoute.steps.length - 1];
+      if (lastStep.endLocation) {
+        stepPoints.push(lastStep.endLocation);
+      }
+
+      return stepPoints;
+    }
+
+    console.warn("⚠️ Could not convert route to polyline, using empty array");
+    return [];
+  } catch (error) {
+    console.error("❌ Error converting route to polyline:", error);
+    return [];
+  }
 }
