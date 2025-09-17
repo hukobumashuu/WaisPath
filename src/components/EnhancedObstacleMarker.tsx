@@ -12,7 +12,7 @@ interface EnhancedObstacleMarkerProps {
   obstacle: AccessibilityObstacle;
   onPress: () => void;
   isOnRoute?: boolean;
-  routeType?: "fastest" | "accessible" | "both";
+  routeType?: "fastest" | "clearest" | "both";
   opacity?: number;
 }
 
@@ -155,7 +155,7 @@ export function EnhancedObstacleMarker({
         case "fastest":
           baseStyle.borderColor = "#EF4444"; // Red for fastest route
           break;
-        case "accessible":
+        case "clearest":
           baseStyle.borderColor = "#22C55E"; // Green for accessible route
           break;
       }

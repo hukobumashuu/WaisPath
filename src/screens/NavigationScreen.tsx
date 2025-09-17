@@ -76,19 +76,21 @@ export default function NavigationScreen() {
   function getObstacleRouteType(
     obstacle: AccessibilityObstacle,
     routeAnalysis: any
-  ): "fastest" | "accessible" | "both" | undefined {
+  ): "fastest" | "clearest" | "both" | undefined {
+    // ✅ Change "accessible" to "clearest"
     if (!routeAnalysis) return undefined;
 
     const onFastest = routeAnalysis.fastestRoute?.obstacles?.some(
       (obs: any) => obs.id === obstacle.id
     );
-    const onAccessible = routeAnalysis.accessibleRoute?.obstacles?.some(
+    const onClearest = routeAnalysis.clearestRoute?.obstacles?.some(
+      // ✅ Change accessibleRoute to clearestRoute
       (obs: any) => obs.id === obstacle.id
     );
 
-    if (onFastest && onAccessible) return "both";
+    if (onFastest && onClearest) return "both";
     if (onFastest) return "fastest";
-    if (onAccessible) return "accessible";
+    if (onClearest) return "clearest"; // ✅ Change "accessible" to "clearest"
     return undefined;
   }
 
@@ -300,7 +302,8 @@ export default function NavigationScreen() {
     }
   };
 
-  const startNavigation = (routeType: "fastest" | "accessible") => {
+  const startNavigation = (routeType: "fastest" | "clearest") => {
+    // ✅ Change "accessible" to "clearest"
     setIsNavigating(true);
     Vibration.vibrate(100);
     Alert.alert(
@@ -319,7 +322,7 @@ export default function NavigationScreen() {
       obstacle: AccessibilityObstacle,
       keyPrefix: string,
       isOnRoute: boolean,
-      routeType?: "fastest" | "accessible" | "both" | undefined,
+      routeType?: "fastest" | "clearest" | "both" | undefined, // ✅ Change "accessible" to "clearest"
       opacity: number = 1.0
     ) => {
       const obstacleId = String(obstacle.id);
@@ -465,9 +468,9 @@ export default function NavigationScreen() {
                 zIndex={1}
               />
             )}
-            {routeAnalysis.accessibleRoute.polyline && (
+            {routeAnalysis.clearestRoute.polyline && ( // ✅ Changed accessibleRoute to clearestRoute
               <Polyline
-                coordinates={routeAnalysis.accessibleRoute.polyline}
+                coordinates={routeAnalysis.clearestRoute.polyline} // ✅ Changed accessibleRoute to clearestRoute
                 strokeColor="#22C55E"
                 strokeWidth={5}
                 lineDashPattern={[0]}
@@ -516,12 +519,18 @@ export default function NavigationScreen() {
 
       <RouteInfoPanel
         routeAnalysis={routeAnalysis}
-        destinationName={destinationName}
-        onStartNavigation={startNavigation}
-        onToggleSidewalks={() => setShowSidewalks(!showSidewalks)}
-        onRecalculate={() => calculateUnifiedRoutes()}
-        showSidewalks={showSidewalks}
-        style={{ bottom: insets.bottom + 100 }}
+        isVisible={!!routeAnalysis} // ✅ Added isVisible prop
+        onClose={() => {
+          /* Add close handler if needed */
+        }} // ✅ Added onClose prop
+        onSelectRoute={(routeType) => {
+          // ✅ Updated prop name
+          if (routeType === "fastest") {
+            startNavigation("fastest");
+          } else {
+            startNavigation("clearest"); // ✅ Changed "accessible" to "clearest"
+          }
+        }}
       />
 
       <Modal
