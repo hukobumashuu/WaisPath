@@ -1,4 +1,4 @@
-// App.tsx - FIXED: App launch logging added to main initialization
+// App.tsx - FIXED: App launch logging added to main initialization + Settings screen + GestureHandler fix
 import "./global.css";
 import React, { useEffect, useState, useRef } from "react";
 import { NavigationContainer } from "@react-navigation/native";
@@ -11,12 +11,14 @@ import {
   SafeAreaProvider,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 // WAISPATH Core Screens
 import HomeScreen from "./src/screens/HomeScreen";
 import NavigationScreen from "./src/screens/NavigationScreen";
 import UserProfileScreen from "./src/screens/UserProfileScreen";
 import ReportScreen from "./src/screens/ReportScreen";
+import SettingsScreen from "./src/screens/SettingsScreen"; // NEW: Settings screen
 import { ReportDetailsScreen } from "./src/components/ReportDetailsScreen";
 
 // Store
@@ -26,21 +28,10 @@ import { initializeAuthCoordinator } from "./src/services/AuthStateCoordinator";
 // Mobile admin logger
 import { logAdminAppLaunch } from "./src/services/mobileAdminLogger";
 
-// Temporary placeholder for future screens
-const PlaceholderScreen = ({ title }: { title: string }) => (
-  <View className="flex-1 justify-center items-center bg-white">
-    <Ionicons name="construct" size={48} color="#3B82F6" />
-    <Text className="text-2xl font-bold mt-4">{title}</Text>
-    <Text className="text-base mt-2 text-accessible-gray">
-      Coming in Month 2...
-    </Text>
-  </View>
-);
-
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
-// Main tab navigator for authenticated users
+// Main tab navigator for authenticated users - NOW WITH 5 SCREENS
 const MainTabNavigator = () => {
   const insets = useSafeAreaInsets();
 
@@ -59,6 +50,8 @@ const MainTabNavigator = () => {
             iconName = focused ? "alert-circle" : "alert-circle-outline";
           } else if (route.name === "Profile") {
             iconName = focused ? "person" : "person-outline";
+          } else if (route.name === "Settings") {
+            iconName = focused ? "settings" : "settings-outline";
           } else {
             iconName = focused ? "home" : "home-outline";
           }
@@ -113,6 +106,13 @@ const MainTabNavigator = () => {
         component={UserProfileScreen}
         options={{
           tabBarAccessibilityLabel: "User profile and accessibility settings",
+        }}
+      />
+      <Tab.Screen
+        name="Settings"
+        component={SettingsScreen}
+        options={{
+          tabBarAccessibilityLabel: "Account management and app preferences",
         }}
       />
     </Tab.Navigator>
@@ -176,49 +176,53 @@ export default function App() {
   // Show loading screen while initializing
   if (!appReady || isLoading) {
     return (
-      <SafeAreaProvider>
-        <View className="flex-1 justify-center items-center bg-accessible-blue">
-          <Ionicons name="navigate-circle" size={80} color="white" />
-          <Text className="text-2xl font-bold text-white mt-4">WAISPATH</Text>
-          <Text className="text-base text-blue-100 mt-2">
-            Intelligent Accessibility Navigation
-          </Text>
-          <Text className="text-sm text-blue-200 mt-8">
-            {!appReady ? "Starting up..." : "Loading profile..."}
-          </Text>
-          <StatusBar style="light" />
-        </View>
-      </SafeAreaProvider>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <SafeAreaProvider>
+          <View className="flex-1 justify-center items-center bg-accessible-blue">
+            <Ionicons name="navigate-circle" size={80} color="white" />
+            <Text className="text-2xl font-bold text-white mt-4">WAISPATH</Text>
+            <Text className="text-base text-blue-100 mt-2">
+              Intelligent Accessibility Navigation
+            </Text>
+            <Text className="text-sm text-blue-200 mt-8">
+              {!appReady ? "Starting up..." : "Loading profile..."}
+            </Text>
+            <StatusBar style="light" />
+          </View>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
     );
   }
 
   // This now reacts to isFirstTime changes in real-time
   return (
-    <SafeAreaProvider>
-      <NavigationContainer>
-        <StatusBar style="auto" />
-        {isFirstTime ? (
-          // First-time users or users without cloud profiles see onboarding
-          <Stack.Navigator screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="Onboarding" component={UserProfileScreen} />
-            <Stack.Screen
-              name="ReportDetails"
-              component={ReportDetailsScreen}
-              options={{ headerShown: false }}
-            />
-          </Stack.Navigator>
-        ) : (
-          // Existing users with cloud profiles OR users who just logged in go to main app
-          <Stack.Navigator screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="MainTabs" component={MainTabNavigator} />
-            <Stack.Screen
-              name="ReportDetails"
-              component={ReportDetailsScreen}
-              options={{ headerShown: false }}
-            />
-          </Stack.Navigator>
-        )}
-      </NavigationContainer>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <NavigationContainer>
+          <StatusBar style="auto" />
+          {isFirstTime ? (
+            // First-time users or users without cloud profiles see onboarding
+            <Stack.Navigator screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="Onboarding" component={UserProfileScreen} />
+              <Stack.Screen
+                name="ReportDetails"
+                component={ReportDetailsScreen}
+                options={{ headerShown: false }}
+              />
+            </Stack.Navigator>
+          ) : (
+            // Existing users with cloud profiles OR users who just logged in go to main app
+            <Stack.Navigator screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="MainTabs" component={MainTabNavigator} />
+              <Stack.Screen
+                name="ReportDetails"
+                component={ReportDetailsScreen}
+                options={{ headerShown: false }}
+              />
+            </Stack.Navigator>
+          )}
+        </NavigationContainer>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

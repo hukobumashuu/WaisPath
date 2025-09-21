@@ -1,5 +1,6 @@
 // src/screens/UserProfileScreen.tsx
-// UPDATED VERSION: Added AuthenticationSection + Separated Styles
+// CLEAN VERSION: Removed AuthenticationSection, kept original structure intact
+// Authentication handled in dedicated Settings screen
 
 import React, { useState, useMemo } from "react";
 import {
@@ -19,12 +20,11 @@ import {
 } from "../stores/userProfileStore";
 import { UserMobilityProfile } from "../types";
 
-// NEW: Import separated styles and AuthenticationSection
+// Import separated styles
 import {
   userProfileStyles as styles,
   COLORS,
 } from "../styles/userProfileStyles";
-import AuthenticationSection from "../components/AuthenticationSection";
 
 interface ProfileSetupProps {
   navigation: any;
@@ -51,14 +51,6 @@ export default function UserProfileScreen({
     restNeeds: false,
     walkingDistance: "default" as "short" | "default" | "long",
   });
-
-  // NEW: Authentication state handler
-  const handleAuthStateChange = (
-    authType: "anonymous" | "registered" | "admin"
-  ) => {
-    console.log("User auth state changed to:", authType);
-    // Optionally refresh profile data or update UI based on auth type
-  };
 
   const mobilityDevices = useMemo(
     () => [
@@ -190,12 +182,6 @@ export default function UserProfileScreen({
       showsVerticalScrollIndicator={false}
     >
       <View style={{ paddingHorizontal: 20 }}>
-        {/* NEW: Authentication Section */}
-        <AuthenticationSection
-          onAuthStateChange={handleAuthStateChange}
-          style={{ marginBottom: 24 }}
-        />
-
         {/* Step Content */}
         <View style={{ marginBottom: 24 }}>
           <Text

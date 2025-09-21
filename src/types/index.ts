@@ -253,6 +253,7 @@ export type RootTabParamList = {
     obstacleType?: ObstacleType;
   };
   Profile: undefined; // New profile management screen
+  Settings: undefined;
 };
 
 // Enhanced route interface for personalized navigation

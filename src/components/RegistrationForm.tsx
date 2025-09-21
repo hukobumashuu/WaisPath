@@ -1,6 +1,6 @@
 // src/components/RegistrationForm.tsx
-// User Registration Component - Clean signup flow for WAISPATH
-// UPDATED: Added onSwitchToLogin prop for modal switching
+// ENHANCED: User Registration Component with password strength validation
+// INTEGRATES: Real-time validation, duplicate email handling, accessibility features
 
 import React, { useState } from "react";
 import {
@@ -14,6 +14,7 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -45,14 +46,21 @@ interface RegistrationResult {
 interface RegistrationFormProps {
   onRegistrationSuccess: (user: any) => void;
   onCancel: () => void;
-  onSwitchToLogin?: () => void; // NEW: Optional prop for switching to login modal
-  mode?: "standalone" | "upgrade"; // upgrade = anonymous user upgrading
+  onSwitchToLogin?: () => void;
+  mode?: "standalone" | "upgrade";
+}
+
+interface PasswordStrength {
+  isValid: boolean;
+  strength: "weak" | "medium" | "strong";
+  feedback: string[];
+  score: number; // 0-100
 }
 
 export default function RegistrationForm({
   onRegistrationSuccess,
   onCancel,
-  onSwitchToLogin, // NEW: Added prop
+  onSwitchToLogin,
   mode = "standalone",
 }: RegistrationFormProps) {
   const [email, setEmail] = useState("");
@@ -60,28 +68,99 @@ export default function RegistrationForm({
   const [confirmPassword, setConfirmPassword] = useState("");
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Password visibility states
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  // Form validation
-  const validateForm = (): { isValid: boolean; error?: string } => {
+  // Validation states
+  const [emailTouched, setEmailTouched] = useState(false);
+  const [passwordTouched, setPasswordTouched] = useState(false);
+  const [confirmPasswordTouched, setConfirmPasswordTouched] = useState(false);
+
+  // Email validation
+  const validateEmail = (
+    email: string
+  ): { isValid: boolean; feedback: string } => {
     if (!email.trim()) {
-      return { isValid: false, error: "Email address is required" };
+      return { isValid: false, feedback: "Email address is required" };
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      return { isValid: false, error: "Please enter a valid email address" };
+      return { isValid: false, feedback: "Please enter a valid email address" };
     }
 
-    if (!password) {
-      return { isValid: false, error: "Password is required" };
+    return { isValid: true, feedback: "Valid email address" };
+  };
+
+  // Password strength calculation (same as change password form)
+  const calculatePasswordStrength = (password: string): PasswordStrength => {
+    const feedback: string[] = [];
+    let score = 0;
+
+    // Length check
+    if (password.length >= 8) {
+      score += 25;
+    } else {
+      feedback.push("Use at least 8 characters");
     }
 
-    if (password.length < 6) {
+    // Uppercase check
+    if (/[A-Z]/.test(password)) {
+      score += 20;
+    } else {
+      feedback.push("Add an uppercase letter");
+    }
+
+    // Lowercase check
+    if (/[a-z]/.test(password)) {
+      score += 20;
+    } else {
+      feedback.push("Add a lowercase letter");
+    }
+
+    // Number check
+    if (/\d/.test(password)) {
+      score += 15;
+    } else {
+      feedback.push("Add a number");
+    }
+
+    // Special character check
+    if (/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
+      score += 20;
+    } else {
+      feedback.push("Add a special character (!@#$%^&*)");
+    }
+
+    // Determine strength
+    let strength: "weak" | "medium" | "strong";
+    if (score >= 80) strength = "strong";
+    else if (score >= 60) strength = "medium";
+    else strength = "weak";
+
+    return {
+      isValid: score >= 60 && password.length >= 8,
+      strength,
+      feedback,
+      score,
+    };
+  };
+
+  const emailValidation = validateEmail(email);
+  const passwordStrength = calculatePasswordStrength(password);
+
+  // Form validation
+  const validateForm = (): { isValid: boolean; error?: string } => {
+    if (!emailValidation.isValid) {
+      return { isValid: false, error: emailValidation.feedback };
+    }
+
+    if (!passwordStrength.isValid) {
       return {
         isValid: false,
-        error: "Password must be at least 6 characters",
+        error: "Password is too weak. Please follow the requirements below.",
       };
     }
 
@@ -153,7 +232,7 @@ export default function RegistrationForm({
     } catch (error: any) {
       console.error("Registration failed:", error);
 
-      // Handle specific Firebase errors
+      // Handle specific Firebase errors with user-friendly messages
       let errorMessage = "Registration failed";
 
       switch (error.code) {
@@ -175,6 +254,10 @@ export default function RegistrationForm({
         case "auth/network-request-failed":
           errorMessage =
             "Network error. Please check your connection and try again.";
+          break;
+        case "auth/too-many-requests":
+          errorMessage =
+            "Too many registration attempts. Please wait before trying again.";
           break;
         default:
           errorMessage =
@@ -202,8 +285,6 @@ export default function RegistrationForm({
       const result = await performRegistration();
 
       if (result.success) {
-        // FIXED: Don't show Alert here - let parent handle success message
-        // Just call the success callback directly
         onRegistrationSuccess(result.user);
       } else {
         Alert.alert("Registration Failed", result.message);
@@ -219,12 +300,10 @@ export default function RegistrationForm({
     }
   };
 
-  // NEW: Handle switching to login modal
   const handleSwitchToLogin = () => {
     if (onSwitchToLogin) {
       onSwitchToLogin();
     } else {
-      // Fallback if no onSwitchToLogin provided
       Alert.alert(
         "Sign In",
         "Please close this form and use the Sign In button instead."
@@ -244,6 +323,32 @@ export default function RegistrationForm({
       : "Join the community and help make Pasig more accessible for everyone";
   };
 
+  const getStrengthColor = () => {
+    switch (passwordStrength.strength) {
+      case "strong":
+        return COLORS.success;
+      case "medium":
+        return COLORS.warning;
+      case "weak":
+        return COLORS.error;
+      default:
+        return COLORS.muted;
+    }
+  };
+
+  const getStrengthText = () => {
+    switch (passwordStrength.strength) {
+      case "strong":
+        return "Strong password";
+      case "medium":
+        return "Medium strength";
+      case "weak":
+        return "Weak password";
+      default:
+        return "";
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
@@ -257,7 +362,12 @@ export default function RegistrationForm({
         >
           {/* Header */}
           <View style={styles.header}>
-            <TouchableOpacity style={styles.closeButton} onPress={onCancel}>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={onCancel}
+              accessibilityLabel="Close registration form"
+              accessibilityRole="button"
+            >
               <Ionicons name="close" size={24} color={COLORS.muted} />
             </TouchableOpacity>
             <Text style={styles.title}>{getTitle()}</Text>
@@ -269,7 +379,15 @@ export default function RegistrationForm({
             {/* Email Input */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Email Address</Text>
-              <View style={styles.inputContainer}>
+              <View
+                style={[
+                  styles.inputContainer,
+                  emailTouched && !emailValidation.isValid && styles.inputError,
+                  emailTouched &&
+                    emailValidation.isValid &&
+                    styles.inputSuccess,
+                ]}
+              >
                 <Ionicons
                   name="mail-outline"
                   size={20}
@@ -280,6 +398,7 @@ export default function RegistrationForm({
                   style={styles.input}
                   value={email}
                   onChangeText={setEmail}
+                  onBlur={() => setEmailTouched(true)}
                   placeholder="your-email@example.com"
                   keyboardType="email-address"
                   autoCapitalize="none"
@@ -287,14 +406,36 @@ export default function RegistrationForm({
                   autoComplete="email"
                   textContentType="emailAddress"
                   editable={!isLoading}
+                  accessibilityLabel="Email address"
+                  accessibilityHint="Enter your email address for your WAISPATH account"
                 />
+                {emailTouched && emailValidation.isValid && (
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={20}
+                    color={COLORS.success}
+                  />
+                )}
               </View>
+              {emailTouched && !emailValidation.isValid && (
+                <Text style={styles.errorText}>{emailValidation.feedback}</Text>
+              )}
             </View>
 
             {/* Password Input */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Password</Text>
-              <View style={styles.inputContainer}>
+              <View
+                style={[
+                  styles.inputContainer,
+                  passwordTouched &&
+                    !passwordStrength.isValid &&
+                    styles.inputError,
+                  passwordTouched &&
+                    passwordStrength.isValid &&
+                    styles.inputSuccess,
+                ]}
+              >
                 <Ionicons
                   name="lock-closed-outline"
                   size={20}
@@ -305,15 +446,22 @@ export default function RegistrationForm({
                   style={[styles.input, styles.passwordInput]}
                   value={password}
                   onChangeText={setPassword}
+                  onBlur={() => setPasswordTouched(true)}
                   placeholder="Enter a secure password"
                   secureTextEntry={!showPassword}
                   autoComplete="new-password"
                   textContentType="newPassword"
                   editable={!isLoading}
+                  accessibilityLabel="Password"
+                  accessibilityHint="Enter a secure password for your account"
                 />
                 <TouchableOpacity
                   onPress={() => setShowPassword(!showPassword)}
                   style={styles.eyeButton}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    showPassword ? "Hide password" : "Show password"
+                  }
                 >
                   <Ionicons
                     name={showPassword ? "eye-off-outline" : "eye-outline"}
@@ -322,13 +470,45 @@ export default function RegistrationForm({
                   />
                 </TouchableOpacity>
               </View>
-              <Text style={styles.passwordHint}>Minimum 6 characters</Text>
+
+              {/* Password Strength Indicator */}
+              {password.length > 0 && (
+                <View style={styles.strengthContainer}>
+                  <View style={styles.strengthBar}>
+                    <View
+                      style={[
+                        styles.strengthFill,
+                        {
+                          width: `${passwordStrength.score}%`,
+                          backgroundColor: getStrengthColor(),
+                        },
+                      ]}
+                    />
+                  </View>
+                  <Text
+                    style={[styles.strengthText, { color: getStrengthColor() }]}
+                  >
+                    {getStrengthText()}
+                  </Text>
+                </View>
+              )}
             </View>
 
             {/* Confirm Password Input */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Confirm Password</Text>
-              <View style={styles.inputContainer}>
+              <View
+                style={[
+                  styles.inputContainer,
+                  confirmPasswordTouched &&
+                    password !== confirmPassword &&
+                    styles.inputError,
+                  confirmPasswordTouched &&
+                    password === confirmPassword &&
+                    confirmPassword.length > 0 &&
+                    styles.inputSuccess,
+                ]}
+              >
                 <Ionicons
                   name="lock-closed-outline"
                   size={20}
@@ -339,15 +519,22 @@ export default function RegistrationForm({
                   style={[styles.input, styles.passwordInput]}
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
+                  onBlur={() => setConfirmPasswordTouched(true)}
                   placeholder="Confirm your password"
                   secureTextEntry={!showConfirmPassword}
                   autoComplete="new-password"
                   textContentType="newPassword"
                   editable={!isLoading}
+                  accessibilityLabel="Confirm password"
+                  accessibilityHint="Re-enter your password to confirm"
                 />
                 <TouchableOpacity
                   onPress={() => setShowConfirmPassword(!showConfirmPassword)}
                   style={styles.eyeButton}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    showConfirmPassword ? "Hide password" : "Show password"
+                  }
                 >
                   <Ionicons
                     name={
@@ -358,14 +545,68 @@ export default function RegistrationForm({
                   />
                 </TouchableOpacity>
               </View>
+
+              {/* Password Match Indicator */}
+              {confirmPassword.length > 0 && (
+                <View style={styles.matchContainer}>
+                  <Ionicons
+                    name={
+                      password === confirmPassword
+                        ? "checkmark-circle"
+                        : "close-circle"
+                    }
+                    size={16}
+                    color={
+                      password === confirmPassword
+                        ? COLORS.success
+                        : COLORS.error
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.matchText,
+                      {
+                        color:
+                          password === confirmPassword
+                            ? COLORS.success
+                            : COLORS.error,
+                      },
+                    ]}
+                  >
+                    {password === confirmPassword
+                      ? "Passwords match"
+                      : "Passwords don't match"}
+                  </Text>
+                </View>
+              )}
             </View>
 
-            {/* Terms Acceptance */}
+            {/* Password Requirements */}
+            {password.length > 0 && passwordStrength.feedback.length > 0 && (
+              <View style={styles.requirementsContainer}>
+                <Text style={styles.requirementsTitle}>
+                  Password Requirements:
+                </Text>
+                {passwordStrength.feedback.map((requirement, index) => (
+                  <View key={index} style={styles.requirementItem}>
+                    <Ionicons
+                      name="close-circle"
+                      size={16}
+                      color={COLORS.error}
+                    />
+                    <Text style={styles.requirementText}>{requirement}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Terms and Conditions */}
             <View style={styles.termsContainer}>
               <TouchableOpacity
                 style={styles.checkboxContainer}
                 onPress={() => setAcceptTerms(!acceptTerms)}
-                disabled={isLoading}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: acceptTerms }}
               >
                 <View
                   style={[
@@ -374,78 +615,86 @@ export default function RegistrationForm({
                   ]}
                 >
                   {acceptTerms && (
-                    <Ionicons name="checkmark" size={16} color={COLORS.white} />
+                    <Ionicons name="checkmark" size={14} color={COLORS.white} />
                   )}
                 </View>
                 <Text style={styles.termsText}>
-                  I agree to WAISPATH's{" "}
+                  I agree to the{" "}
                   <Text style={styles.termsLink}>Terms of Service</Text> and{" "}
                   <Text style={styles.termsLink}>Privacy Policy</Text>
                 </Text>
               </TouchableOpacity>
             </View>
 
-            {/* Benefits Section for Upgrade Mode */}
-            {mode === "upgrade" && (
-              <View style={styles.benefitsContainer}>
-                <Text style={styles.benefitsTitle}>Unlock These Features:</Text>
-                <View style={styles.benefitsList}>
-                  {[
-                    {
-                      icon: "infinite-outline",
-                      text: "Unlimited obstacle reporting",
-                    },
-                    {
-                      icon: "camera-outline",
-                      text: "Photo uploads with reports",
-                    },
-                    { icon: "list-outline", text: "Track your report history" },
-                    {
-                      icon: "people-outline",
-                      text: "Join community validation",
-                    },
-                    {
-                      icon: "cloud-upload-outline",
-                      text: "Cloud sync across devices",
-                    },
-                  ].map((benefit, index) => (
-                    <View key={index} style={styles.benefit}>
-                      <Ionicons
-                        name={benefit.icon as any}
-                        size={18}
-                        color={COLORS.success}
-                      />
-                      <Text style={styles.benefitText}>{benefit.text}</Text>
-                    </View>
-                  ))}
+            {/* Benefits Section */}
+            <View style={styles.benefitsContainer}>
+              <Text style={styles.benefitsTitle}>Account Benefits:</Text>
+              <View style={styles.benefitsList}>
+                <View style={styles.benefit}>
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={16}
+                    color={COLORS.success}
+                  />
+                  <Text style={styles.benefitText}>
+                    Unlimited accessibility reporting
+                  </Text>
+                </View>
+                <View style={styles.benefit}>
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={16}
+                    color={COLORS.success}
+                  />
+                  <Text style={styles.benefitText}>
+                    Save and sync your routes
+                  </Text>
+                </View>
+                <View style={styles.benefit}>
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={16}
+                    color={COLORS.success}
+                  />
+                  <Text style={styles.benefitText}>
+                    Track your community contributions
+                  </Text>
+                </View>
+                <View style={styles.benefit}>
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={16}
+                    color={COLORS.success}
+                  />
+                  <Text style={styles.benefitText}>
+                    Personalized accessibility preferences
+                  </Text>
                 </View>
               </View>
-            )}
+            </View>
 
             {/* Submit Button */}
             <TouchableOpacity
               style={[
                 styles.submitButton,
-                isLoading && styles.submitButtonDisabled,
+                (!validateForm().isValid || isLoading) &&
+                  styles.submitButtonDisabled,
               ]}
               onPress={handleSubmit}
-              disabled={isLoading}
+              disabled={!validateForm().isValid || isLoading}
+              accessibilityLabel="Create account"
+              accessibilityRole="button"
             >
               {isLoading ? (
                 <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="small" color={COLORS.white} />
                   <Text style={styles.submitButtonText}>
-                    {mode === "upgrade"
-                      ? "Upgrading Account..."
-                      : "Creating Account..."}
+                    Creating Account...
                   </Text>
                 </View>
               ) : (
                 <>
-                  <Ionicons
-                    name="person-add-outline"
-                    size={20}
-                    color={COLORS.white}
-                  />
+                  <Ionicons name="person-add" size={20} color={COLORS.white} />
                   <Text style={styles.submitButtonText}>
                     {mode === "upgrade" ? "Upgrade Account" : "Create Account"}
                   </Text>
@@ -453,14 +702,16 @@ export default function RegistrationForm({
               )}
             </TouchableOpacity>
 
-            {/* Footer - UPDATED: Added onPress handler for "Sign in instead" */}
+            {/* Footer */}
             <View style={styles.footer}>
-              <Text style={styles.footerText}>
-                Already have an account?{" "}
-                <Text style={styles.footerLink} onPress={handleSwitchToLogin}>
-                  Sign in instead
-                </Text>
-              </Text>
+              <Text style={styles.footerText}>Already have an account? </Text>
+              <TouchableOpacity
+                onPress={handleSwitchToLogin}
+                accessibilityLabel="Switch to sign in"
+                accessibilityRole="button"
+              >
+                <Text style={styles.footerLink}>Sign In</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </ScrollView>
@@ -482,21 +733,29 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingHorizontal: 24,
+    paddingBottom: 40,
   },
   header: {
-    paddingTop: 20,
+    padding: 24,
     paddingBottom: 32,
+    alignItems: "center",
   },
   closeButton: {
-    alignSelf: "flex-end",
-    padding: 8,
-    marginBottom: 16,
+    position: "absolute",
+    top: 24,
+    right: 24,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: COLORS.lightGray,
+    alignItems: "center",
+    justifyContent: "center",
   },
   title: {
     fontSize: 28,
-    fontWeight: "700",
-    color: COLORS.navy,
+    fontWeight: "bold",
+    color: COLORS.slate,
+    marginTop: 12,
     marginBottom: 8,
     textAlign: "center",
   },
@@ -505,8 +764,10 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
     textAlign: "center",
     lineHeight: 22,
+    paddingHorizontal: 16,
   },
   form: {
+    padding: 24,
     flex: 1,
   },
   inputGroup: {
@@ -521,10 +782,16 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
-    borderWidth: 1.5,
+    borderWidth: 2,
     borderColor: "#E5E7EB",
     borderRadius: 12,
     backgroundColor: COLORS.white,
+  },
+  inputError: {
+    borderColor: COLORS.error,
+  },
+  inputSuccess: {
+    borderColor: COLORS.success,
   },
   inputIcon: {
     marginLeft: 16,
@@ -545,11 +812,62 @@ const styles = StyleSheet.create({
     right: 16,
     padding: 4,
   },
-  passwordHint: {
+  errorText: {
     fontSize: 14,
-    color: COLORS.muted,
+    color: COLORS.error,
     marginTop: 6,
     marginLeft: 4,
+  },
+  strengthContainer: {
+    marginTop: 8,
+  },
+  strengthBar: {
+    height: 4,
+    backgroundColor: "#E5E7EB",
+    borderRadius: 2,
+    marginBottom: 4,
+  },
+  strengthFill: {
+    height: "100%",
+    borderRadius: 2,
+  },
+  strengthText: {
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  matchContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 8,
+  },
+  matchText: {
+    fontSize: 14,
+    fontWeight: "500",
+    marginLeft: 6,
+  },
+  requirementsContainer: {
+    backgroundColor: COLORS.lightGray,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: COLORS.error,
+  },
+  requirementsTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: COLORS.slate,
+    marginBottom: 8,
+  },
+  requirementItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  requirementText: {
+    fontSize: 14,
+    color: COLORS.error,
+    marginLeft: 8,
   },
   termsContainer: {
     marginBottom: 24,
@@ -636,10 +954,13 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   loadingContainer: {
+    flexDirection: "row",
     alignItems: "center",
   },
   footer: {
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     paddingBottom: 20,
   },
   footerText: {
@@ -647,6 +968,7 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
   },
   footerLink: {
+    fontSize: 14,
     color: COLORS.softBlue,
     fontWeight: "500",
   },
