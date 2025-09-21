@@ -1,6 +1,6 @@
 // src/services/routeObstacleService.ts
+// ENHANCED: Better interface compatibility + performance improvements
 // Service for loading obstacles based on calculated routes
-// Extracted from NavigationScreen for better organization
 
 import { UserLocation, AccessibilityObstacle } from "../types";
 import { firebaseServices } from "./firebase";
@@ -10,9 +10,30 @@ interface RouteBounds {
   radiusKm: number;
 }
 
+// ENHANCEMENT: Support both old and new interface patterns
+interface RouteAnalysisLegacy {
+  fastestRoute?: { polyline: UserLocation[] };
+  accessibleRoute?: { polyline: UserLocation[] };
+}
+
+interface RouteAnalysisNew {
+  fastestRoute?: { polyline: UserLocation[] };
+  clearestRoute?: { polyline: UserLocation[] };
+}
+
+type RouteAnalysisCompat = RouteAnalysisLegacy | RouteAnalysisNew;
+
 class RouteObstacleService {
+  // ENHANCEMENT: Simple caching to avoid duplicate calls
+  private obstacleCache = new Map<
+    string,
+    { obstacles: AccessibilityObstacle[]; timestamp: number }
+  >();
+  private readonly CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+  private readonly MAX_CACHE_SIZE = 50;
+
   /**
-   * Get obstacles along multiple route polylines
+   * ENHANCED: Get obstacles along multiple route polylines with caching
    */
   async getObstaclesAlongRoutes(
     fastestRoutePolyline: UserLocation[],
@@ -21,6 +42,19 @@ class RouteObstacleService {
   ): Promise<AccessibilityObstacle[]> {
     try {
       console.log("🛣️ Loading obstacles along calculated routes...");
+
+      // ENHANCEMENT: Generate cache key
+      const cacheKey = this.generateCacheKey(
+        fastestRoutePolyline,
+        accessibleRoutePolyline,
+        bufferMeters
+      );
+      const cached = this.getCachedObstacles(cacheKey);
+
+      if (cached) {
+        console.log("✅ Using cached obstacle data");
+        return cached;
+      }
 
       // Combine both route polylines
       const allRoutePoints = [
@@ -51,7 +85,9 @@ class RouteObstacleService {
       const routeObstacles: AccessibilityObstacle[] = [];
 
       for (const obstacle of allObstacles) {
-        if (!obstacle.location) continue;
+        if (!obstacle.location || !this.isValidLocation(obstacle.location)) {
+          continue;
+        }
 
         // Check distance to fastest route
         const distanceToFastest = this.calculateDistanceToPolyline(
@@ -76,8 +112,11 @@ class RouteObstacleService {
         `✅ ${routeObstacles.length} obstacles are within ${bufferMeters}m of routes`
       );
 
-      // Remove duplicates by ID
-      return this.deduplicateObstacles(routeObstacles);
+      // Remove duplicates by ID and cache result
+      const deduplicatedObstacles = this.deduplicateObstacles(routeObstacles);
+      this.cacheObstacles(cacheKey, deduplicatedObstacles);
+
+      return deduplicatedObstacles;
     } catch (error) {
       console.error("❌ Error getting obstacles along routes:", error);
       return [];
@@ -85,7 +124,7 @@ class RouteObstacleService {
   }
 
   /**
-   * Get obstacles around a specific location (fallback method)
+   * ENHANCED: Get obstacles around a specific location with validation
    */
   async getObstaclesAroundLocation(
     location: UserLocation,
@@ -94,10 +133,25 @@ class RouteObstacleService {
     try {
       console.log("📍 Loading obstacles around location (fallback)...");
 
+      // ENHANCEMENT: Validate location input
+      if (!this.isValidLocation(location)) {
+        console.error("❌ Invalid location provided:", location);
+        return [];
+      }
+
+      // ENHANCEMENT: Validate radius
+      const validRadius = Math.max(0.1, Math.min(radiusKm, 5)); // Between 100m and 5km
+
+      if (validRadius !== radiusKm) {
+        console.warn(
+          `⚠️ Adjusted radius from ${radiusKm}km to ${validRadius}km`
+        );
+      }
+
       const obstacles = await firebaseServices.obstacle.getObstaclesInArea(
         location.latitude,
         location.longitude,
-        radiusKm
+        validRadius
       );
 
       console.log(`📍 Found ${obstacles.length} obstacles around location`);
@@ -109,29 +163,140 @@ class RouteObstacleService {
   }
 
   /**
-   * Smart obstacle loading: routes first, fallback to location
+   * ENHANCED: Smart obstacle loading with improved interface compatibility
    */
   async getRelevantObstacles(
     userLocation: UserLocation,
-    routeAnalysis?: {
-      fastestRoute?: { polyline: UserLocation[] };
-      accessibleRoute?: { polyline: UserLocation[] };
-    }
+    routeAnalysis?: RouteAnalysisCompat
   ): Promise<AccessibilityObstacle[]> {
-    // If routes are available, load obstacles along routes
-    if (
-      routeAnalysis?.fastestRoute?.polyline?.length &&
-      routeAnalysis?.accessibleRoute?.polyline?.length
-    ) {
-      return await this.getObstaclesAlongRoutes(
-        routeAnalysis.fastestRoute.polyline,
-        routeAnalysis.accessibleRoute.polyline,
-        50 // 50m buffer
-      );
+    try {
+      // ENHANCEMENT: Better input validation
+      if (!this.isValidLocation(userLocation)) {
+        console.error("❌ Invalid user location:", userLocation);
+        return [];
+      }
+
+      // Extract polylines with backward compatibility
+      let fastestPolyline: UserLocation[] = [];
+      let accessiblePolyline: UserLocation[] = [];
+
+      if (routeAnalysis) {
+        // Handle fastest route (consistent across both interfaces)
+        if (routeAnalysis.fastestRoute?.polyline) {
+          fastestPolyline = routeAnalysis.fastestRoute.polyline;
+        }
+
+        // Handle accessible/clearest route with compatibility
+        if (
+          "accessibleRoute" in routeAnalysis &&
+          routeAnalysis.accessibleRoute?.polyline
+        ) {
+          accessiblePolyline = routeAnalysis.accessibleRoute.polyline;
+        } else if (
+          "clearestRoute" in routeAnalysis &&
+          routeAnalysis.clearestRoute?.polyline
+        ) {
+          accessiblePolyline = routeAnalysis.clearestRoute.polyline;
+        }
+      }
+
+      // If routes are available and valid, load obstacles along routes
+      if (fastestPolyline.length > 0 && accessiblePolyline.length > 0) {
+        console.log("🛣️ Loading obstacles along provided routes");
+        return await this.getObstaclesAlongRoutes(
+          fastestPolyline,
+          accessiblePolyline,
+          50 // 50m buffer
+        );
+      }
+
+      // Fallback: Load obstacles around user location
+      console.log("📍 Falling back to location-based obstacle loading");
+      return await this.getObstaclesAroundLocation(userLocation, 1);
+    } catch (error) {
+      console.error("❌ Error getting relevant obstacles:", error);
+      return [];
+    }
+  }
+
+  /**
+   * ENHANCEMENT: Cache management functions
+   */
+  private generateCacheKey(
+    fastestPolyline: UserLocation[],
+    accessiblePolyline: UserLocation[],
+    bufferMeters: number
+  ): string {
+    // Create a simple hash of the route points
+    const fastestHash = this.hashPolyline(fastestPolyline);
+    const accessibleHash = this.hashPolyline(accessiblePolyline);
+    return `${fastestHash}-${accessibleHash}-${bufferMeters}`;
+  }
+
+  private hashPolyline(polyline: UserLocation[]): string {
+    if (polyline.length === 0) return "empty";
+
+    // Use first, middle, and last points for a simple hash
+    const first = polyline[0];
+    const middle = polyline[Math.floor(polyline.length / 2)];
+    const last = polyline[polyline.length - 1];
+
+    return `${first.latitude.toFixed(4)},${first.longitude.toFixed(
+      4
+    )}-${middle.latitude.toFixed(4)},${middle.longitude.toFixed(
+      4
+    )}-${last.latitude.toFixed(4)},${last.longitude.toFixed(4)}`;
+  }
+
+  private getCachedObstacles(cacheKey: string): AccessibilityObstacle[] | null {
+    const cached = this.obstacleCache.get(cacheKey);
+
+    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
+      return cached.obstacles;
     }
 
-    // Fallback: Load obstacles around user location
-    return await this.getObstaclesAroundLocation(userLocation, 1);
+    if (cached) {
+      this.obstacleCache.delete(cacheKey); // Clean up expired cache
+    }
+
+    return null;
+  }
+
+  private cacheObstacles(
+    cacheKey: string,
+    obstacles: AccessibilityObstacle[]
+  ): void {
+    // Prune cache if at capacity
+    if (this.obstacleCache.size >= this.MAX_CACHE_SIZE) {
+      const oldestKey = this.obstacleCache.keys().next().value;
+      if (oldestKey) {
+        this.obstacleCache.delete(oldestKey);
+      }
+    }
+
+    this.obstacleCache.set(cacheKey, {
+      obstacles,
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
+   * ENHANCEMENT: Clear cache manually
+   */
+  clearCache(): void {
+    this.obstacleCache.clear();
+    console.log("🧹 Route obstacle cache cleared");
+  }
+
+  /**
+   * ENHANCEMENT: Get cache statistics
+   */
+  getCacheStats() {
+    return {
+      size: this.obstacleCache.size,
+      maxSize: this.MAX_CACHE_SIZE,
+      ttlMinutes: this.CACHE_TTL / (60 * 1000),
+    };
   }
 
   /**
@@ -169,19 +334,28 @@ class RouteObstacleService {
   }
 
   /**
-   * Calculate distance from point to polyline
+   * ENHANCED: Calculate distance from point to polyline with validation
    */
   private calculateDistanceToPolyline(
     point: UserLocation,
     polyline: UserLocation[]
   ): number {
     if (polyline.length === 0) return Infinity;
+    if (!this.isValidLocation(point)) return Infinity;
 
     let minDistance = Infinity;
 
     for (let i = 0; i < polyline.length - 1; i++) {
       const segmentStart = polyline[i];
       const segmentEnd = polyline[i + 1];
+
+      // Validate segment points
+      if (
+        !this.isValidLocation(segmentStart) ||
+        !this.isValidLocation(segmentEnd)
+      ) {
+        continue;
+      }
 
       const distanceToSegment = this.pointToLineSegmentDistance(
         point,
@@ -258,6 +432,21 @@ class RouteObstacleService {
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
     return R * c; // Distance in meters
+  }
+
+  /**
+   * ENHANCEMENT: Validate UserLocation
+   */
+  private isValidLocation(location: any): location is UserLocation {
+    return (
+      location &&
+      typeof location.latitude === "number" &&
+      typeof location.longitude === "number" &&
+      !isNaN(location.latitude) &&
+      !isNaN(location.longitude) &&
+      Math.abs(location.latitude) <= 90 &&
+      Math.abs(location.longitude) <= 180
+    );
   }
 
   /**

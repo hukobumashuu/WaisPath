@@ -1,17 +1,33 @@
-// src/components/RouteInfoPanel.tsx
-// SIMPLIFIED: Show obstacle counts instead of mysterious grades!
-// Clean, user-friendly interface that PWDs can actually understand
+// src/components/RouteInfoBottomSheet.tsx
+// FIXED: Removed close button + Fixed map interaction blocking
+// Users can drag up/down to expand/minimize, map clicks work properly
 
-import React from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
+  ActivityIndicator,
+  Dimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { AccessibilityObstacle } from "../types";
+import {
+  PanGestureHandler,
+  PanGestureHandlerGestureEvent,
+  State,
+} from "react-native-gesture-handler";
+import Animated, {
+  useAnimatedGestureHandler,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  runOnJS,
+} from "react-native-reanimated";
+
+const { height: screenHeight } = Dimensions.get("window");
 
 const COLORS = {
   white: "#FFFFFF",
@@ -26,7 +42,11 @@ const COLORS = {
   chipBg: "#EFF8FF",
 };
 
-// SIMPLIFIED: What the panel actually needs - no more complex scoring!
+// Constants for sheet positions
+const EXPANDED_HEIGHT = screenHeight * 0.8;
+const MINIMIZED_HEIGHT = 140;
+const DRAG_THRESHOLD = 50;
+
 interface SimpleRouteInfo {
   fastestRoute: {
     duration: number; // seconds
@@ -48,371 +68,706 @@ interface SimpleRouteInfo {
   };
 }
 
-interface RouteInfoPanelProps {
+interface RouteInfoBottomSheetProps {
   routeAnalysis: SimpleRouteInfo | null;
   isVisible: boolean;
-  onClose: () => void;
+  isCalculating?: boolean;
+  isCalculatingObstacles?: boolean;
+  onClose?: () => void; // Made optional since we removed close button
   onSelectRoute: (routeType: "fastest" | "clearest") => void;
 }
 
-export function RouteInfoPanel({
+type SheetState = "expanded" | "minimized";
+
+export function RouteInfoBottomSheet({
   routeAnalysis,
   isVisible,
-  onClose,
+  isCalculating = false,
+  isCalculatingObstacles = false,
   onSelectRoute,
-}: RouteInfoPanelProps) {
-  if (!isVisible || !routeAnalysis) {
+}: RouteInfoBottomSheetProps) {
+  // ALL HOOKS AT THE TOP
+  const [sheetState, setSheetState] = useState<SheetState>("expanded");
+  const translateY = useSharedValue(0);
+  const isGestureActive = useSharedValue(false);
+
+  // Memoized helper functions
+  const formatDuration = useMemo(
+    () =>
+      (seconds: number): string => {
+        const minutes = Math.round(seconds / 60);
+        return `${minutes} min${minutes === 1 ? "" : "s"}`;
+      },
+    []
+  );
+
+  const formatDistance = useMemo(
+    () =>
+      (meters: number): string => {
+        if (meters >= 1000) {
+          return `${(meters / 1000).toFixed(1)} km`;
+        }
+        return `${Math.round(meters)} m`;
+      },
+    []
+  );
+
+  const getObstacleCountColor = useMemo(
+    () =>
+      (count: number): string => {
+        if (count === 0) return COLORS.success;
+        if (count <= 2) return COLORS.warning;
+        return COLORS.error;
+      },
+    []
+  );
+
+  const getObstacleIcon = useMemo(
+    () =>
+      (count: number): keyof typeof Ionicons.glyphMap => {
+        if (count === 0) return "checkmark-circle";
+        if (count <= 2) return "alert-circle";
+        return "warning";
+      },
+    []
+  );
+
+  // State management functions
+  const expandSheet = useMemo(
+    () => () => {
+      setSheetState("expanded");
+      translateY.value = withSpring(0, { damping: 20, stiffness: 100 }); // Slower, more natural
+    },
+    [translateY]
+  );
+
+  const minimizeSheet = useMemo(
+    () => () => {
+      setSheetState("minimized");
+      translateY.value = withSpring(EXPANDED_HEIGHT - MINIMIZED_HEIGHT, {
+        damping: 20,
+        stiffness: 100, // Slower, more natural
+      });
+    },
+    [translateY]
+  );
+
+  const toggleSheetState = useMemo(
+    () => () => {
+      if (sheetState === "expanded") {
+        minimizeSheet();
+      } else {
+        expandSheet();
+      }
+    },
+    [sheetState, expandSheet, minimizeSheet]
+  );
+
+  // Initialize position on visibility change
+  useEffect(() => {
+    if (isVisible) {
+      if (sheetState === "expanded") {
+        translateY.value = withSpring(0, { damping: 20, stiffness: 100 });
+      } else {
+        translateY.value = withSpring(EXPANDED_HEIGHT - MINIMIZED_HEIGHT, {
+          damping: 20,
+          stiffness: 100,
+        });
+      }
+    }
+  }, [isVisible, sheetState, translateY]);
+
+  // Gesture handler for dragging
+  const gestureHandler =
+    useAnimatedGestureHandler<PanGestureHandlerGestureEvent>({
+      onStart: (_, context: any) => {
+        isGestureActive.value = true;
+        context.startY = translateY.value; // Remember starting position
+      },
+      onActive: (event, context: any) => {
+        // Follow finger movement more closely
+        const newTranslateY = context.startY + event.translationY;
+        const minY = 0;
+        const maxY = EXPANDED_HEIGHT - MINIMIZED_HEIGHT;
+
+        // Allow slight overscroll for natural feel, then clamp
+        if (newTranslateY < minY - 20) {
+          translateY.value = minY - 20 + (newTranslateY - (minY - 20)) * 0.3;
+        } else if (newTranslateY > maxY + 20) {
+          translateY.value = maxY + 20 + (newTranslateY - (maxY + 20)) * 0.3;
+        } else {
+          translateY.value = newTranslateY;
+        }
+      },
+      onEnd: (event) => {
+        isGestureActive.value = false;
+        const { velocityY, translationY } = event;
+
+        // More responsive thresholds
+        const shouldMinimize =
+          translationY > DRAG_THRESHOLD ||
+          (velocityY > 300 && translationY > 10); // Lower velocity threshold
+
+        const shouldExpand =
+          translationY < -DRAG_THRESHOLD ||
+          (velocityY < -300 && translationY < -10); // Lower velocity threshold
+
+        if (shouldMinimize) {
+          translateY.value = withSpring(EXPANDED_HEIGHT - MINIMIZED_HEIGHT, {
+            damping: 20,
+            stiffness: 100,
+          });
+          runOnJS(setSheetState)("minimized");
+        } else if (shouldExpand) {
+          translateY.value = withSpring(0, { damping: 20, stiffness: 100 });
+          runOnJS(setSheetState)("expanded");
+        } else {
+          // Snap back to current state with natural spring
+          if (sheetState === "expanded") {
+            translateY.value = withSpring(0, { damping: 20, stiffness: 100 });
+          } else {
+            translateY.value = withSpring(EXPANDED_HEIGHT - MINIMIZED_HEIGHT, {
+              damping: 20,
+              stiffness: 100,
+            });
+          }
+        }
+      },
+    });
+
+  // Animated style for the sheet
+  const animatedSheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
+
+  // EARLY RETURNS AFTER ALL HOOKS
+  if (!isVisible) {
+    return null;
+  }
+
+  // Loading state
+  if (isCalculating && !routeAnalysis) {
+    return (
+      <View>
+        <Animated.View style={[styles.panel, styles.loadingPanel]}>
+          <View style={styles.dragHandleContainer}>
+            <View style={styles.dragHandle} />
+          </View>
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={COLORS.softBlue} />
+            <Text style={styles.loadingText}>Finding routes...</Text>
+          </View>
+        </Animated.View>
+      </View>
+    );
+  }
+
+  if (!routeAnalysis) {
     return null;
   }
 
   const { fastestRoute, clearestRoute, summary } = routeAnalysis;
 
-  // Helper functions for clean display
-  const formatDuration = (seconds: number): string => {
-    const minutes = Math.round(seconds / 60);
-    return `${minutes} min${minutes === 1 ? "" : "s"}`;
-  };
-
-  const formatDistance = (meters: number): string => {
-    if (meters >= 1000) {
-      return `${(meters / 1000).toFixed(1)} km`;
-    }
-    return `${meters} m`;
-  };
-
-  const getObstacleCountColor = (count: number): string => {
-    if (count === 0) return COLORS.success;
-    if (count <= 2) return COLORS.warning;
-    return COLORS.error;
-  };
-
-  const getObstacleIcon = (count: number): keyof typeof Ionicons.glyphMap => {
-    if (count === 0) return "checkmark-circle";
-    if (count <= 2) return "alert-circle";
-    return "warning";
-  };
-
-  // Get most common obstacle types for quick preview
-  const getMostCommonObstacles = (
-    obstacles: AccessibilityObstacle[]
-  ): string[] => {
-    const obstacleTypes = obstacles.map((obs) => obs.type.replace("_", " "));
-    const counts = obstacleTypes.reduce((acc, type) => {
-      acc[type] = (acc[type] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    return Object.entries(counts)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 2)
-      .map(([type]) => type);
-  };
-
   return (
-    <View style={styles.overlay}>
-      <View style={styles.panel}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Route Options</Text>
-          <TouchableOpacity
-            style={styles.closeButton}
-            onPress={onClose}
-            accessibilityLabel="Close route options"
-            accessibilityRole="button"
-          >
-            <Ionicons name="close" size={24} color={COLORS.muted} />
-          </TouchableOpacity>
-        </View>
+    <>
+      {/* Background overlay only visible when expanded for visual effect */}
+      {sheetState === "expanded" && <View style={styles.backgroundOverlay} />}
 
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Perfect Scenario - Same route is fastest AND clearest */}
-          {summary.fastestIsAlsoClearest && (
-            <View style={styles.perfectScenarioCard}>
-              <View style={styles.perfectIcon}>
-                <Ionicons name="star" size={24} color={COLORS.success} />
-              </View>
-              <Text style={styles.perfectTitle}>Perfect Route! 🎉</Text>
-              <Text style={styles.perfectSubtitle}>
-                The fastest route also has the fewest obstacles
-              </Text>
+      {/* Bottom sheet - positioned to not block map interaction */}
+      <View style={styles.sheetContainer}>
+        <PanGestureHandler onGestureEvent={gestureHandler}>
+          <Animated.View style={[styles.panel, animatedSheetStyle]}>
+            {/* Drag Handle - Touch target for dragging */}
+            <TouchableOpacity
+              style={styles.dragHandleContainer}
+              onPress={toggleSheetState}
+              activeOpacity={0.7}
+            >
+              <View style={styles.dragHandle} />
+            </TouchableOpacity>
 
-              <View style={styles.routeStats}>
-                <Text style={styles.routeTime}>
-                  {formatDuration(fastestRoute.duration)}
-                </Text>
-                <Text style={styles.routeDistance}>
-                  {formatDistance(fastestRoute.distance)}
-                </Text>
-                <View style={styles.obstacleCount}>
-                  <Ionicons
-                    name={getObstacleIcon(fastestRoute.obstacleCount)}
-                    size={16}
-                    color={getObstacleCountColor(fastestRoute.obstacleCount)}
-                  />
-                  <Text
-                    style={[
-                      styles.obstacleText,
-                      {
-                        color: getObstacleCountColor(
-                          fastestRoute.obstacleCount
-                        ),
-                      },
-                    ]}
-                  >
-                    {fastestRoute.obstacleCount === 0
-                      ? "No obstacles!"
-                      : `${fastestRoute.obstacleCount} obstacle${
-                          fastestRoute.obstacleCount === 1 ? "" : "s"
-                        }`}
-                  </Text>
-                </View>
-              </View>
-
+            {/* Header - Simplified without close button */}
+            <View style={styles.header}>
               <TouchableOpacity
-                style={styles.selectButtonPerfect}
-                onPress={() => onSelectRoute("fastest")}
-                accessibilityLabel="Select the perfect route"
+                style={styles.expandButton}
+                onPress={toggleSheetState}
+                accessibilityLabel={
+                  sheetState === "expanded" ? "Minimize panel" : "Expand panel"
+                }
                 accessibilityRole="button"
               >
-                <Text style={styles.selectButtonTextPerfect}>
-                  Use This Route
-                </Text>
-                <Ionicons name="arrow-forward" size={20} color={COLORS.white} />
+                <Ionicons
+                  name={
+                    sheetState === "expanded" ? "chevron-down" : "chevron-up"
+                  }
+                  size={24}
+                  color={COLORS.muted}
+                />
               </TouchableOpacity>
+
+              <Text style={styles.headerTitle}>Route Options</Text>
+
+              {/* Empty view for balance - no close button */}
+              <View style={styles.headerSpacer} />
             </View>
-          )}
 
-          {/* Two Different Routes - User needs to choose */}
-          {!summary.fastestIsAlsoClearest && (
-            <>
-              {/* Fastest Route Card */}
-              <View style={styles.routeCard}>
-                <View style={styles.routeCardHeader}>
-                  <View style={styles.routeTypeIcon}>
-                    <Ionicons name="flash" size={20} color={COLORS.softBlue} />
-                  </View>
-                  <Text style={styles.routeCardTitle}>Fastest Route</Text>
-                </View>
-
-                <View style={styles.routeStats}>
-                  <View style={styles.statItem}>
-                    <Ionicons name="time" size={16} color={COLORS.muted} />
-                    <Text style={styles.statText}>
+            {/* Minimized Summary - Only visible when minimized */}
+            {sheetState === "minimized" && (
+              <TouchableOpacity
+                style={styles.minimizedSummary}
+                onPress={expandSheet}
+                activeOpacity={0.7}
+              >
+                <View style={styles.routeSummaryRow}>
+                  <View style={styles.routeSummaryItem}>
+                    <Ionicons name="flash" size={16} color={COLORS.softBlue} />
+                    <Text style={styles.summaryText}>
                       {formatDuration(fastestRoute.duration)}
                     </Text>
-                  </View>
-                  <View style={styles.statItem}>
-                    <Ionicons name="map" size={16} color={COLORS.muted} />
-                    <Text style={styles.statText}>
-                      {formatDistance(fastestRoute.distance)}
+                    <Text style={styles.summaryObstacles}>
+                      {fastestRoute.obstacleCount} obstacles
                     </Text>
                   </View>
-                </View>
 
-                <View style={styles.obstacleInfo}>
-                  <View style={styles.obstacleCount}>
-                    <Ionicons
-                      name={getObstacleIcon(fastestRoute.obstacleCount)}
-                      size={16}
-                      color={getObstacleCountColor(fastestRoute.obstacleCount)}
-                    />
-                    <Text
-                      style={[
-                        styles.obstacleText,
-                        {
-                          color: getObstacleCountColor(
-                            fastestRoute.obstacleCount
-                          ),
-                        },
-                      ]}
-                    >
-                      {fastestRoute.obstacleCount === 0
-                        ? "No obstacles!"
-                        : `${fastestRoute.obstacleCount} obstacle${
-                            fastestRoute.obstacleCount === 1 ? "" : "s"
-                          }`}
-                    </Text>
-                  </View>
-                  {fastestRoute.obstacleCount > 0 && (
-                    <Text style={styles.obstacleTypes}>
-                      {getMostCommonObstacles(fastestRoute.obstacles).join(
-                        ", "
-                      )}
-                    </Text>
-                  )}
-                </View>
+                  <View style={styles.routeSummaryDivider} />
 
-                <TouchableOpacity
-                  style={styles.selectButton}
-                  onPress={() => onSelectRoute("fastest")}
-                  accessibilityLabel={`Select fastest route: ${formatDuration(
-                    fastestRoute.duration
-                  )} with ${fastestRoute.obstacleCount} obstacles`}
-                  accessibilityRole="button"
-                >
-                  <Text style={styles.selectButtonText}>Choose Fast Route</Text>
-                  <Ionicons name="flash" size={16} color={COLORS.softBlue} />
-                </TouchableOpacity>
-              </View>
-
-              {/* Clearest Route Card */}
-              <View style={styles.routeCard}>
-                <View style={styles.routeCardHeader}>
-                  <View style={styles.routeTypeIcon}>
+                  <View style={styles.routeSummaryItem}>
                     <Ionicons
                       name="shield-checkmark"
-                      size={20}
+                      size={16}
                       color={COLORS.success}
                     />
-                  </View>
-                  <Text style={styles.routeCardTitle}>Clearest Route</Text>
-                </View>
-
-                <View style={styles.routeStats}>
-                  <View style={styles.statItem}>
-                    <Ionicons name="time" size={16} color={COLORS.muted} />
-                    <Text style={styles.statText}>
+                    <Text style={styles.summaryText}>
                       {formatDuration(clearestRoute.duration)}
                     </Text>
-                  </View>
-                  <View style={styles.statItem}>
-                    <Ionicons name="map" size={16} color={COLORS.muted} />
-                    <Text style={styles.statText}>
-                      {formatDistance(clearestRoute.distance)}
+                    <Text style={styles.summaryObstacles}>
+                      {clearestRoute.obstacleCount} obstacles
                     </Text>
                   </View>
                 </View>
+                <Text style={styles.tapToExpand}>Tap or drag to expand</Text>
+              </TouchableOpacity>
+            )}
 
-                <View style={styles.obstacleInfo}>
-                  <View style={styles.obstacleCount}>
-                    <Ionicons
-                      name={getObstacleIcon(clearestRoute.obstacleCount)}
-                      size={16}
-                      color={getObstacleCountColor(clearestRoute.obstacleCount)}
-                    />
-                    <Text
-                      style={[
-                        styles.obstacleText,
-                        {
-                          color: getObstacleCountColor(
-                            clearestRoute.obstacleCount
-                          ),
-                        },
-                      ]}
+            {/* Expanded Content - Only visible when expanded */}
+            {sheetState === "expanded" && (
+              <ScrollView
+                style={styles.content}
+                contentContainerStyle={styles.contentContainer}
+                showsVerticalScrollIndicator={false}
+                scrollEnabled={!isGestureActive.value}
+              >
+                {/* Loading overlay for obstacles */}
+                {isCalculatingObstacles && (
+                  <View style={styles.obstacleLoadingOverlay}>
+                    <ActivityIndicator size="small" color={COLORS.softBlue} />
+                    <Text style={styles.obstacleLoadingText}>
+                      Counting obstacles along routes...
+                    </Text>
+                  </View>
+                )}
+
+                {/* Perfect Scenario */}
+                {summary.fastestIsAlsoClearest && (
+                  <View style={styles.perfectScenarioCard}>
+                    <View style={styles.perfectIcon}>
+                      <Ionicons name="star" size={24} color={COLORS.success} />
+                    </View>
+                    <Text style={styles.perfectTitle}>Perfect Route!</Text>
+                    <Text style={styles.perfectSubtitle}>
+                      The fastest route also has the fewest obstacles
+                    </Text>
+
+                    <View style={styles.routeStatsRow}>
+                      <View style={styles.statItem}>
+                        <Ionicons name="time" size={16} color={COLORS.muted} />
+                        <Text style={styles.statText}>
+                          {formatDuration(fastestRoute.duration)}
+                        </Text>
+                      </View>
+                      <View style={styles.statItem}>
+                        <Ionicons name="map" size={16} color={COLORS.muted} />
+                        <Text style={styles.statText}>
+                          {formatDistance(fastestRoute.distance)}
+                        </Text>
+                      </View>
+                      <View style={styles.statItem}>
+                        <Ionicons
+                          name={getObstacleIcon(fastestRoute.obstacleCount)}
+                          size={16}
+                          color={getObstacleCountColor(
+                            fastestRoute.obstacleCount
+                          )}
+                        />
+                        <Text
+                          style={[
+                            styles.statText,
+                            {
+                              color: getObstacleCountColor(
+                                fastestRoute.obstacleCount
+                              ),
+                            },
+                          ]}
+                        >
+                          {fastestRoute.obstacleCount === 0
+                            ? "No obstacles"
+                            : `${fastestRoute.obstacleCount} obstacle${
+                                fastestRoute.obstacleCount === 1 ? "" : "s"
+                              }`}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <TouchableOpacity
+                      style={[styles.selectButton, styles.perfectButton]}
+                      onPress={() => onSelectRoute("fastest")}
+                      accessibilityLabel={`Select perfect route: ${formatDuration(
+                        fastestRoute.duration
+                      )} with ${fastestRoute.obstacleCount} obstacles`}
+                      accessibilityRole="button"
                     >
-                      {clearestRoute.obstacleCount === 0
-                        ? "No obstacles!"
-                        : `${clearestRoute.obstacleCount} obstacle${
-                            clearestRoute.obstacleCount === 1 ? "" : "s"
-                          }`}
-                    </Text>
+                      <Text
+                        style={[
+                          styles.selectButtonText,
+                          styles.perfectButtonText,
+                        ]}
+                      >
+                        Choose This Route
+                      </Text>
+                      <Ionicons name="star" size={16} color={COLORS.white} />
+                    </TouchableOpacity>
                   </View>
-                  {clearestRoute.obstacleCount > 0 && (
-                    <Text style={styles.obstacleTypes}>
-                      {getMostCommonObstacles(clearestRoute.obstacles).join(
-                        ", "
-                      )}
-                    </Text>
-                  )}
-                </View>
-
-                <TouchableOpacity
-                  style={[styles.selectButton, styles.selectButtonClearest]}
-                  onPress={() => onSelectRoute("clearest")}
-                  accessibilityLabel={`Select clearest route: ${formatDuration(
-                    clearestRoute.duration
-                  )} with ${clearestRoute.obstacleCount} obstacles`}
-                  accessibilityRole="button"
-                >
-                  <Text style={styles.selectButtonText}>
-                    Choose Clear Route
-                  </Text>
-                  <Ionicons
-                    name="shield-checkmark"
-                    size={16}
-                    color={COLORS.success}
-                  />
-                </TouchableOpacity>
-              </View>
-
-              {/* Comparison Summary */}
-              <View style={styles.summaryCard}>
-                <Text style={styles.summaryTitle}>Route Comparison</Text>
-                <Text style={styles.summaryText}>{summary.recommendation}</Text>
-
-                {Math.abs(summary.timeDifference) > 60 && (
-                  <Text style={styles.summaryDetail}>
-                    Time difference:{" "}
-                    {formatDuration(Math.abs(summary.timeDifference))}
-                  </Text>
                 )}
 
-                {summary.obstacleDifference > 0 && (
-                  <Text style={styles.summaryDetail}>
-                    Obstacle difference: {Math.abs(summary.obstacleDifference)}{" "}
-                    fewer obstacles
-                  </Text>
+                {/* Two separate routes */}
+                {!summary.fastestIsAlsoClearest && (
+                  <>
+                    {/* Fastest Route Card */}
+                    <View style={styles.routeCard}>
+                      <View style={styles.routeCardHeader}>
+                        <View style={styles.routeTypeIcon}>
+                          <Ionicons
+                            name="flash"
+                            size={20}
+                            color={COLORS.softBlue}
+                          />
+                        </View>
+                        <Text style={styles.routeCardTitle}>Fastest Route</Text>
+                      </View>
+
+                      <View style={styles.routeStatsRow}>
+                        <View style={styles.statItem}>
+                          <Ionicons
+                            name="time"
+                            size={16}
+                            color={COLORS.muted}
+                          />
+                          <Text style={styles.statText}>
+                            {formatDuration(fastestRoute.duration)}
+                          </Text>
+                        </View>
+                        <View style={styles.statItem}>
+                          <Ionicons name="map" size={16} color={COLORS.muted} />
+                          <Text style={styles.statText}>
+                            {formatDistance(fastestRoute.distance)}
+                          </Text>
+                        </View>
+                        <View style={styles.statItem}>
+                          <Ionicons
+                            name={getObstacleIcon(fastestRoute.obstacleCount)}
+                            size={16}
+                            color={getObstacleCountColor(
+                              fastestRoute.obstacleCount
+                            )}
+                          />
+                          <Text
+                            style={[
+                              styles.statText,
+                              {
+                                color: getObstacleCountColor(
+                                  fastestRoute.obstacleCount
+                                ),
+                              },
+                            ]}
+                          >
+                            {fastestRoute.obstacleCount === 0
+                              ? "No obstacles"
+                              : `${fastestRoute.obstacleCount} obstacle${
+                                  fastestRoute.obstacleCount === 1 ? "" : "s"
+                                }`}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <TouchableOpacity
+                        style={styles.selectButton}
+                        onPress={() => onSelectRoute("fastest")}
+                        accessibilityLabel={`Select fastest route: ${formatDuration(
+                          fastestRoute.duration
+                        )} with ${fastestRoute.obstacleCount} obstacles`}
+                        accessibilityRole="button"
+                      >
+                        <Text style={styles.selectButtonText}>
+                          Choose Fast Route
+                        </Text>
+                        <Ionicons name="flash" size={16} color={COLORS.white} />
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Clearest Route Card */}
+                    <View style={styles.routeCard}>
+                      <View style={styles.routeCardHeader}>
+                        <View style={styles.routeTypeIcon}>
+                          <Ionicons
+                            name="shield-checkmark"
+                            size={20}
+                            color={COLORS.success}
+                          />
+                        </View>
+                        <Text style={styles.routeCardTitle}>
+                          Clearest Route
+                        </Text>
+                      </View>
+
+                      <View style={styles.routeStatsRow}>
+                        <View style={styles.statItem}>
+                          <Ionicons
+                            name="time"
+                            size={16}
+                            color={COLORS.muted}
+                          />
+                          <Text style={styles.statText}>
+                            {formatDuration(clearestRoute.duration)}
+                          </Text>
+                        </View>
+                        <View style={styles.statItem}>
+                          <Ionicons name="map" size={16} color={COLORS.muted} />
+                          <Text style={styles.statText}>
+                            {formatDistance(clearestRoute.distance)}
+                          </Text>
+                        </View>
+                        <View style={styles.statItem}>
+                          <Ionicons
+                            name={getObstacleIcon(clearestRoute.obstacleCount)}
+                            size={16}
+                            color={getObstacleCountColor(
+                              clearestRoute.obstacleCount
+                            )}
+                          />
+                          <Text
+                            style={[
+                              styles.statText,
+                              {
+                                color: getObstacleCountColor(
+                                  clearestRoute.obstacleCount
+                                ),
+                              },
+                            ]}
+                          >
+                            {clearestRoute.obstacleCount === 0
+                              ? "No obstacles"
+                              : `${clearestRoute.obstacleCount} obstacle${
+                                  clearestRoute.obstacleCount === 1 ? "" : "s"
+                                }`}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <TouchableOpacity
+                        style={[styles.selectButton, styles.clearButton]}
+                        onPress={() => onSelectRoute("clearest")}
+                        accessibilityLabel={`Select clearest route: ${formatDuration(
+                          clearestRoute.duration
+                        )} with ${clearestRoute.obstacleCount} obstacles`}
+                        accessibilityRole="button"
+                      >
+                        <Text
+                          style={[
+                            styles.selectButtonText,
+                            styles.clearButtonText,
+                          ]}
+                        >
+                          Choose Clear Route
+                        </Text>
+                        <Ionicons
+                          name="shield-checkmark"
+                          size={16}
+                          color={COLORS.white}
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  </>
                 )}
-              </View>
-            </>
-          )}
-        </ScrollView>
+              </ScrollView>
+            )}
+          </Animated.View>
+        </PanGestureHandler>
       </View>
-    </View>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
+  // Split overlay into two parts for better map interaction
+  backgroundOverlay: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    backgroundColor: "rgba(0, 0, 0, 0.3)", // Subtle background when expanded
+    zIndex: 999,
+  },
+  sheetContainer: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: EXPANDED_HEIGHT,
     justifyContent: "flex-end",
     zIndex: 1000,
+    pointerEvents: "box-none", // Allow touches to pass through to map when not hitting sheet
   },
+
+  // Panel
   panel: {
     backgroundColor: COLORS.white,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: "80%",
-    minHeight: "50%",
+    height: EXPANDED_HEIGHT,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 8,
+    pointerEvents: "auto", // Sheet itself captures touches
   },
+  loadingPanel: {
+    height: 200,
+  },
+
+  // Drag handle
+  dragHandleContainer: {
+    alignItems: "center",
+    paddingVertical: 12,
+  },
+  dragHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: COLORS.muted,
+    borderRadius: 2,
+  },
+
+  // Header - Simplified without close button
   header: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.lightGray,
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: "700",
+    fontSize: 18,
+    fontWeight: "600",
     color: COLORS.slate,
   },
-  closeButton: {
+  expandButton: {
     padding: 8,
-    minWidth: 44,
-    minHeight: 44,
-    justifyContent: "center",
-    alignItems: "center",
+    borderRadius: 20,
   },
-  content: {
-    padding: 20,
+  headerSpacer: {
+    width: 40, // Same width as expandButton for balance
   },
 
-  // Perfect scenario styles
+  // Minimized summary
+  minimizedSummary: {
+    padding: 16,
+    alignItems: "center",
+  },
+  routeSummaryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    width: "100%",
+    marginBottom: 8,
+  },
+  routeSummaryItem: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  routeSummaryDivider: {
+    width: 1,
+    height: 20,
+    backgroundColor: COLORS.lightGray,
+    marginHorizontal: 16,
+  },
+  summaryText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: COLORS.slate,
+    marginLeft: 4,
+    marginRight: 8,
+  },
+  summaryObstacles: {
+    fontSize: 12,
+    color: COLORS.muted,
+  },
+  tapToExpand: {
+    fontSize: 12,
+    color: COLORS.muted,
+    fontStyle: "italic",
+  },
+
+  // Content (expanded state)
+  content: {
+    flex: 1,
+    paddingHorizontal: 20,
+  },
+  contentContainer: {
+    paddingBottom: 40,
+  },
+
+  // Loading states
+  loadingContainer: {
+    padding: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  loadingText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: COLORS.slate,
+    marginTop: 16,
+    textAlign: "center",
+  },
+  obstacleLoadingOverlay: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: COLORS.lightGray,
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  obstacleLoadingText: {
+    fontSize: 14,
+    color: COLORS.muted,
+    marginLeft: 8,
+  },
+
+  // Perfect scenario
   perfectScenarioCard: {
-    backgroundColor: "#F0FDF4", // Light green background
+    backgroundColor: COLORS.lightGray,
     borderRadius: 16,
     padding: 20,
     alignItems: "center",
     borderWidth: 1,
     borderColor: COLORS.success,
+    marginTop: 16,
+    marginBottom: 8,
   },
   perfectIcon: {
     marginBottom: 8,
@@ -430,12 +785,13 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
 
-  // Route card styles
+  // Route cards
   routeCard: {
     backgroundColor: COLORS.white,
     borderRadius: 12,
     padding: 16,
-    marginBottom: 12,
+    marginTop: 12,
+    marginBottom: 8,
     borderWidth: 1,
     borderColor: COLORS.lightGray,
     shadowColor: "#000",
@@ -457,112 +813,54 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: COLORS.slate,
   },
-  routeStats: {
+
+  // Stats
+  routeStatsRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 12,
+    justifyContent: "space-around",
+    alignItems: "center",
+    marginBottom: 16,
+    paddingHorizontal: 8,
   },
   statItem: {
     flexDirection: "row",
     alignItems: "center",
+    flex: 1,
+    justifyContent: "center",
   },
   statText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "500",
     color: COLORS.slate,
     marginLeft: 4,
   },
-  routeTime: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: COLORS.slate,
-  },
-  routeDistance: {
-    fontSize: 14,
-    color: COLORS.muted,
-  },
 
-  // Obstacle info styles
-  obstacleInfo: {
-    marginBottom: 16,
-  },
-  obstacleCount: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 4,
-  },
-  obstacleText: {
-    fontSize: 14,
-    fontWeight: "500",
-    marginLeft: 4,
-  },
-  obstacleTypes: {
-    fontSize: 12,
-    color: COLORS.muted,
-    marginLeft: 20,
-    fontStyle: "italic",
-  },
-
-  // Button styles
+  // Buttons
   selectButton: {
-    backgroundColor: COLORS.lightGray,
+    backgroundColor: COLORS.softBlue,
     borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    padding: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
-    borderColor: COLORS.softBlue,
-  },
-  selectButtonClearest: {
-    borderColor: COLORS.success,
-  },
-  selectButtonPerfect: {
-    backgroundColor: COLORS.success,
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 8,
+    gap: 8,
+    marginTop: 4,
   },
   selectButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: COLORS.softBlue,
-    marginRight: 4,
-  },
-  selectButtonTextPerfect: {
     fontSize: 16,
     fontWeight: "600",
     color: COLORS.white,
-    marginRight: 8,
   },
-
-  // Summary styles
-  summaryCard: {
-    backgroundColor: COLORS.chipBg,
-    borderRadius: 8,
-    padding: 12,
-    marginTop: 8,
+  perfectButton: {
+    backgroundColor: COLORS.success,
   },
-  summaryTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: COLORS.slate,
-    marginBottom: 4,
+  perfectButtonText: {
+    color: COLORS.white,
   },
-  summaryText: {
-    fontSize: 13,
-    color: COLORS.muted,
-    lineHeight: 18,
+  clearButton: {
+    backgroundColor: COLORS.success,
   },
-  summaryDetail: {
-    fontSize: 12,
-    color: COLORS.muted,
-    marginTop: 4,
-    fontStyle: "italic",
+  clearButtonText: {
+    color: COLORS.white,
   },
 });

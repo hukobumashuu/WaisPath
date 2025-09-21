@@ -37,7 +37,7 @@ import { useProximityDetection } from "../hooks/useProximityDetection";
 import { useRouteCalculation } from "../hooks/useRouteCalculation";
 import { ProximityAlertsOverlay } from "../components/ProximityAlertsOverlay";
 import { EnhancedObstacleMarker } from "../components/EnhancedObstacleMarker";
-import { RouteInfoPanel } from "../components/RouteInfoPanel";
+import { RouteInfoBottomSheet } from "../components/RouteInfoPanel";
 import { NavigationControls } from "../components/NavigationControls";
 
 // Enhanced search component
@@ -303,7 +303,6 @@ export default function NavigationScreen() {
   };
 
   const startNavigation = (routeType: "fastest" | "clearest") => {
-    // ✅ Change "accessible" to "clearest"
     setIsNavigating(true);
     Vibration.vibrate(100);
     Alert.alert(
@@ -517,12 +516,9 @@ export default function NavigationScreen() {
         onAlertPress={handleProximityAlertPress}
       />
 
-      <RouteInfoPanel
+      <RouteInfoBottomSheet
         routeAnalysis={routeAnalysis}
         isVisible={!!routeAnalysis} // ✅ Added isVisible prop
-        onClose={() => {
-          /* Add close handler if needed */
-        }} // ✅ Added onClose prop
         onSelectRoute={(routeType) => {
           // ✅ Updated prop name
           if (routeType === "fastest") {
