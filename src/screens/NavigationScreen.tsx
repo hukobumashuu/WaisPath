@@ -23,6 +23,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MapView, { Marker, Callout, Polyline } from "react-native-maps";
+import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocation } from "../hooks/useLocation";
 import { useUserProfile } from "../stores/userProfileStore";
@@ -72,6 +73,9 @@ export default function NavigationScreen() {
     AccessibilityObstacle[]
   >([]);
 
+  // ADD: New state to control route panel visibility
+  const [showRoutePanel, setShowRoutePanel] = useState(true);
+
   // Existing helper functions
   function getObstacleRouteType(
     obstacle: AccessibilityObstacle,
@@ -111,6 +115,7 @@ export default function NavigationScreen() {
     calculateUnifiedRoutes,
     handlePOIPress,
     updateRouteAnalysis,
+    clearRoutes,
   } = useRouteCalculation({
     location,
     profile,
@@ -124,6 +129,7 @@ export default function NavigationScreen() {
   const [currentValidationPrompt, setCurrentValidationPrompt] =
     useState<ValidationPromptType | null>(null);
   const [showSidewalks, setShowSidewalks] = useState(true);
+  const [navigationPausedByBlur, setNavigationPausedByBlur] = useState(false);
 
   // Enhanced destination selection handler
   const handleDestinationSelect = async (destination: PlaceSearchResult) => {
@@ -139,6 +145,7 @@ export default function NavigationScreen() {
       };
 
       await calculateUnifiedRoutes(poiObject);
+      setShowRoutePanel(true); // ADDED: Show panel when new routes are calculated
 
       if (destination.accessibilityFeatures?.wheelchairAccessible) {
         Alert.alert(
@@ -312,6 +319,85 @@ export default function NavigationScreen() {
     );
   };
 
+  const stopNavigation = useCallback(() => {
+    setIsNavigating(false);
+    setDestination(""); // Clear destination
+
+    // Reset proximity detection state
+    proximityDetectionService.resetDetectionState();
+    // Clear TTS announcements
+    textToSpeechService.stopSpeaking();
+
+    console.log("🛑 Navigation stopped manually by user");
+  }, []);
+
+  // UPDATED: Function to clear routes when user wants to close route info panel
+  const clearRoutesAndPanel = useCallback(() => {
+    setShowRoutePanel(false); // Hide the route panel
+    setDestination(""); // Clear destination input
+    clearRoutes(); // Clear all route data from the hook
+    console.log("🗑️ Routes and panel cleared completely");
+  }, [clearRoutes]);
+
+  const checkArrival = useCallback(() => {
+    if (!location || !selectedDestination || !isNavigating) return;
+
+    const distance = proximityDetectionService.calculateDistance(
+      location,
+      selectedDestination
+    );
+    const ARRIVAL_THRESHOLD = 20; // 20 meters
+
+    if (distance <= ARRIVAL_THRESHOLD) {
+      setIsNavigating(false);
+      setDestination(""); // Clear destination
+      proximityDetectionService.resetDetectionState();
+      textToSpeechService.stopSpeaking();
+
+      console.log(
+        `🎉 Arrival detected - ${distance.toFixed(1)}m from destination`
+      );
+
+      // For now, skip TTS announcement since speak method is private
+      // We can use testTTS as a workaround or make speak public later
+      Alert.alert("🎉 Arrival", `You have reached your destination!`, [
+        { text: "Great!" },
+      ]);
+    }
+  }, [location, selectedDestination, isNavigating, destinationName]);
+
+  // 🔥 NEW: Arrival monitoring useEffect - MUST be after checkArrival declaration
+  useEffect(() => {
+    if (isNavigating && location && selectedDestination) {
+      checkArrival();
+    }
+  }, [location, isNavigating, selectedDestination, checkArrival]);
+
+  useFocusEffect(
+    useCallback(() => {
+      console.log("📱 NavigationScreen focused");
+
+      // If navigation was paused due to screen blur, resume it
+      if (navigationPausedByBlur && selectedDestination) {
+        setIsNavigating(true);
+        setNavigationPausedByBlur(false);
+        console.log("▶️ Resuming navigation after screen focus");
+      }
+
+      // Cleanup function runs when screen loses focus
+      return () => {
+        console.log("📱 NavigationScreen blurred");
+
+        // If currently navigating, pause it
+        if (isNavigating) {
+          setIsNavigating(false);
+          setNavigationPausedByBlur(true);
+          console.log("⏸️ Pausing navigation due to screen blur");
+        }
+      };
+    }, [isNavigating, selectedDestination, navigationPausedByBlur])
+  );
+
   // Existing obstacle rendering
   const renderObstacles = () => {
     const allObstacleIds = new Set<string>();
@@ -436,7 +522,10 @@ export default function NavigationScreen() {
           <Marker
             key={poi.id}
             coordinate={{ latitude: poi.lat, longitude: poi.lng }}
-            onPress={() => handlePOIPress(poi)}
+            onPress={() => {
+              handlePOIPress(poi);
+              setShowRoutePanel(true); // ADDED: Show panel when POI selected
+            }}
           >
             <View style={styles.poiMarker}>
               <Ionicons name={getPOIIcon(poi.type)} size={20} color="white" />
@@ -518,7 +607,7 @@ export default function NavigationScreen() {
 
       <RouteInfoBottomSheet
         routeAnalysis={routeAnalysis}
-        isVisible={!!routeAnalysis} // ✅ Added isVisible prop
+        isVisible={!!routeAnalysis && showRoutePanel}
         onSelectRoute={(routeType) => {
           // ✅ Updated prop name
           if (routeType === "fastest") {
@@ -527,6 +616,7 @@ export default function NavigationScreen() {
             startNavigation("clearest"); // ✅ Changed "accessible" to "clearest"
           }
         }}
+        onStopNavigation={clearRoutesAndPanel}
       />
 
       <Modal

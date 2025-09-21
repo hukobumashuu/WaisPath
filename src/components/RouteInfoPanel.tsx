@@ -75,6 +75,7 @@ interface RouteInfoBottomSheetProps {
   isCalculatingObstacles?: boolean;
   onClose?: () => void; // Made optional since we removed close button
   onSelectRoute: (routeType: "fastest" | "clearest") => void;
+  onStopNavigation?: () => void;
 }
 
 type SheetState = "expanded" | "minimized";
@@ -85,6 +86,7 @@ export function RouteInfoBottomSheet({
   isCalculating = false,
   isCalculatingObstacles = false,
   onSelectRoute,
+  onStopNavigation,
 }: RouteInfoBottomSheetProps) {
   // ALL HOOKS AT THE TOP
   const [sheetState, setSheetState] = useState<SheetState>("expanded");
@@ -100,6 +102,10 @@ export function RouteInfoBottomSheet({
       },
     []
   );
+
+  const handleStopNavigation = () => {
+    onStopNavigation?.();
+  };
 
   const formatDistance = useMemo(
     () =>
@@ -307,8 +313,19 @@ export function RouteInfoBottomSheet({
 
               <Text style={styles.headerTitle}>Route Options</Text>
 
-              {/* Empty view for balance - no close button */}
-              <View style={styles.headerSpacer} />
+              {/* Stop button - only show when navigation can be stopped */}
+              {onStopNavigation ? (
+                <TouchableOpacity
+                  style={styles.stopButton}
+                  onPress={handleStopNavigation}
+                  accessibilityLabel="Stop navigation"
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="close" size={24} color={COLORS.error} />
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.headerSpacer} />
+              )}
             </View>
 
             {/* Minimized Summary - Only visible when minimized */}
@@ -679,6 +696,16 @@ const styles = StyleSheet.create({
   },
   headerSpacer: {
     width: 40, // Same width as expandButton for balance
+  },
+  stopButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.lightGray,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: COLORS.error + "20", // 20% opacity
   },
 
   // Minimized summary

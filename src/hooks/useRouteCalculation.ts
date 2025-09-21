@@ -382,6 +382,19 @@ export function useRouteCalculation({
     console.log("🧹 Route cache cleared");
   }, []);
 
+  const clearRoutes = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      routeAnalysis: null,
+      selectedDestination: null,
+      destinationName: "",
+      routeObstacles: [],
+      nearbyObstacles: [],
+    }));
+    routeCache.clear(); // Also clear cache
+    console.log("🧹 All route data cleared");
+  }, []);
+
   return {
     routeAnalysis: state.routeAnalysis,
     isCalculating: state.isCalculating,
@@ -394,6 +407,7 @@ export function useRouteCalculation({
     handlePOIPress,
     updateRouteAnalysis,
     clearCache, // New utility function
+    clearRoutes,
   };
 }
 

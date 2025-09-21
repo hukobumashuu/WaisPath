@@ -234,10 +234,7 @@ export class ProximityDetectionService {
   /**
    * UTILITY: Calculate Haversine distance between two points
    */
-  private calculateDistance(
-    point1: UserLocation,
-    point2: UserLocation
-  ): number {
+  public calculateDistance(point1: UserLocation, point2: UserLocation): number {
     const R = 6371e3; // Earth's radius in meters
     const φ1 = (point1.latitude * Math.PI) / 180;
     const φ2 = (point2.latitude * Math.PI) / 180;
