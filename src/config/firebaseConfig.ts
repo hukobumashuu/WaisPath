@@ -14,32 +14,31 @@ interface FirebaseConfig {
 }
 
 function validateFirebaseConfig(): FirebaseConfig {
-  const requiredEnvVars = [
-    "EXPO_PUBLIC_FIREBASE_API_KEY",
-    "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN",
-    "EXPO_PUBLIC_FIREBASE_PROJECT_ID",
-    "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET",
-    "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID",
-    "EXPO_PUBLIC_FIREBASE_APP_ID",
-  ];
+  // Hardcoded config as fallback (same approach as your Google Maps API key)
+  const hardcodedConfig = {
+    apiKey: "AIzaSyCWXKiwkXZh8DRql14JBs9aN6icBe1MHxg",
+    authDomain: "waispath-4dbf1.firebaseapp.com",
+    projectId: "waispath-4dbf1",
+    storageBucket: "waispath-4dbf1.firebasestorage.app",
+    messagingSenderId: "483457985900",
+    appId: "1:483457985900:android:2916f46dac322a430d5749",
+  };
 
-  const missingVars = requiredEnvVars.filter(
-    (varName) => !process.env[varName]
-  );
-
-  if (missingVars.length > 0) {
-    throw new Error(
-      `Missing Firebase configuration: ${missingVars.join(", ")}`
-    );
-  }
-
+  // Try environment variables first, fall back to hardcoded
   return {
-    apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY!,
-    authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN!,
-    projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID!,
-    storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET!,
-    messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID!,
-    appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID!,
+    apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || hardcodedConfig.apiKey,
+    authDomain:
+      process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN ||
+      hardcodedConfig.authDomain,
+    projectId:
+      process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || hardcodedConfig.projectId,
+    storageBucket:
+      process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET ||
+      hardcodedConfig.storageBucket,
+    messagingSenderId:
+      process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID ||
+      hardcodedConfig.messagingSenderId,
+    appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || hardcodedConfig.appId,
   };
 }
 
