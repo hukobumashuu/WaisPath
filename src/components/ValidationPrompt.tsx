@@ -162,13 +162,6 @@ export function ValidationPrompt({
               </Text>
             </View>
           </View>
-          <TouchableOpacity
-            onPress={onDismiss}
-            style={{ padding: 4 }}
-            accessibilityLabel="Close validation prompt"
-          >
-            <Ionicons name="close" size={24} color="#6B7280" />
-          </TouchableOpacity>
         </View>
 
         {/* Question */}

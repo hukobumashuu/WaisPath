@@ -1,8 +1,8 @@
 // src/components/RegistrationForm.tsx
-// ENHANCED: User Registration Component with password strength validation
-// INTEGRATES: Real-time validation, duplicate email handling, accessibility features
+// SIMPLE & RELIABLE: Format validation + Firebase duplicate handling
+// No complex real-time availability checking
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -21,7 +21,6 @@ import {
   createUserWithEmailAndPassword,
   linkWithCredential,
   EmailAuthProvider,
-  signInWithEmailAndPassword,
 } from "firebase/auth";
 
 const COLORS = {
@@ -35,6 +34,7 @@ const COLORS = {
   warning: "#F59E0B",
   error: "#EF4444",
   chipBg: "#EFF8FF",
+  orange: "#F97316",
 };
 
 interface RegistrationResult {
@@ -54,7 +54,14 @@ interface PasswordStrength {
   isValid: boolean;
   strength: "weak" | "medium" | "strong";
   feedback: string[];
-  score: number; // 0-100
+  score: number;
+  requirements: PasswordRequirement[];
+}
+
+interface PasswordRequirement {
+  label: string;
+  met: boolean;
+  icon: string;
 }
 
 export default function RegistrationForm({
@@ -74,97 +81,95 @@ export default function RegistrationForm({
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   // Validation states
-  const [emailTouched, setEmailTouched] = useState(false);
   const [passwordTouched, setPasswordTouched] = useState(false);
   const [confirmPasswordTouched, setConfirmPasswordTouched] = useState(false);
 
-  // Email validation
-  const validateEmail = (
-    email: string
-  ): { isValid: boolean; feedback: string } => {
-    if (!email.trim()) {
-      return { isValid: false, feedback: "Email address is required" };
-    }
-
+  // Simple email validation
+  const validateEmailFormat = (email: string): boolean => {
+    if (!email.trim()) return false;
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return { isValid: false, feedback: "Please enter a valid email address" };
-    }
-
-    return { isValid: true, feedback: "Valid email address" };
+    return emailRegex.test(email);
   };
 
-  // Password strength calculation (same as change password form)
+  const isEmailValid = validateEmailFormat(email);
+
+  // Password strength calculation
   const calculatePasswordStrength = (password: string): PasswordStrength => {
-    const feedback: string[] = [];
-    let score = 0;
+    const requirements: PasswordRequirement[] = [
+      {
+        label: "At least 8 characters",
+        met: password.length >= 8,
+        icon: password.length >= 8 ? "checkmark-circle" : "close-circle",
+      },
+      {
+        label: "One uppercase letter",
+        met: /[A-Z]/.test(password),
+        icon: /[A-Z]/.test(password) ? "checkmark-circle" : "close-circle",
+      },
+      {
+        label: "One lowercase letter",
+        met: /[a-z]/.test(password),
+        icon: /[a-z]/.test(password) ? "checkmark-circle" : "close-circle",
+      },
+      {
+        label: "One number",
+        met: /\d/.test(password),
+        icon: /\d/.test(password) ? "checkmark-circle" : "close-circle",
+      },
+      {
+        label: "One special character (!@#$%^&*)",
+        met: /[!@#$%^&*(),.?":{}|<>]/.test(password),
+        icon: /[!@#$%^&*(),.?":{}|<>]/.test(password)
+          ? "checkmark-circle"
+          : "close-circle",
+      },
+    ];
 
-    // Length check
-    if (password.length >= 8) {
-      score += 25;
-    } else {
-      feedback.push("Use at least 8 characters");
-    }
+    const metRequirements = requirements.filter((req) => req.met).length;
+    let score = (metRequirements / requirements.length) * 100;
 
-    // Uppercase check
-    if (/[A-Z]/.test(password)) {
-      score += 20;
-    } else {
-      feedback.push("Add an uppercase letter");
-    }
-
-    // Lowercase check
-    if (/[a-z]/.test(password)) {
-      score += 20;
-    } else {
-      feedback.push("Add a lowercase letter");
-    }
-
-    // Number check
-    if (/\d/.test(password)) {
-      score += 15;
-    } else {
-      feedback.push("Add a number");
-    }
-
-    // Special character check
-    if (/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
-      score += 20;
-    } else {
-      feedback.push("Add a special character (!@#$%^&*)");
-    }
-
-    // Determine strength
     let strength: "weak" | "medium" | "strong";
     if (score >= 80) strength = "strong";
     else if (score >= 60) strength = "medium";
     else strength = "weak";
 
+    const feedback = requirements
+      .filter((req) => !req.met)
+      .map((req) => req.label);
+
     return {
-      isValid: score >= 60 && password.length >= 8,
+      isValid: metRequirements >= 4 && password.length >= 8,
       strength,
       feedback,
       score,
+      requirements,
     };
   };
 
-  const emailValidation = validateEmail(email);
   const passwordStrength = calculatePasswordStrength(password);
 
-  // Form validation
+  // Confirm password validation
+  const isConfirmPasswordValid = () => {
+    return confirmPassword.length > 0 && password === confirmPassword;
+  };
+
+  // Simple form validation
   const validateForm = (): { isValid: boolean; error?: string } => {
-    if (!emailValidation.isValid) {
-      return { isValid: false, error: emailValidation.feedback };
+    if (!isEmailValid) {
+      return {
+        isValid: false,
+        error: "Please enter a valid email address",
+      };
     }
 
     if (!passwordStrength.isValid) {
       return {
         isValid: false,
-        error: "Password is too weak. Please follow the requirements below.",
+        error: "Please meet all password requirements.",
       };
     }
 
-    if (password !== confirmPassword) {
+    if (!isConfirmPasswordValid()) {
       return { isValid: false, error: "Passwords do not match" };
     }
 
@@ -189,31 +194,31 @@ export default function RegistrationForm({
 
   const performRegistration = async (): Promise<RegistrationResult> => {
     try {
+      const normalizedEmail = email.trim().toLowerCase();
       const auth = await getFirebaseAuth();
       let userCredential;
 
       if (mode === "upgrade" && auth.currentUser?.isAnonymous) {
-        // Upgrade anonymous user to registered account
         console.log("🔄 Upgrading anonymous user to registered account");
-        const credential = EmailAuthProvider.credential(email, password);
+        const credential = EmailAuthProvider.credential(
+          normalizedEmail,
+          password
+        );
         userCredential = await linkWithCredential(auth.currentUser, credential);
         console.log(
           "✅ Anonymous account successfully linked to email/password"
         );
       } else {
-        // Create new account
         console.log("🔄 Creating new user account");
         userCredential = await createUserWithEmailAndPassword(
           auth,
-          email,
+          normalizedEmail,
           password
         );
         console.log("✅ New user account created successfully");
       }
 
       const user = userCredential.user;
-
-      // Check if this becomes an admin (unlikely but possible)
       const tokenResult = await user.getIdTokenResult();
       const isAdmin = tokenResult.claims.admin === true;
 
@@ -232,13 +237,11 @@ export default function RegistrationForm({
     } catch (error: any) {
       console.error("Registration failed:", error);
 
-      // Handle specific Firebase errors with user-friendly messages
       let errorMessage = "Registration failed";
-
       switch (error.code) {
         case "auth/email-already-in-use":
           errorMessage =
-            "An account with this email already exists. Try signing in instead.";
+            "This email is already registered. Please sign in instead or use a different email address.";
           break;
         case "auth/weak-password":
           errorMessage =
@@ -260,15 +263,10 @@ export default function RegistrationForm({
             "Too many registration attempts. Please wait before trying again.";
           break;
         default:
-          errorMessage =
-            error.message ||
-            "An unexpected error occurred during registration.";
+          errorMessage = error.message || "An unexpected error occurred.";
       }
 
-      return {
-        success: false,
-        message: errorMessage,
-      };
+      return { success: false, message: errorMessage };
     }
   };
 
@@ -319,33 +317,19 @@ export default function RegistrationForm({
 
   const getSubtitle = () => {
     return mode === "upgrade"
-      ? "Link your anonymous account to get unlimited access and report tracking"
-      : "Join the community and help make Pasig more accessible for everyone";
+      ? "Get unlimited access and track your accessibility reports"
+      : "Join the community making cities more accessible";
   };
 
-  const getStrengthColor = () => {
+  // Password strength indicator color
+  const getPasswordStrengthColor = () => {
     switch (passwordStrength.strength) {
       case "strong":
         return COLORS.success;
       case "medium":
-        return COLORS.warning;
-      case "weak":
+        return COLORS.orange;
+      default:
         return COLORS.error;
-      default:
-        return COLORS.muted;
-    }
-  };
-
-  const getStrengthText = () => {
-    switch (passwordStrength.strength) {
-      case "strong":
-        return "Strong password";
-      case "medium":
-        return "Medium strength";
-      case "weak":
-        return "Weak password";
-      default:
-        return "";
     }
   };
 
@@ -353,7 +337,7 @@ export default function RegistrationForm({
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={styles.keyboardAvoid}
+        style={styles.keyboardView}
       >
         <ScrollView
           style={styles.scrollView}
@@ -363,29 +347,30 @@ export default function RegistrationForm({
           {/* Header */}
           <View style={styles.header}>
             <TouchableOpacity
-              style={styles.closeButton}
               onPress={onCancel}
-              accessibilityLabel="Close registration form"
+              style={styles.closeButton}
               accessibilityRole="button"
+              accessibilityLabel="Close registration form"
             >
-              <Ionicons name="close" size={24} color={COLORS.muted} />
+              <Ionicons name="close" size={24} color={COLORS.slate} />
             </TouchableOpacity>
-            <Text style={styles.title}>{getTitle()}</Text>
-            <Text style={styles.subtitle}>{getSubtitle()}</Text>
+
+            <View style={styles.titleContainer}>
+              <Text style={styles.title}>{getTitle()}</Text>
+              <Text style={styles.subtitle}>{getSubtitle()}</Text>
+            </View>
           </View>
 
-          {/* Registration Form */}
+          {/* Form */}
           <View style={styles.form}>
-            {/* Email Input */}
+            {/* Email Input with Format Validation */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Email Address</Text>
               <View
                 style={[
                   styles.inputContainer,
-                  emailTouched && !emailValidation.isValid && styles.inputError,
-                  emailTouched &&
-                    emailValidation.isValid &&
-                    styles.inputSuccess,
+                  email.length > 0 && isEmailValid && styles.inputSuccess,
+                  email.length > 0 && !isEmailValid && styles.inputError,
                 ]}
               >
                 <Ionicons
@@ -398,7 +383,6 @@ export default function RegistrationForm({
                   style={styles.input}
                   value={email}
                   onChangeText={setEmail}
-                  onBlur={() => setEmailTouched(true)}
                   placeholder="your-email@example.com"
                   keyboardType="email-address"
                   autoCapitalize="none"
@@ -409,20 +393,22 @@ export default function RegistrationForm({
                   accessibilityLabel="Email address"
                   accessibilityHint="Enter your email address for your WAISPATH account"
                 />
-                {emailTouched && emailValidation.isValid && (
+                {email.length > 0 && (
                   <Ionicons
-                    name="checkmark-circle"
+                    name={isEmailValid ? "checkmark-circle" : "close-circle"}
                     size={20}
-                    color={COLORS.success}
+                    color={isEmailValid ? COLORS.success : COLORS.error}
                   />
                 )}
               </View>
-              {emailTouched && !emailValidation.isValid && (
-                <Text style={styles.errorText}>{emailValidation.feedback}</Text>
+              {email.length > 0 && !isEmailValid && (
+                <Text style={styles.errorText}>
+                  Please enter a valid email address
+                </Text>
               )}
             </View>
 
-            {/* Password Input */}
+            {/* Password Input with Progress Bar */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Password</Text>
               <View
@@ -447,6 +433,7 @@ export default function RegistrationForm({
                   value={password}
                   onChangeText={setPassword}
                   onBlur={() => setPasswordTouched(true)}
+                  onFocus={() => setPasswordTouched(true)}
                   placeholder="Enter a secure password"
                   secureTextEntry={!showPassword}
                   autoComplete="new-password"
@@ -472,24 +459,53 @@ export default function RegistrationForm({
               </View>
 
               {/* Password Strength Indicator */}
-              {password.length > 0 && (
-                <View style={styles.strengthContainer}>
+              {(passwordTouched || password.length > 0) && (
+                <View style={styles.passwordStrengthContainer}>
+                  <View style={styles.strengthHeader}>
+                    <Text style={styles.strengthLabel}>Password Strength</Text>
+                    {password.length > 0 && (
+                      <Text
+                        style={[
+                          styles.strengthText,
+                          { color: getPasswordStrengthColor() },
+                        ]}
+                      >
+                        {passwordStrength.strength.toUpperCase()}
+                      </Text>
+                    )}
+                  </View>
+
                   <View style={styles.strengthBar}>
                     <View
                       style={[
                         styles.strengthFill,
                         {
                           width: `${passwordStrength.score}%`,
-                          backgroundColor: getStrengthColor(),
+                          backgroundColor: getPasswordStrengthColor(),
                         },
                       ]}
                     />
                   </View>
-                  <Text
-                    style={[styles.strengthText, { color: getStrengthColor() }]}
-                  >
-                    {getStrengthText()}
-                  </Text>
+
+                  <View style={styles.requirementsList}>
+                    {passwordStrength.requirements.map((req, index) => (
+                      <View key={index} style={styles.requirementItem}>
+                        <Ionicons
+                          name={req.icon as any}
+                          size={14}
+                          color={req.met ? COLORS.success : COLORS.muted}
+                        />
+                        <Text
+                          style={[
+                            styles.requirementText,
+                            { color: req.met ? COLORS.success : COLORS.muted },
+                          ]}
+                        >
+                          {req.label}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
                 </View>
               )}
             </View>
@@ -501,11 +517,10 @@ export default function RegistrationForm({
                 style={[
                   styles.inputContainer,
                   confirmPasswordTouched &&
-                    password !== confirmPassword &&
+                    !isConfirmPasswordValid() &&
                     styles.inputError,
                   confirmPasswordTouched &&
-                    password === confirmPassword &&
-                    confirmPassword.length > 0 &&
+                    isConfirmPasswordValid() &&
                     styles.inputSuccess,
                 ]}
               >
@@ -518,7 +533,12 @@ export default function RegistrationForm({
                 <TextInput
                   style={[styles.input, styles.passwordInput]}
                   value={confirmPassword}
-                  onChangeText={setConfirmPassword}
+                  onChangeText={(text) => {
+                    setConfirmPassword(text);
+                    if (text.length > 0) {
+                      setConfirmPasswordTouched(true);
+                    }
+                  }}
                   onBlur={() => setConfirmPasswordTouched(true)}
                   placeholder="Confirm your password"
                   secureTextEntry={!showConfirmPassword}
@@ -545,133 +565,34 @@ export default function RegistrationForm({
                   />
                 </TouchableOpacity>
               </View>
-
-              {/* Password Match Indicator */}
-              {confirmPassword.length > 0 && (
-                <View style={styles.matchContainer}>
-                  <Ionicons
-                    name={
-                      password === confirmPassword
-                        ? "checkmark-circle"
-                        : "close-circle"
-                    }
-                    size={16}
-                    color={
-                      password === confirmPassword
-                        ? COLORS.success
-                        : COLORS.error
-                    }
-                  />
-                  <Text
-                    style={[
-                      styles.matchText,
-                      {
-                        color:
-                          password === confirmPassword
-                            ? COLORS.success
-                            : COLORS.error,
-                      },
-                    ]}
-                  >
-                    {password === confirmPassword
-                      ? "Passwords match"
-                      : "Passwords don't match"}
-                  </Text>
-                </View>
-              )}
+              {confirmPasswordTouched &&
+                !isConfirmPasswordValid() &&
+                confirmPassword.length > 0 && (
+                  <Text style={styles.errorText}>Passwords do not match</Text>
+                )}
             </View>
 
-            {/* Password Requirements */}
-            {password.length > 0 && passwordStrength.feedback.length > 0 && (
-              <View style={styles.requirementsContainer}>
-                <Text style={styles.requirementsTitle}>
-                  Password Requirements:
-                </Text>
-                {passwordStrength.feedback.map((requirement, index) => (
-                  <View key={index} style={styles.requirementItem}>
-                    <Ionicons
-                      name="close-circle"
-                      size={16}
-                      color={COLORS.error}
-                    />
-                    <Text style={styles.requirementText}>{requirement}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-
-            {/* Terms and Conditions */}
-            <View style={styles.termsContainer}>
-              <TouchableOpacity
-                style={styles.checkboxContainer}
-                onPress={() => setAcceptTerms(!acceptTerms)}
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked: acceptTerms }}
+            {/* Terms and Conditions Checkbox */}
+            <TouchableOpacity
+              style={styles.termsContainer}
+              onPress={() => setAcceptTerms(!acceptTerms)}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: acceptTerms }}
+              accessibilityLabel="Accept Terms of Service and Privacy Policy"
+            >
+              <View
+                style={[styles.checkbox, acceptTerms && styles.checkboxChecked]}
               >
-                <View
-                  style={[
-                    styles.checkbox,
-                    acceptTerms && styles.checkboxChecked,
-                  ]}
-                >
-                  {acceptTerms && (
-                    <Ionicons name="checkmark" size={14} color={COLORS.white} />
-                  )}
-                </View>
-                <Text style={styles.termsText}>
-                  I agree to the{" "}
-                  <Text style={styles.termsLink}>Terms of Service</Text> and{" "}
-                  <Text style={styles.termsLink}>Privacy Policy</Text>
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Benefits Section */}
-            <View style={styles.benefitsContainer}>
-              <Text style={styles.benefitsTitle}>Account Benefits:</Text>
-              <View style={styles.benefitsList}>
-                <View style={styles.benefit}>
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={16}
-                    color={COLORS.success}
-                  />
-                  <Text style={styles.benefitText}>
-                    Unlimited accessibility reporting
-                  </Text>
-                </View>
-                <View style={styles.benefit}>
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={16}
-                    color={COLORS.success}
-                  />
-                  <Text style={styles.benefitText}>
-                    Save and sync your routes
-                  </Text>
-                </View>
-                <View style={styles.benefit}>
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={16}
-                    color={COLORS.success}
-                  />
-                  <Text style={styles.benefitText}>
-                    Track your community contributions
-                  </Text>
-                </View>
-                <View style={styles.benefit}>
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={16}
-                    color={COLORS.success}
-                  />
-                  <Text style={styles.benefitText}>
-                    Personalized accessibility preferences
-                  </Text>
-                </View>
+                {acceptTerms && (
+                  <Ionicons name="checkmark" size={14} color={COLORS.white} />
+                )}
               </View>
-            </View>
+              <Text style={styles.termsText}>
+                I agree to the{" "}
+                <Text style={styles.termsLink}>Terms of Service</Text> and{" "}
+                <Text style={styles.termsLink}>Privacy Policy</Text>
+              </Text>
+            </TouchableOpacity>
 
             {/* Submit Button */}
             <TouchableOpacity
@@ -682,37 +603,35 @@ export default function RegistrationForm({
               ]}
               onPress={handleSubmit}
               disabled={!validateForm().isValid || isLoading}
-              accessibilityLabel="Create account"
               accessibilityRole="button"
+              accessibilityLabel={
+                mode === "upgrade" ? "Upgrade account" : "Create account"
+              }
             >
               {isLoading ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="small" color={COLORS.white} />
-                  <Text style={styles.submitButtonText}>
-                    Creating Account...
-                  </Text>
-                </View>
+                <ActivityIndicator size="small" color={COLORS.white} />
               ) : (
-                <>
-                  <Ionicons name="person-add" size={20} color={COLORS.white} />
-                  <Text style={styles.submitButtonText}>
-                    {mode === "upgrade" ? "Upgrade Account" : "Create Account"}
-                  </Text>
-                </>
+                <Text style={styles.submitButtonText}>
+                  {mode === "upgrade"
+                    ? "Get Unlimited Access"
+                    : "Create Account"}
+                </Text>
               )}
             </TouchableOpacity>
 
-            {/* Footer */}
-            <View style={styles.footer}>
-              <Text style={styles.footerText}>Already have an account? </Text>
-              <TouchableOpacity
-                onPress={handleSwitchToLogin}
-                accessibilityLabel="Switch to sign in"
-                accessibilityRole="button"
-              >
-                <Text style={styles.footerLink}>Sign In</Text>
-              </TouchableOpacity>
-            </View>
+            {/* Switch to Login */}
+            {onSwitchToLogin && (
+              <View style={styles.switchContainer}>
+                <Text style={styles.switchText}>Already have an account? </Text>
+                <TouchableOpacity
+                  onPress={handleSwitchToLogin}
+                  accessibilityRole="button"
+                  accessibilityLabel="Switch to sign in"
+                >
+                  <Text style={styles.switchLink}>Sign In</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -725,7 +644,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.white,
   },
-  keyboardAvoid: {
+  keyboardView: {
     flex: 1,
   },
   scrollView: {
@@ -733,45 +652,44 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingBottom: 40,
+    paddingHorizontal: 24,
+    paddingBottom: 32,
   },
   header: {
-    padding: 24,
+    paddingTop: 16,
     paddingBottom: 32,
-    alignItems: "center",
   },
   closeButton: {
-    position: "absolute",
-    top: 24,
-    right: 24,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    alignSelf: "flex-end",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: COLORS.lightGray,
-    alignItems: "center",
     justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  titleContainer: {
+    alignItems: "center",
   },
   title: {
     fontSize: 28,
     fontWeight: "bold",
-    color: COLORS.slate,
-    marginTop: 12,
-    marginBottom: 8,
+    color: COLORS.navy,
     textAlign: "center",
+    marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,
     color: COLORS.muted,
     textAlign: "center",
     lineHeight: 22,
-    paddingHorizontal: 16,
   },
   form: {
-    padding: 24,
     flex: 1,
   },
   inputGroup: {
-    marginBottom: 20,
+    marginBottom: 24,
   },
   label: {
     fontSize: 16,
@@ -783,9 +701,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 2,
-    borderColor: "#E5E7EB",
+    borderColor: COLORS.lightGray,
     borderRadius: 12,
     backgroundColor: COLORS.white,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
   },
   inputError: {
     borderColor: COLORS.error,
@@ -794,18 +714,15 @@ const styles = StyleSheet.create({
     borderColor: COLORS.success,
   },
   inputIcon: {
-    marginLeft: 16,
     marginRight: 12,
   },
   input: {
     flex: 1,
     fontSize: 16,
     color: COLORS.slate,
-    paddingVertical: 16,
-    paddingRight: 16,
   },
   passwordInput: {
-    paddingRight: 50,
+    paddingRight: 40,
   },
   eyeButton: {
     position: "absolute",
@@ -815,81 +732,73 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: 14,
     color: COLORS.error,
-    marginTop: 6,
-    marginLeft: 4,
-  },
-  strengthContainer: {
     marginTop: 8,
+    fontWeight: "500",
+  },
+  passwordStrengthContainer: {
+    marginTop: 12,
+    padding: 16,
+    backgroundColor: COLORS.lightGray,
+    borderRadius: 12,
+  },
+  strengthHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  strengthLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: COLORS.slate,
+  },
+  strengthText: {
+    fontSize: 12,
+    fontWeight: "700",
   },
   strengthBar: {
     height: 4,
     backgroundColor: "#E5E7EB",
     borderRadius: 2,
-    marginBottom: 4,
+    marginBottom: 12,
+    overflow: "hidden",
   },
   strengthFill: {
     height: "100%",
     borderRadius: 2,
   },
-  strengthText: {
-    fontSize: 14,
-    fontWeight: "500",
-  },
-  matchContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 8,
-  },
-  matchText: {
-    fontSize: 14,
-    fontWeight: "500",
-    marginLeft: 6,
-  },
-  requirementsContainer: {
-    backgroundColor: COLORS.lightGray,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
-    borderLeftWidth: 4,
-    borderLeftColor: COLORS.error,
-  },
-  requirementsTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: COLORS.slate,
-    marginBottom: 8,
+  requirementsList: {
+    gap: 6,
   },
   requirementItem: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 4,
   },
   requirementText: {
-    fontSize: 14,
-    color: COLORS.error,
+    fontSize: 13,
     marginLeft: 8,
+    fontWeight: "500",
   },
   termsContainer: {
-    marginBottom: 24,
-  },
-  checkboxContainer: {
     flexDirection: "row",
     alignItems: "flex-start",
+    marginBottom: 32,
   },
   checkbox: {
     width: 20,
     height: 20,
-    borderWidth: 2,
-    borderColor: "#E5E7EB",
     borderRadius: 4,
+    borderWidth: 2,
+    borderColor: COLORS.muted,
     marginRight: 12,
     marginTop: 2,
-    alignItems: "center",
     justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: COLORS.white,
   },
   checkboxChecked: {
-    backgroundColor: COLORS.success,
-    borderColor: COLORS.success,
+    backgroundColor: COLORS.softBlue,
+    borderColor: COLORS.softBlue,
   },
   termsText: {
     flex: 1,
@@ -899,77 +808,35 @@ const styles = StyleSheet.create({
   },
   termsLink: {
     color: COLORS.softBlue,
-    fontWeight: "500",
-  },
-  benefitsContainer: {
-    backgroundColor: COLORS.chipBg,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: "#E0F2FE",
-  },
-  benefitsTitle: {
-    fontSize: 16,
     fontWeight: "600",
-    color: COLORS.navy,
-    marginBottom: 12,
-  },
-  benefitsList: {
-    gap: 10,
-  },
-  benefit: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  benefitText: {
-    fontSize: 14,
-    color: COLORS.slate,
-    marginLeft: 10,
-    flex: 1,
   },
   submitButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: COLORS.success,
-    paddingVertical: 16,
+    backgroundColor: COLORS.softBlue,
     borderRadius: 12,
-    marginBottom: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
+    paddingVertical: 16,
+    alignItems: "center",
+    marginBottom: 24,
   },
   submitButtonDisabled: {
     backgroundColor: COLORS.muted,
-    shadowOpacity: 0,
-    elevation: 0,
   },
   submitButtonText: {
     fontSize: 16,
     fontWeight: "600",
     color: COLORS.white,
-    marginLeft: 8,
   },
-  loadingContainer: {
+  switchContainer: {
     flexDirection: "row",
-    alignItems: "center",
-  },
-  footer: {
-    flexDirection: "row",
-    alignItems: "center",
     justifyContent: "center",
-    paddingBottom: 20,
+    alignItems: "center",
   },
-  footerText: {
+  switchText: {
     fontSize: 14,
     color: COLORS.muted,
   },
-  footerLink: {
+  switchLink: {
     fontSize: 14,
     color: COLORS.softBlue,
-    fontWeight: "500",
+    fontWeight: "600",
   },
 });
