@@ -1,5 +1,6 @@
 // src/hooks/useProximityDetection.ts
-// 🔥 UPDATED: Integration with improved TTS service
+// 🔥 FIXED: Location-driven detection instead of interval-based
+// Now matches the working validation system pattern
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
@@ -40,9 +41,15 @@ export function useProximityDetection({
     detectionError: null,
   });
 
-  const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // 🔥 REMOVED: detectionIntervalRef - No more setInterval!
+
+  // Track last announced obstacles to prevent spam
   const lastCriticalIdsRef = useRef<Set<string>>(new Set());
   const lastLocationRef = useRef<UserLocation | null>(null);
+
+  // 🔥 NEW: Track last detection time to prevent too-frequent checks
+  const lastDetectionTimeRef = useRef<number>(0);
+  const MIN_DETECTION_INTERVAL = 1500; // 1.5 seconds minimum between detections
 
   // 🔥 NEW: Update TTS service with user location for distance-based cleanup
   useEffect(() => {
@@ -51,11 +58,26 @@ export function useProximityDetection({
     }
   }, [userLocation]);
 
-  // Detection function - memoized to prevent unnecessary re-renders
+  // 🔥 FIXED: Detection function with stable dependencies
   const runDetection = useCallback(async () => {
-    if (!userLocation || !isNavigating || !userProfile) return;
+    if (!userLocation || !isNavigating || !userProfile) {
+      return;
+    }
+
+    // 🔥 NEW: Throttle detection to prevent excessive API calls
+    const now = Date.now();
+    const timeSinceLastDetection = now - lastDetectionTimeRef.current;
+
+    if (timeSinceLastDetection < MIN_DETECTION_INTERVAL) {
+      // Skip this detection cycle - too soon after last one
+      return;
+    }
+
+    lastDetectionTimeRef.current = now;
 
     try {
+      console.log("🚨 Running proximity detection...");
+
       const alerts = await proximityDetectionService.detectObstaclesAhead(
         userLocation,
         routePolyline,
@@ -69,7 +91,7 @@ export function useProximityDetection({
           (alert.severity === "blocking" || alert.severity === "high")
       );
 
-      // 🔥 CRITICAL FIX: Update UI state IMMEDIATELY - don't wait for TTS
+      // 🔥 CRITICAL: Update UI state IMMEDIATELY
       setState((prev) => ({
         ...prev,
         proximityAlerts: alerts || [],
@@ -78,69 +100,55 @@ export function useProximityDetection({
         detectionError: null,
       }));
 
-      // 🔥 IMPROVED: Handle modal display FIRST, then TTS in background
+      console.log(
+        `🚨 Detection complete: ${alerts.length} alerts, ${criticalAlerts.length} critical`
+      );
+
+      // 🔥 Handle critical obstacle modals for NEW obstacles only
       const currentCriticalIds = new Set(
         criticalAlerts.map((alert) => alert.obstacle.id)
       );
 
-      // Trigger critical obstacle callback for new alerts IMMEDIATELY
       if (onCriticalObstacle) {
         const newCriticalAlerts = criticalAlerts.filter(
           (alert) => !lastCriticalIdsRef.current.has(alert.obstacle.id)
         );
 
-        // 🔥 SHOW MODALS IMMEDIATELY - don't wait for TTS
+        // Show modals for new critical obstacles
         for (const alert of newCriticalAlerts) {
+          console.log(
+            `🚨 NEW CRITICAL: ${alert.obstacle.type} at ${alert.distance}m`
+          );
           onCriticalObstacle(alert);
         }
       }
 
-      // 🔥 IMPROVED: Process ALL critical alerts (both new and existing) for TTS
-      // This ensures consistent announcements even if detection timing varies
+      // 🔥 Process ALL critical alerts for TTS (service handles deduplication)
       if (criticalAlerts.length > 0 && userProfile) {
         console.log(
           `🔊 TTS: Processing ${criticalAlerts.length} critical alerts for announcements`
         );
 
-        // 🔥 CRITICAL IMPROVEMENT: Let TTS service handle deduplication
-        // We pass ALL critical alerts and let the improved TTS service decide what to announce
         for (const alert of criticalAlerts) {
-          // 🔥 NON-BLOCKING: Fire and forget TTS (no await, no setTimeout delays)
+          // Fire-and-forget TTS (non-blocking)
           textToSpeechService
             .announceProximityAlert(alert.obstacle, alert.distance, userProfile)
             .then(() => {
-              // Success logging handled in TTS service
               if (__DEV__) {
                 console.log(
-                  `🔊 TTS: Processed announcement for ${alert.obstacle.type} at ${alert.distance}m`
+                  `🔊 TTS: Announced ${alert.obstacle.type} at ${alert.distance}m`
                 );
               }
             })
             .catch((error: unknown) => {
-              console.warn(
-                "🔊 TTS: Failed to process obstacle announcement:",
-                error
-              );
-              // Don't break proximity detection if TTS fails
+              console.warn("🔊 TTS: Failed to announce obstacle:", error);
             });
         }
       }
 
-      // Update tracking reference
+      // Update tracking reference for next cycle
       lastCriticalIdsRef.current = currentCriticalIds;
       lastLocationRef.current = userLocation;
-
-      if (__DEV__ && alerts.length > 0) {
-        console.log(
-          `🚨 Proximity: ${alerts.length} alerts, ${criticalAlerts.length} critical`
-        );
-
-        // 🔥 NEW: Debug TTS state
-        const ttsDebug = textToSpeechService.getDebugInfo();
-        console.log(
-          `🔊 TTS State: Queue: ${ttsDebug.queueLength}, Tracked: ${ttsDebug.trackedObstacles}, Processing: ${ttsDebug.isProcessing}, Speaking: ${ttsDebug.isSpeaking}`
-        );
-      }
     } catch (error) {
       console.error("❌ Proximity detection error:", error);
       setState((prev) => ({
@@ -159,54 +167,50 @@ export function useProximityDetection({
     onCriticalObstacle,
   ]);
 
-  // Start/stop detection based on navigation state
+  // 🔥 NEW: Location-driven detection (replaces setInterval)
+  // This runs EVERY TIME location updates during navigation
   useEffect(() => {
     if (isNavigating && userLocation && userProfile) {
-      // Start periodic detection
-      setState((prev) => ({
-        ...prev,
-        isDetecting: true,
-        detectionError: null,
-      }));
+      // Mark as detecting
+      if (!state.isDetecting) {
+        setState((prev) => ({
+          ...prev,
+          isDetecting: true,
+          detectionError: null,
+        }));
+        console.log("🚨 Proximity detection ACTIVE (location-driven)");
+      }
 
-      // Run initial detection
+      // Run detection on every location update
       runDetection();
-
-      // Set up periodic detection every 2 seconds
-      detectionIntervalRef.current = setInterval(runDetection, 2000);
-
-      console.log("🚨 Proximity detection started");
     } else {
-      // Stop detection
-      if (detectionIntervalRef.current) {
-        clearInterval(detectionIntervalRef.current);
-        detectionIntervalRef.current = null;
+      // Stop detection and reset state
+      if (state.isDetecting) {
+        setState((prev) => ({
+          ...prev,
+          isDetecting: false,
+          proximityAlerts: [],
+          criticalAlerts: [],
+        }));
+
+        // Reset tracking
+        lastCriticalIdsRef.current.clear();
+        lastLocationRef.current = null;
+        lastDetectionTimeRef.current = 0;
+
+        console.log("🚨 Proximity detection STOPPED");
       }
-
-      setState((prev) => ({
-        ...prev,
-        isDetecting: false,
-        proximityAlerts: [],
-        criticalAlerts: [],
-      }));
-
-      // Reset tracking
-      lastCriticalIdsRef.current.clear();
-      lastLocationRef.current = null;
-
-      console.log("🚨 Proximity detection stopped");
     }
+  }, [
+    isNavigating,
+    userLocation,
+    userProfile,
+    runDetection,
+    state.isDetecting,
+  ]);
 
-    // Cleanup on unmount
-    return () => {
-      if (detectionIntervalRef.current) {
-        clearInterval(detectionIntervalRef.current);
-        detectionIntervalRef.current = null;
-      }
-    };
-  }, [isNavigating, userLocation, userProfile, runDetection]);
+  // 🔥 REMOVED: Cleanup function for interval (no longer needed)
 
-  // 🔥 KEEP IT SIMPLE: Just return the state as before
   return state;
 }
 

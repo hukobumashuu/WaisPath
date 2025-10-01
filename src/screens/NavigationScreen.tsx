@@ -496,15 +496,6 @@ export default function NavigationScreen() {
           console.log("Map is ready!");
         }}
       >
-        {/* USER MARKER */}
-        {location && (
-          <Marker coordinate={location} anchor={{ x: 0.5, y: 0.5 }}>
-            <View style={styles.userLocationMarker}>
-              <Ionicons name="navigate" size={20} color="white" />
-            </View>
-          </Marker>
-        )}
-
         {/* DESTINATION MARKER */}
         {selectedDestination && (
           <Marker coordinate={selectedDestination} anchor={{ x: 0.5, y: 1 }}>
