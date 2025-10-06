@@ -67,6 +67,13 @@ export default function NavigationScreen() {
   const mapRef = useRef<MapView | null>(null);
   const [destination, setDestination] = useState("");
 
+  const [remainingPolyline, setRemainingPolyline] = useState<UserLocation[]>(
+    []
+  );
+  const [selectedRouteType, setSelectedRouteType] = useState<
+    "fastest" | "clearest" | null
+  >(null);
+
   // All existing state
   const [showAllObstacles, setShowAllObstacles] = useState(false);
   const [validationRadiusObstacles, setValidationRadiusObstacles] = useState<
@@ -97,6 +104,33 @@ export default function NavigationScreen() {
     if (onClearest) return "clearest"; // ✅ Change "accessible" to "clearest"
     return undefined;
   }
+
+  const calculateRemainingRoute = useCallback(
+    (userLocation: UserLocation, fullRoute: UserLocation[]): UserLocation[] => {
+      if (fullRoute.length === 0) return [];
+
+      let closestIndex = 0;
+      let minDistance = Infinity;
+
+      // Find closest point on route to user
+      fullRoute.forEach((point, index) => {
+        const distance = proximityDetectionService.calculateDistance(
+          userLocation,
+          point
+        );
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestIndex = index;
+        }
+      });
+
+      // Return from closest point to end
+      // Keep a small buffer behind (2 points) for smooth rendering
+      const startIndex = Math.max(0, closestIndex - 2);
+      return fullRoute.slice(startIndex);
+    },
+    []
+  );
 
   const dedupeById = (arr: AccessibilityObstacle[] = []) => {
     const map = new Map<string, AccessibilityObstacle>();
@@ -310,8 +344,25 @@ export default function NavigationScreen() {
   };
 
   const startNavigation = (routeType: "fastest" | "clearest") => {
+    // Add this check first
+    if (!routeAnalysis) {
+      console.error("Cannot start navigation: No route analysis");
+      Alert.alert("Error", "Route not ready. Please try again.");
+      return;
+    }
+
     setIsNavigating(true);
+    setSelectedRouteType(routeType);
     Vibration.vibrate(100);
+
+    const selectedRoute =
+      routeType === "fastest"
+        ? routeAnalysis.fastestRoute
+        : routeAnalysis.clearestRoute;
+
+    // Initialize the polyline
+    setRemainingPolyline(selectedRoute.polyline);
+
     Alert.alert(
       "Navigation Started!",
       `Following ${routeType} route to ${destinationName}.`,
@@ -321,22 +372,23 @@ export default function NavigationScreen() {
 
   const stopNavigation = useCallback(() => {
     setIsNavigating(false);
-    setDestination(""); // Clear destination
-
-    // Reset proximity detection state
+    setSelectedRouteType(null); // ADD THIS
+    setRemainingPolyline([]); // ADD THIS
+    setDestination("");
     proximityDetectionService.resetDetectionState();
-    // Clear TTS announcements
     textToSpeechService.stopSpeaking();
-
-    console.log("🛑 Navigation stopped manually by user");
+    console.log("🛑 Navigation stopped");
   }, []);
 
   // UPDATED: Function to clear routes when user wants to close route info panel
   const clearRoutesAndPanel = useCallback(() => {
-    setShowRoutePanel(false); // Hide the route panel
-    setDestination(""); // Clear destination input
-    clearRoutes(); // Clear all route data from the hook
-    console.log("🗑️ Routes and panel cleared completely");
+    setIsNavigating(false); // ADD THIS
+    setSelectedRouteType(null); // ADD THIS
+    setRemainingPolyline([]); // ADD THIS
+    setShowRoutePanel(false);
+    setDestination("");
+    clearRoutes();
+    console.log("🗑️ Routes cleared");
   }, [clearRoutes]);
 
   const checkArrival = useCallback(() => {
@@ -372,6 +424,35 @@ export default function NavigationScreen() {
       checkArrival();
     }
   }, [location, isNavigating, selectedDestination, checkArrival]);
+
+  useEffect(() => {
+    if (!isNavigating || !location || !selectedRouteType || !routeAnalysis) {
+      return;
+    }
+
+    const selectedRoute =
+      selectedRouteType === "fastest"
+        ? routeAnalysis.fastestRoute
+        : routeAnalysis.clearestRoute;
+
+    if (!selectedRoute || !selectedRoute.polyline) {
+      return;
+    }
+
+    // Calculate remaining route from user's position
+    const updatedPolyline = calculateRemainingRoute(
+      location,
+      selectedRoute.polyline
+    );
+
+    setRemainingPolyline(updatedPolyline);
+  }, [
+    location,
+    isNavigating,
+    selectedRouteType,
+    routeAnalysis,
+    calculateRemainingRoute,
+  ]);
 
   useFocusEffect(
     useCallback(() => {
@@ -547,24 +628,40 @@ export default function NavigationScreen() {
         {/* ROUTE VISUALIZATION */}
         {routeAnalysis && (
           <>
-            {routeAnalysis.fastestRoute.polyline && (
-              <Polyline
-                coordinates={routeAnalysis.fastestRoute.polyline}
-                strokeColor="#EF4444"
-                strokeWidth={5}
-                lineDashPattern={[0]}
-                zIndex={1}
-              />
+            {/* Show both routes when NOT navigating */}
+            {!isNavigating && (
+              <>
+                {routeAnalysis.fastestRoute.polyline && (
+                  <Polyline
+                    coordinates={routeAnalysis.fastestRoute.polyline}
+                    strokeColor="#EF4444"
+                    strokeWidth={5}
+                  />
+                )}
+                {routeAnalysis.clearestRoute.polyline && (
+                  <Polyline
+                    coordinates={routeAnalysis.clearestRoute.polyline}
+                    strokeColor="#22C55E"
+                    strokeWidth={5}
+                  />
+                )}
+              </>
             )}
-            {routeAnalysis.clearestRoute.polyline && ( // ✅ Changed accessibleRoute to clearestRoute
-              <Polyline
-                coordinates={routeAnalysis.clearestRoute.polyline} // ✅ Changed accessibleRoute to clearestRoute
-                strokeColor="#22C55E"
-                strokeWidth={5}
-                lineDashPattern={[0]}
-                zIndex={2}
-              />
-            )}
+
+            {/* Show ONLY selected route when navigating - TRIMMED! */}
+            {isNavigating &&
+              selectedRouteType &&
+              remainingPolyline.length > 0 && (
+                <Polyline
+                  coordinates={remainingPolyline}
+                  strokeColor={
+                    selectedRouteType === "fastest" ? "#EF4444" : "#22C55E"
+                  }
+                  strokeWidth={6}
+                  lineDashPattern={[0]}
+                  zIndex={10}
+                />
+              )}
           </>
         )}
       </MapView>

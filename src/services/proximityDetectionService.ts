@@ -29,14 +29,16 @@ export interface ProximityDetectionConfig {
 
 export class ProximityDetectionService {
   private config: ProximityDetectionConfig = {
-    detectionRadius: 100, // 100m lookahead
-    routeTolerance: 15, // 15m tolerance for "on route"
-    updateInterval: 5000, // 5 second updates
-    minimumMovement: 10, // 10m minimum movement
-    maxAlerts: 2, // Maximum alerts to return
+    detectionRadius: 100,
+    routeTolerance: 15,
+    updateInterval: 3000, // Changed from 5000 to 3000ms (3 seconds)
+    minimumMovement: 3, // Changed from 10 to 3 meters
+    maxAlerts: 2,
   };
 
   private lastDetectionLocation?: UserLocation;
+
+  private lastDetectionTime: number = 0;
 
   /**
    * MAIN METHOD: Detect obstacles ahead on the planned route
@@ -119,12 +121,27 @@ export class ProximityDetectionService {
   private shouldUpdate(currentLocation: UserLocation): boolean {
     if (!this.lastDetectionLocation) return true;
 
+    const now = Date.now();
+    const timeSinceLastDetection = now - this.lastDetectionTime;
+
+    // Check if enough time has passed (3 seconds)
+    if (timeSinceLastDetection >= this.config.updateInterval) {
+      this.lastDetectionTime = now;
+      return true;
+    }
+
+    // OR check if user moved enough (3 meters)
     const distanceMoved = this.calculateDistance(
       this.lastDetectionLocation,
       currentLocation
     );
 
-    return distanceMoved >= this.config.minimumMovement;
+    if (distanceMoved >= this.config.minimumMovement) {
+      this.lastDetectionTime = now;
+      return true;
+    }
+
+    return false;
   }
 
   /**
