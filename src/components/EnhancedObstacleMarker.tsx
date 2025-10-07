@@ -38,9 +38,10 @@ function getObstacleDisplay(type: ObstacleType) {
       title: "Narrow Passage",
       color: "#F59E0B",
     },
-    broken_pavement: {
+    // 🔥 UPDATED: Changed from broken_pavement to broken_infrastructure
+    broken_infrastructure: {
       icon: "warning-outline" as keyof typeof Ionicons.glyphMap,
-      title: "Broken Pavement",
+      title: "Broken Infrastructure",
       color: "#EF4444",
     },
     flooding: {
@@ -58,11 +59,13 @@ function getObstacleDisplay(type: ObstacleType) {
       title: "Electrical Post",
       color: "#6B7280",
     },
-    tree_roots: {
-      icon: "leaf-outline" as keyof typeof Ionicons.glyphMap,
-      title: "Tree Roots",
-      color: "#059669",
+    // 🔥 NEW: Added debris mapping
+    debris: {
+      icon: "trash-outline" as keyof typeof Ionicons.glyphMap,
+      title: "Debris or Trash",
+      color: "#6B7280",
     },
+    // 🔥 REMOVED: tree_roots (no longer in reporting system)
     no_sidewalk: {
       icon: "trail-sign-outline" as keyof typeof Ionicons.glyphMap,
       title: "No Sidewalk",

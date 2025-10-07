@@ -45,18 +45,18 @@ export interface AccessibilityObstacle {
 
 // Philippine street reality obstacle types
 export type ObstacleType =
-  | "vendor_blocking" // Sari-sari store, food vendors
-  | "parked_vehicles" // Motorcycles, cars on sidewalk
-  | "construction" // Materials, ongoing work
-  | "electrical_post" // Posts planted in walkway
-  | "tree_roots" // Broken/raised sidewalk
-  | "no_sidewalk" // Must walk on road
-  | "flooding" // Rainy season issues
-  | "stairs_no_ramp" // Accessibility barrier
-  | "narrow_passage" // Less than wheelchair width
-  | "broken_pavement" // Dangerous surface
-  | "steep_slope" // Too steep for wheelchairs
-  | "other"; // Other obstacles
+  | "vendor_blocking"
+  | "parked_vehicles"
+  | "stairs_no_ramp"
+  | "narrow_passage"
+  | "broken_infrastructure" // ✅ NEW
+  | "flooding"
+  | "construction"
+  | "electrical_post"
+  | "debris" // ✅ NEW
+  | "no_sidewalk"
+  | "steep_slope"
+  | "other";
 
 // Enhanced User Mobility Profile for Option B implementation
 export interface UserMobilityProfile {

@@ -525,13 +525,13 @@ class TextToSpeechService {
     const allObstacleTypes = [
       "stairs_no_ramp",
       "narrow_passage",
-      "broken_pavement",
+      "broken_infrastructure", // 🔥 UPDATED
       "flooding",
       "construction",
       "vendor_blocking",
       "parked_vehicles",
       "electrical_post",
-      "tree_roots",
+      "debris", // 🔥 NEW
       "no_sidewalk",
       "steep_slope",
       "other",
@@ -543,17 +543,20 @@ class TextToSpeechService {
   /**
    * Convert obstacle type to readable English
    */
+  /**
+   * Convert obstacle type to readable English
+   */
   private getObstacleTypeInEnglish(type: string): string {
     const types: Record<string, string> = {
       stairs_no_ramp: "Stairs without ramp",
       narrow_passage: "Narrow passage",
-      broken_pavement: "Broken pavement",
+      broken_infrastructure: "Broken infrastructure", // 🔥 UPDATED
       flooding: "Flooding",
       construction: "Construction",
       vendor_blocking: "Vendors",
       parked_vehicles: "Parked vehicles",
       electrical_post: "Utility pole",
-      tree_roots: "Tree roots",
+      debris: "Debris or trash", // 🔥 NEW
       no_sidewalk: "No sidewalk",
       steep_slope: "Steep slope",
       other: "Obstacle",

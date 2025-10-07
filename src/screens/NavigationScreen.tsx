@@ -713,6 +713,9 @@ export default function NavigationScreen() {
               selectedRouteType &&
               remainingPolyline.length > 0 && (
                 <Polyline
+                  key={`nav-route-${
+                    remainingPolyline.length
+                  }-${remainingPolyline[0]?.latitude.toFixed(6)}`}
                   coordinates={remainingPolyline}
                   strokeColor={
                     selectedRouteType === "fastest" ? "#EF4444" : "#22C55E"
