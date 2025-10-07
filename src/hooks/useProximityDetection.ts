@@ -173,7 +173,7 @@ export function useProximityDetection({
       runDetection();
 
       // Set up periodic detection every 2 seconds
-      detectionIntervalRef.current = setInterval(runDetection, 2000);
+      detectionIntervalRef.current = setInterval(runDetection, 5000);
 
       console.log("🚨 Proximity detection started");
     } else {

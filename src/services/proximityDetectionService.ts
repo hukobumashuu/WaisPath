@@ -31,8 +31,8 @@ export class ProximityDetectionService {
   private config: ProximityDetectionConfig = {
     detectionRadius: 100,
     routeTolerance: 15,
-    updateInterval: 3000, // Changed from 5000 to 3000ms (3 seconds)
-    minimumMovement: 3, // Changed from 10 to 3 meters
+    updateInterval: 5000, // Changed from 5000 to 3000ms (3 seconds)
+    minimumMovement: 5, // Changed from 10 to 3 meters
     maxAlerts: 2,
   };
 

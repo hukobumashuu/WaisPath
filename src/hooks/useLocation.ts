@@ -1,7 +1,7 @@
 // src/hooks/useLocation.ts
-// RAHHH UPDATE: Real user location ALWAYS - no more location lock!
+// 🔥 CRITICAL FIX: Enable continuous location tracking for navigation
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import * as Location from "expo-location";
 import { UserLocation } from "../types";
 
@@ -27,7 +27,12 @@ export function useLocation() {
     hasPermission: false,
   });
 
-  // 🔥 RAHHH: Get user's REAL location - anywhere in the world!
+  // 🔥 NEW: Store subscription reference for cleanup
+  const locationSubscription = useRef<Location.LocationSubscription | null>(
+    null
+  );
+
+  // Get initial location
   const getCurrentLocation = async (): Promise<UserLocation> => {
     try {
       setState((prev) => ({ ...prev, loading: true, error: null }));
@@ -54,46 +59,39 @@ export function useLocation() {
         "✅ Location permission granted, getting current position..."
       );
 
-      // Get current position with longer timeout for various network conditions
+      // Get current position
       const position = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
-        timeInterval: 15000, // 15 seconds timeout
+        timeInterval: 15000,
       });
 
       console.log(
         `📍 Got real user location: ${position.coords.latitude}, ${position.coords.longitude}`
       );
 
-      // 🚀 REAL WORLD READY: Use actual user location!
       const userLocation: UserLocation = {
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
         accuracy: position.coords.accuracy || undefined,
       };
 
-      // 🔥 NO MORE LOCATION LOCK - Use real location everywhere!
       setState((prev) => ({
         ...prev,
         loading: false,
         hasPermission: true,
-        location: userLocation, // Always use real location!
+        location: userLocation,
         error: null,
       }));
 
-      console.log("✅ RAHHH! Real user location set:", userLocation);
-      console.log("🌍 WAISPATH now works GLOBALLY!");
+      console.log("✅ Initial location set:", userLocation);
 
       return userLocation;
     } catch (error: any) {
       console.log("❌ Location error:", error.message);
 
-      // Provide specific error messages
       let errorMessage = "Could not get location. Using Pasig City center.";
 
-      if (
-        error.message?.includes("timeout") ||
-        error.message?.includes("Location request timed out")
-      ) {
+      if (error.message?.includes("timeout")) {
         errorMessage =
           "Location timeout. Please check GPS signal. Using Pasig City center.";
       } else if (error.message?.includes("Location provider is disabled")) {
@@ -106,14 +104,88 @@ export function useLocation() {
         loading: false,
         error: errorMessage,
         hasPermission: true,
-        location: PASIG_CENTER, // Only fallback on actual errors
+        location: PASIG_CENTER,
       }));
 
       return PASIG_CENTER;
     }
   };
 
-  // Keep the isNearPasig function for informational purposes (but don't use it to lock location)
+  // 🔥 CRITICAL FIX: Start continuous location tracking
+  const startWatchingLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        console.log("❌ Cannot watch location - permission denied");
+        return;
+      }
+
+      console.log("🔄 Starting continuous location tracking...");
+
+      // 🔥 IMPORTANT: Store subscription for cleanup
+      locationSubscription.current = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.Balanced,
+          timeInterval: 3000, // 🔥 Update every 3 seconds (matches detection interval)
+          distanceInterval: 3, // 🔥 Update when moved 3 meters (matches detection threshold)
+        },
+        (position) => {
+          const newLocation: UserLocation = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            accuracy: position.coords.accuracy || undefined,
+          };
+
+          console.log("📍 Location update:", {
+            lat: newLocation.latitude.toFixed(6),
+            lng: newLocation.longitude.toFixed(6),
+            accuracy: newLocation.accuracy?.toFixed(1) + "m",
+          });
+
+          setState((prev) => ({
+            ...prev,
+            location: newLocation,
+          }));
+        }
+      );
+
+      console.log(
+        "✅ Location tracking started - updates every 3s or 3m movement"
+      );
+    } catch (error) {
+      console.error("❌ Failed to start location tracking:", error);
+    }
+  };
+
+  // 🔥 CRITICAL FIX: Auto-start tracking on mount
+  useEffect(() => {
+    let isMounted = true;
+
+    const initializeLocation = async () => {
+      // Get initial location
+      await getCurrentLocation();
+
+      // Start continuous tracking
+      if (isMounted) {
+        await startWatchingLocation();
+      }
+    };
+
+    initializeLocation();
+
+    // 🔥 CRITICAL: Cleanup on unmount
+    return () => {
+      isMounted = false;
+
+      if (locationSubscription.current) {
+        console.log("🛑 Stopping location tracking...");
+        locationSubscription.current.remove();
+        locationSubscription.current = null;
+      }
+    };
+  }, []);
+
+  // Helper functions
   const isNearPasig = (location: UserLocation): boolean => {
     const pasigBounds = {
       north: 14.62,
@@ -130,48 +202,10 @@ export function useLocation() {
     );
   };
 
-  // Watch location updates (for when user is moving)
-  const watchLocation = async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") return;
-
-      return await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.Balanced,
-          timeInterval: 30000, // Update every 30 seconds
-          distanceInterval: 50, // Update when moved 50 meters
-        },
-        (position) => {
-          const newLocation: UserLocation = {
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-            accuracy: position.coords.accuracy || undefined,
-          };
-
-          console.log("📍 Location update - REAL WORLD:", newLocation);
-
-          setState((prev) => ({
-            ...prev,
-            location: newLocation, // Always use real updates!
-          }));
-        }
-      );
-    } catch (error) {
-      console.log("Watch location error:", error);
-    }
-  };
-
-  // Initialize location on hook mount
-  useEffect(() => {
-    getCurrentLocation();
-  }, []);
-
   return {
     ...state,
     getCurrentLocation,
-    watchLocation,
-    pasigCenter: PASIG_CENTER, // Keep for fallback reference
-    isNearPasig, // Keep for informational use
+    pasigCenter: PASIG_CENTER,
+    isNearPasig,
   };
 }
