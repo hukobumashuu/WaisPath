@@ -9,6 +9,11 @@ import {
 } from "../types";
 import { firebaseServices } from "./firebase";
 
+import {
+  calculateUserBearingFromRoute,
+  isObstacleAhead,
+} from "../utils/navigationUtils";
+
 // Type definitions for proximity detection
 export interface ProximityAlert {
   obstacle: AccessibilityObstacle;
@@ -76,9 +81,23 @@ export class ProximityDetectionService {
         );
       }
 
+      // 🔥 NEW STEP 3.5: Filter obstacles that are AHEAD (not behind)
+      const obstaclesAhead = this.filterObstaclesAhead(
+        routeObstacles,
+        userLocation,
+        routePolyline
+      );
+      if (obstaclesAhead.length < routeObstacles.length) {
+        console.log(
+          `🧭 Filtered out ${
+            routeObstacles.length - obstaclesAhead.length
+          } obstacles behind user`
+        );
+      }
+
       // STEP 4: Filter by user relevance (mobility type specific)
       const relevantObstacles = this.filterByUserRelevance(
-        routeObstacles,
+        obstaclesAhead, // 🔥 Changed from routeObstacles
         userProfile
       );
       if (relevantObstacles.length > 0) {
@@ -204,6 +223,56 @@ export class ProximityDetectionService {
 
       return distanceToRoute <= this.config.routeTolerance;
     });
+  }
+
+  /**
+   * 🔥 NEW STEP 3.5: Filter obstacles that are ahead of user (not behind)
+   */
+  private filterObstaclesAhead(
+    obstacles: AccessibilityObstacle[],
+    userLocation: UserLocation,
+    routePolyline: UserLocation[]
+  ): AccessibilityObstacle[] {
+    // Calculate user's direction of travel from route
+    const userBearing = calculateUserBearingFromRoute(
+      userLocation,
+      routePolyline
+    );
+
+    if (userBearing === null) {
+      console.warn(
+        "⚠️ Could not determine user bearing, showing all obstacles"
+      );
+      return obstacles; // Fail-safe: show all if we can't determine direction
+    }
+
+    console.log(
+      `🧭 User bearing: ${Math.round(userBearing)}° (direction of travel)`
+    );
+
+    // Filter obstacles that are ahead (within 90° cone in front)
+    const ahead = obstacles.filter((obstacle) => {
+      const isAhead = isObstacleAhead(
+        userLocation,
+        userBearing,
+        obstacle.location,
+        90 // 90° threshold = front hemisphere
+      );
+
+      if (!isAhead) {
+        console.log(
+          `⬅️ Filtered out ${
+            obstacle.type
+          } at ${obstacle.location.latitude.toFixed(
+            4
+          )}, ${obstacle.location.longitude.toFixed(4)} (behind user)`
+        );
+      }
+
+      return isAhead;
+    });
+
+    return ahead;
   }
 
   /**

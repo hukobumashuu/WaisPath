@@ -29,6 +29,7 @@ import { useLocation } from "../hooks/useLocation";
 import { useUserProfile } from "../stores/userProfileStore";
 import { firebaseServices } from "../services/firebase";
 import { UserLocation, AccessibilityObstacle, ObstacleType } from "../types";
+import { calculateUserBearingFromRoute } from "../utils/navigationUtils";
 
 // Import existing styles
 import { navigationStyles as styles } from "../styles/navigationStyles";
@@ -80,8 +81,12 @@ export default function NavigationScreen() {
     AccessibilityObstacle[]
   >([]);
 
+  const [hasArrived, setHasArrived] = useState(false);
+
   // ADD: New state to control route panel visibility
   const [showRoutePanel, setShowRoutePanel] = useState(true);
+
+  const [userBearing, setUserBearing] = useState<number | null>(null);
 
   // Existing helper functions
   function getObstacleRouteType(
@@ -344,7 +349,6 @@ export default function NavigationScreen() {
   };
 
   const startNavigation = (routeType: "fastest" | "clearest") => {
-    // Add this check first
     if (!routeAnalysis) {
       console.error("Cannot start navigation: No route analysis");
       Alert.alert("Error", "Route not ready. Please try again.");
@@ -353,6 +357,7 @@ export default function NavigationScreen() {
 
     setIsNavigating(true);
     setSelectedRouteType(routeType);
+    setHasArrived(false); // 🔄 RESET arrival flag for new navigation
     Vibration.vibrate(100);
 
     const selectedRoute =
@@ -372,19 +377,20 @@ export default function NavigationScreen() {
 
   const stopNavigation = useCallback(() => {
     setIsNavigating(false);
-    setSelectedRouteType(null); // ADD THIS
-    setRemainingPolyline([]); // ADD THIS
+    setHasArrived(false); // 🔄 RESET arrival flag on manual stop
+    setSelectedRouteType(null);
+    setRemainingPolyline([]);
     setDestination("");
     proximityDetectionService.resetDetectionState();
     textToSpeechService.stopSpeaking();
     console.log("🛑 Navigation stopped");
   }, []);
 
-  // UPDATED: Function to clear routes when user wants to close route info panel
   const clearRoutesAndPanel = useCallback(() => {
-    setIsNavigating(false); // ADD THIS
-    setSelectedRouteType(null); // ADD THIS
-    setRemainingPolyline([]); // ADD THIS
+    setIsNavigating(false);
+    setHasArrived(false); // 🔄 RESET arrival flag when clearing routes
+    setSelectedRouteType(null);
+    setRemainingPolyline([]);
     setShowRoutePanel(false);
     setDestination("");
     clearRoutes();
@@ -392,6 +398,11 @@ export default function NavigationScreen() {
   }, [clearRoutes]);
 
   const checkArrival = useCallback(() => {
+    // 🛡️ NEW: Exit early if already arrived
+    if (hasArrived) {
+      return;
+    }
+
     if (!location || !selectedDestination || !isNavigating) return;
 
     const distance = proximityDetectionService.calculateDistance(
@@ -401,8 +412,11 @@ export default function NavigationScreen() {
     const ARRIVAL_THRESHOLD = 20; // 20 meters
 
     if (distance <= ARRIVAL_THRESHOLD) {
+      // 🛡️ NEW: Set arrival flag FIRST to prevent re-entry
+      setHasArrived(true);
+
       setIsNavigating(false);
-      setDestination(""); // Clear destination
+      setDestination("");
       proximityDetectionService.resetDetectionState();
       textToSpeechService.stopSpeaking();
 
@@ -410,13 +424,18 @@ export default function NavigationScreen() {
         `🎉 Arrival detected - ${distance.toFixed(1)}m from destination`
       );
 
-      // For now, skip TTS announcement since speak method is private
-      // We can use testTTS as a workaround or make speak public later
+      // ✅ NOW SAFE - Will only show ONCE
       Alert.alert("🎉 Arrival", `You have reached your destination!`, [
         { text: "Great!" },
       ]);
     }
-  }, [location, selectedDestination, isNavigating, destinationName]);
+  }, [
+    location,
+    selectedDestination,
+    isNavigating,
+    destinationName,
+    hasArrived,
+  ]); // 🛡️ Added hasArrived to deps
 
   // 🔥 NEW: Arrival monitoring useEffect - MUST be after checkArrival declaration
   useEffect(() => {
@@ -439,13 +458,21 @@ export default function NavigationScreen() {
       return;
     }
 
-    // Calculate remaining route from user's position
+    // 🔥 FIX: Calculate remaining route from user's position
     const updatedPolyline = calculateRemainingRoute(
       location,
       selectedRoute.polyline
     );
 
-    setRemainingPolyline(updatedPolyline);
+    // 🔥 CRITICAL: Validate before updating
+    if (updatedPolyline.length > 0) {
+      setRemainingPolyline(updatedPolyline);
+      console.log(
+        `🗺️ Polyline trimmed: ${selectedRoute.polyline.length} → ${updatedPolyline.length} points`
+      );
+    } else {
+      console.warn("⚠️ Updated polyline is empty, keeping previous polyline");
+    }
   }, [
     location,
     isNavigating,
@@ -478,6 +505,34 @@ export default function NavigationScreen() {
       };
     }, [isNavigating, selectedDestination, navigationPausedByBlur])
   );
+
+  // 🔥 NEW: Calculate and update user bearing from route
+  useEffect(() => {
+    if (!isNavigating || !location || !selectedRouteType || !routeAnalysis) {
+      setUserBearing(null); // Reset when not navigating
+      return;
+    }
+
+    const selectedRoute =
+      selectedRouteType === "fastest"
+        ? routeAnalysis.fastestRoute
+        : routeAnalysis.clearestRoute;
+
+    if (!selectedRoute || !selectedRoute.polyline) {
+      return;
+    }
+
+    // Import at top: import { calculateUserBearingFromRoute } from "../utils/navigationUtils";
+    const bearing = calculateUserBearingFromRoute(
+      location,
+      selectedRoute.polyline
+    );
+
+    if (bearing !== null) {
+      setUserBearing(bearing);
+      console.log(`🧭 User marker bearing updated: ${Math.round(bearing)}°`);
+    }
+  }, [location, isNavigating, selectedRouteType, routeAnalysis]);
 
   // Existing obstacle rendering
   const renderObstacles = () => {
@@ -579,7 +634,12 @@ export default function NavigationScreen() {
       >
         {/* USER MARKER */}
         {location && (
-          <Marker coordinate={location} anchor={{ x: 0.5, y: 0.5 }}>
+          <Marker
+            coordinate={location}
+            anchor={{ x: 0.5, y: 0.5 }}
+            rotation={userBearing || 0} // 🔥 Add rotation based on bearing
+            flat={true} // 🔥 Keep icon flat on map (rotates with map rotation)
+          >
             <View style={styles.userLocationMarker}>
               <Ionicons name="navigate" size={20} color="white" />
             </View>
