@@ -112,27 +112,127 @@ export default function NavigationScreen() {
 
   const calculateRemainingRoute = useCallback(
     (userLocation: UserLocation, fullRoute: UserLocation[]): UserLocation[] => {
-      if (fullRoute.length === 0) return [];
+      if (!fullRoute || fullRoute.length === 0 || !userLocation) return [];
 
-      let closestIndex = 0;
-      let minDistance = Infinity;
+      // Ensure points use {latitude, longitude}
+      const norm = (p: any) =>
+        ({
+          latitude: p.latitude ?? p.lat,
+          longitude: p.longitude ?? p.lng,
+        } as UserLocation);
 
-      // Find closest point on route to user
-      fullRoute.forEach((point, index) => {
-        const distance = proximityDetectionService.calculateDistance(
-          userLocation,
-          point
-        );
-        if (distance < minDistance) {
-          minDistance = distance;
-          closestIndex = index;
+      const route = fullRoute.map(norm);
+      const user = norm(userLocation);
+
+      // Fast equirectangular approximation to meters (centered at user)
+      const R = 6371000;
+      const toRad = (d: number) => (d * Math.PI) / 180;
+      const lat0 = toRad(user.latitude);
+      const cosLat0 = Math.cos(lat0);
+
+      const toXY = (p: UserLocation) => {
+        const x = toRad(p.longitude - user.longitude) * R * cosLat0;
+        const y = toRad(p.latitude - user.latitude) * R;
+        return { x, y };
+      };
+
+      const userXY = { x: 0, y: 0 }; // by construction
+      const routeXY = route.map(toXY);
+
+      const sq = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+        (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y);
+
+      const projectSeg = (
+        pXY: { x: number; y: number },
+        vXY: { x: number; y: number },
+        wXY: { x: number; y: number }
+      ) => {
+        const dx = wXY.x - vXY.x;
+        const dy = wXY.y - vXY.y;
+        const l2 = dx * dx + dy * dy;
+        if (l2 === 0) return { t: 0, proj: { x: vXY.x, y: vXY.y } };
+        let t = ((pXY.x - vXY.x) * dx + (pXY.y - vXY.y) * dy) / l2;
+        if (t < 0) t = 0;
+        if (t > 1) t = 1;
+        return { t, proj: { x: vXY.x + t * dx, y: vXY.y + t * dy } };
+      };
+
+      // Find best projection on any segment
+      let bestDist = Infinity;
+      let bestIndex = -1;
+      let bestProjXY: { x: number; y: number } | null = null;
+
+      for (let i = 0; i < routeXY.length - 1; i++) {
+        const { proj } = projectSeg(userXY, routeXY[i], routeXY[i + 1]);
+        const d = sq(userXY, proj);
+        if (d < bestDist) {
+          bestDist = d;
+          bestIndex = i;
+          bestProjXY = proj;
         }
-      });
+      }
 
-      // Return from closest point to end
-      // Keep a small buffer behind (2 points) for smooth rendering
-      const startIndex = Math.max(0, closestIndex - 2);
-      return fullRoute.slice(startIndex);
+      // Also check final point
+      const lastIdx = routeXY.length - 1;
+      const dLast = sq(userXY, routeXY[lastIdx]);
+      if (dLast < bestDist) {
+        bestDist = dLast;
+        bestIndex = lastIdx;
+        bestProjXY = routeXY[lastIdx];
+      }
+
+      if (!bestProjXY || bestIndex === -1) {
+        // Fallback — prefix user location
+        return [user, ...route];
+      }
+
+      // Convert projection XY back to lat/lng
+      const projToLatLng = (xy: { x: number; y: number }) => {
+        const lat = user.latitude + (xy.y / R) * (180 / Math.PI);
+        const lon = user.longitude + (xy.x / (R * cosLat0)) * (180 / Math.PI);
+        return { latitude: lat, longitude: lon } as UserLocation;
+      };
+
+      const projLatLng = projToLatLng(bestProjXY);
+
+      // Build output: user location, projection (if different), then remaining points
+      const out: UserLocation[] = [];
+      out.push({ latitude: user.latitude, longitude: user.longitude });
+
+      const EPS_M_SQ = 0.01; // 0.1m^2 threshold
+      // include proj if it is meaningfully different from user
+      if (sq(userXY, bestProjXY) > EPS_M_SQ) {
+        out.push(projLatLng);
+      }
+
+      if (bestIndex >= lastIdx) {
+        // Closest to end; append last point
+        const lastPt = route[lastIdx];
+        if (
+          out.length === 0 ||
+          out[out.length - 1].latitude !== lastPt.latitude ||
+          out[out.length - 1].longitude !== lastPt.longitude
+        ) {
+          out.push(lastPt);
+        }
+        return out;
+      }
+
+      // Append remaining points from bestIndex+1 onward (avoid duplicates)
+      const start = bestIndex + 1;
+      for (let k = start; k < route.length; k++) {
+        const pt = route[k];
+        const prev = out[out.length - 1];
+        if (
+          !prev ||
+          prev.latitude !== pt.latitude ||
+          prev.longitude !== pt.longitude
+        ) {
+          out.push(pt);
+        }
+      }
+
+      return out;
     },
     []
   );
