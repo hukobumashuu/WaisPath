@@ -88,21 +88,21 @@ const OBSTACLE_TYPES = [
 const SEVERITY_LEVELS = [
   {
     key: "low" as const,
-    labelFil: "Maliit na Problem",
+    labelFil: "Maliit na Problema",
     labelEn: "Minor Issue",
     color: COLORS.success,
     description: "Pwedeng ma-navigate pero may konting hirap",
   },
   {
     key: "medium" as const,
-    labelFil: "Katamtamang Problem",
+    labelFil: "Katamtamang Problema",
     labelEn: "Moderate Issue",
     color: COLORS.warning,
     description: "Mahirap ma-navigate, kailangan ng tulong",
   },
   {
     key: "high" as const,
-    labelFil: "Malaking Problem",
+    labelFil: "Malaking Problema",
     labelEn: "Major Issue",
     color: COLORS.danger,
     description: "Napaka-hirap ma-navigate, delikado",
