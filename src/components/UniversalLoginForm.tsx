@@ -23,6 +23,8 @@ import {
   enhancedFirebaseService,
   clearAuthCache,
 } from "../services/enhancedFirebase";
+import RegistrationForm from "./RegistrationForm";
+import ForgotPasswordForm from "./ForgotPasswordForm";
 
 const COLORS = {
   white: "#FFFFFF",
@@ -57,7 +59,12 @@ export default function UniversalLoginForm({
 }: UniversalLoginFormProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Modal states for linked components
+  const [showRegister, setShowRegister] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
 
   const handleSubmit = async () => {
     if (!email.trim() || !password.trim()) {
@@ -341,6 +348,49 @@ export default function UniversalLoginForm({
     return mode === "upgrade" ? "Get Access" : "Sign In";
   };
 
+  // Handlers for opening linked components
+  const openRegister = () => setShowRegister(true);
+  const openForgot = () => setShowForgot(true);
+
+  const handleRegistrationSuccess = (user: any) => {
+    // Close register modal and forward success to parent as a registered user
+    setShowRegister(false);
+    onLoginSuccess("registered", user);
+  };
+
+  const handleForgotSuccess = () => {
+    // ForgotPasswordForm already alerts on success — just close it
+    setShowForgot(false);
+  };
+
+  const handleSwitchToLoginFromChild = () => {
+    setShowRegister(false);
+    setShowForgot(false);
+    // retains the current sign-in form visibility for user to continue
+  };
+
+  // If a linked form is open, render it full-screen (overlay)
+  if (showRegister) {
+    return (
+      <RegistrationForm
+        onRegistrationSuccess={handleRegistrationSuccess}
+        onCancel={() => setShowRegister(false)}
+        onSwitchToLogin={handleSwitchToLoginFromChild}
+        mode="standalone"
+      />
+    );
+  }
+
+  if (showForgot) {
+    return (
+      <ForgotPasswordForm
+        onCancel={() => setShowForgot(false)}
+        onSuccess={handleForgotSuccess}
+        onSwitchToLogin={handleSwitchToLoginFromChild}
+      />
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -369,15 +419,27 @@ export default function UniversalLoginForm({
 
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Password</Text>
-          <TextInput
-            style={styles.input}
-            value={password}
-            onChangeText={setPassword}
-            placeholder="Enter your password"
-            secureTextEntry
-            autoComplete="password"
-            textContentType="password"
-          />
+          <View style={styles.passwordContainer}>
+            <TextInput
+              style={[styles.input, { flex: 1 }]}
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Enter your password"
+              secureTextEntry={!isPasswordVisible}
+              autoComplete="password"
+              textContentType="password"
+            />
+            <TouchableOpacity
+              style={styles.eyeIcon}
+              onPress={() => setIsPasswordVisible(!isPasswordVisible)}
+            >
+              <Ionicons
+                name={isPasswordVisible ? "eye-off" : "eye"}
+                size={22}
+                color={COLORS.muted}
+              />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <TouchableOpacity
@@ -390,6 +452,19 @@ export default function UniversalLoginForm({
         >
           <Text style={styles.submitButtonText}>{getSubmitButtonText()}</Text>
         </TouchableOpacity>
+
+        {/* Modernized link row: lighter "forgot" + accented "Sign up" */}
+        <View style={styles.linkRow}>
+          <TouchableOpacity onPress={openForgot} accessibilityRole="button">
+            <Text style={styles.forgotText}>Forgot Password?</Text>
+          </TouchableOpacity>
+
+          <Text style={styles.divider}>·</Text>
+
+          <TouchableOpacity onPress={openRegister} accessibilityRole="button">
+            <Text style={styles.signupText}>Sign up</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -453,6 +528,16 @@ const styles = StyleSheet.create({
     color: COLORS.slate,
     backgroundColor: COLORS.white,
   },
+  passwordContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: COLORS.lightGray,
+    borderRadius: 12,
+    backgroundColor: COLORS.white,
+    paddingRight: 12,
+  },
+  eyeIcon: { paddingHorizontal: 4 },
   submitButton: {
     backgroundColor: COLORS.softBlue,
     borderRadius: 12,
@@ -467,5 +552,38 @@ const styles = StyleSheet.create({
     color: COLORS.white,
     fontSize: 18,
     fontWeight: "600",
+  },
+  linkContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 16,
+  },
+  linkText: {
+    color: COLORS.softBlue,
+    fontSize: 16,
+    fontWeight: "500",
+  },
+  linkRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 16,
+  },
+  forgotText: {
+    color: COLORS.muted,
+    fontSize: 14,
+    paddingHorizontal: 6,
+  },
+  divider: {
+    color: "#E5E7EB",
+    marginHorizontal: 8,
+    fontSize: 14,
+    alignSelf: "center",
+  },
+  signupText: {
+    color: COLORS.softBlue,
+    fontSize: 15,
+    fontWeight: "600",
+    paddingHorizontal: 6,
   },
 });
