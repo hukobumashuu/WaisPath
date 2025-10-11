@@ -110,7 +110,7 @@ const ReportScreen = ({ navigation }: { navigation: any }) => {
                 { text: "Maybe Later", style: "cancel" },
                 {
                   text: "Register Now",
-                  onPress: () => navigation.navigate("Profile"),
+                  onPress: () => navigation.navigate("Settings"),
                 },
               ]
             );

@@ -48,11 +48,11 @@ export const AuthUpgradePrompt: React.FC = () => {
   const isSmallScreen = screenWidth < 375;
 
   const handleRegisterPress = () => {
-    navigation.navigate("Profile");
+    navigation.navigate("Settings");
   };
 
   const handleLearnMorePress = () => {
-    navigation.navigate("Profile");
+    navigation.navigate("Settings");
   };
 
   return (
