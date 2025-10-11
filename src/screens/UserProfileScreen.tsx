@@ -58,7 +58,7 @@ export default function UserProfileScreen({
         type: "wheelchair" as const,
         icon: "♿",
         title: "Wheelchair",
-        tagalogTitle: "Silyang de Gulong",
+        tagalogTitle: "Wheelchair",
         subtitle: "Manual o electric",
         description: "Kailangan: ramp, malawak na daan, makinis na surface",
         color: COLORS.softBlue,

@@ -157,7 +157,7 @@ export const SubmitReportTab: React.FC<SubmitReportTabProps> = ({
       case "select":
         return { current: 1, total: 3, label: "Uri ng Hadlang" };
       case "photo":
-        return { current: 2, total: 3, label: "Kumuha ng Photo" };
+        return { current: 2, total: 3, label: "Kumuha ng Larawan" };
       case "details":
         return { current: 3, total: 3, label: "Mga Detalye" };
       default:

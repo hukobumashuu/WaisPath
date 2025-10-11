@@ -47,8 +47,7 @@ export function useLocation() {
         setState((prev) => ({
           ...prev,
           loading: false,
-          error:
-            "Location permission denied. Using Pasig City center for demo.",
+          error: "Location permission denied.",
           hasPermission: false,
           location: PASIG_CENTER,
         }));

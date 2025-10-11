@@ -62,9 +62,9 @@ const OBSTACLE_TYPE_LABELS = {
 };
 
 const SEVERITY_LABELS = {
-  low: "Maliit na Problem",
-  medium: "Katamtamang Problem",
-  high: "Malaking Problem",
+  low: "Maliit na Problema",
+  medium: "Katamtamang Problema",
+  high: "Malaking Problema",
   blocking: "Completely Blocked",
 };
 

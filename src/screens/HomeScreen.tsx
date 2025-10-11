@@ -53,45 +53,49 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
     const deviceMap = {
       wheelchair: {
         greeting: "Kumusta! Ready to roll?",
-        deviceInfo: "Mga ramp at malawak na daan para sa wheelchair",
+        deviceInfo: "Mga ramp at malawak na daan para sa wheelchair.",
         icon: "♿",
         tips: [
-          "Check accessible entrances",
-          "Prefer covered walkways",
-          "Avoid vendor-heavy times",
+          "Check accessible entrances.",
+          "Prefer covered walkways.",
+          "Avoid vendor-heavy times.",
         ],
       },
       walker: {
-        greeting: "Hello! Safe exploration ahead",
-        deviceInfo: "Steady routes para sa walker mo",
+        greeting: "Hello! Safe exploration ahead.",
+        deviceInfo: "Steady routes para sa walker mo.",
         icon: "🚶‍♂️",
         tips: [
-          "Rest every 400m",
-          "Use handrails when available",
-          "Avoid slippery surfaces",
+          "Rest every 400m.",
+          "Use handrails when available.",
+          "Avoid slippery surfaces.",
         ],
       },
       cane: {
-        greeting: "Magandang araw! Let's navigate safely",
-        deviceInfo: "Stable paths para sa walking cane",
+        greeting: "Magandang araw! Let's navigate safely.",
+        deviceInfo: "Stable paths para sa walking cane.",
         icon: "🦯",
         tips: [
-          "Watch for uneven sidewalks",
-          "Use well-lit routes at night",
-          "Report loose tiles",
+          "Watch for uneven sidewalks.",
+          "Use well-lit routes at night.",
+          "Report loose tiles.",
         ],
       },
       crutches: {
         greeting: "Ready ka na? Let's go!",
-        deviceInfo: "Space para sa crutches mo",
+        deviceInfo: "Space para sa crutches mo.",
         icon: "🩼",
         tips: ["Allow extra time", "Avoid crowded areas", "Rest frequently"],
       },
       none: {
-        greeting: "Kumusta! Comfortable routes para sa'yo",
-        deviceInfo: "Short distances with rest stops",
+        greeting: "Kumusta! Comfortable routes para sa'yo.",
+        deviceInfo: "Short distances with rest stops.",
         icon: "👥",
-        tips: ["Take frequent breaks", "Choose shaded paths", "Stay hydrated"],
+        tips: [
+          "Take frequent breaks.",
+          "Choose shaded paths.",
+          "Stay hydrated!",
+        ],
       },
     };
 
@@ -218,7 +222,7 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
                 { fontSize: isSmallScreen ? 18 : 20, marginBottom: 12 },
               ]}
             >
-              Tips para sa'yo
+              Tips para sa'yo:
             </Text>
 
             <View style={styles.tipsContainer}>
