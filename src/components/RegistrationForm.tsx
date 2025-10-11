@@ -22,6 +22,7 @@ import {
   linkWithCredential,
   EmailAuthProvider,
 } from "firebase/auth";
+import PolicyModal from "./PolicyModal";
 
 const COLORS = {
   white: "#FFFFFF",
@@ -83,6 +84,12 @@ export default function RegistrationForm({
   // Validation states
   const [passwordTouched, setPasswordTouched] = useState(false);
   const [confirmPasswordTouched, setConfirmPasswordTouched] = useState(false);
+
+  // Policy modal states
+  const [showPolicyModal, setShowPolicyModal] = useState(false);
+  const [policyInitialTab, setPolicyInitialTab] = useState<"terms" | "privacy">(
+    "terms"
+  );
 
   // Simple email validation
   const validateEmailFormat = (email: string): boolean => {
@@ -333,6 +340,16 @@ export default function RegistrationForm({
     }
   };
 
+  // Policy modal helpers
+  const openPolicyModal = (tab: "terms" | "privacy") => {
+    setPolicyInitialTab(tab);
+    setShowPolicyModal(true);
+  };
+
+  const closePolicyModal = () => {
+    setShowPolicyModal(false);
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
@@ -572,27 +589,45 @@ export default function RegistrationForm({
                 )}
             </View>
 
-            {/* Terms and Conditions Checkbox */}
-            <TouchableOpacity
-              style={styles.termsContainer}
-              onPress={() => setAcceptTerms(!acceptTerms)}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: acceptTerms }}
-              accessibilityLabel="Accept Terms of Service and Privacy Policy"
-            >
-              <View
+            {/* Terms and Conditions Checkbox + Links */}
+            <View style={styles.termsContainer}>
+              {/* Checkbox only toggles acceptance */}
+              <TouchableOpacity
+                onPress={() => setAcceptTerms(!acceptTerms)}
                 style={[styles.checkbox, acceptTerms && styles.checkboxChecked]}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: acceptTerms }}
+                accessibilityLabel="Accept Terms of Service and Privacy Policy"
               >
                 {acceptTerms && (
                   <Ionicons name="checkmark" size={14} color={COLORS.white} />
                 )}
+              </TouchableOpacity>
+
+              {/* Text with tappable links that open the policy modal (uses Text.onPress for perfect inline alignment) */}
+              <View style={{ flex: 1 }}>
+                <Text style={styles.termsText}>
+                  I agree to the{" "}
+                  <Text
+                    style={styles.termsLink}
+                    onPress={() => openPolicyModal("terms")}
+                    accessibilityRole="link"
+                    accessibilityLabel="Open Terms of Service"
+                  >
+                    Terms of Service
+                  </Text>{" "}
+                  and{" "}
+                  <Text
+                    style={styles.termsLink}
+                    onPress={() => openPolicyModal("privacy")}
+                    accessibilityRole="link"
+                    accessibilityLabel="Open Privacy Policy"
+                  >
+                    Privacy Policy
+                  </Text>
+                </Text>
               </View>
-              <Text style={styles.termsText}>
-                I agree to the{" "}
-                <Text style={styles.termsLink}>Terms of Service</Text> and{" "}
-                <Text style={styles.termsLink}>Privacy Policy</Text>
-              </Text>
-            </TouchableOpacity>
+            </View>
 
             {/* Submit Button */}
             <TouchableOpacity
@@ -635,6 +670,15 @@ export default function RegistrationForm({
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Policy Modal */}
+      <PolicyModal
+        visible={showPolicyModal}
+        initialTab={policyInitialTab}
+        onClose={closePolicyModal}
+        termsLastUpdated="October 11, 2025"
+        privacyLastUpdated="October 11, 2025"
+      />
     </SafeAreaView>
   );
 }

@@ -22,6 +22,7 @@ import UniversalLoginForm from "../components/UniversalLoginForm";
 import RegistrationForm from "../components/RegistrationForm";
 import ForgotPasswordForm from "../components/ForgotPasswordForm";
 import ChangePasswordForm from "../components/ChangePasswordForm"; // NEW: Import change password component
+import InfoModal from "../components/InfoModal";
 
 // Import auth state management
 import {
@@ -143,6 +144,8 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
   const [showRegistrationModal, setShowRegistrationModal] = useState(false);
   const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false); // NEW: Change password modal
+  const [showInfoModal, setShowInfoModal] = useState(false);
+  const [infoModalType, setInfoModalType] = useState<"about" | "team">("about");
 
   // Listen to auth state changes
   useEffect(() => {
@@ -435,25 +438,21 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
             />
             <SettingsRow
               icon="help-circle-outline"
-              title="Help & Support"
-              subtitle="Get help using WAISPATH"
-              onPress={() =>
-                Alert.alert(
-                  "Coming Soon",
-                  "Help center will be available in the next update"
-                )
-              }
+              title="The Team"
+              subtitle="Get to know the capstone duo"
+              onPress={() => {
+                setInfoModalType("team"); // we are using 'team' type for credits/help
+                setShowInfoModal(true);
+              }}
             />
             <SettingsRow
               icon="heart-outline"
               title="About WAISPATH"
               subtitle="Making Pasig City accessible for everyone"
-              onPress={() =>
-                Alert.alert(
-                  "WAISPATH Mission",
-                  "WAISPATH is dedicated to making Pasig City more accessible for persons with reduced mobility. We use community reporting and intelligent routing to help everyone navigate safely and independently."
-                )
-              }
+              onPress={() => {
+                setInfoModalType("about");
+                setShowInfoModal(true);
+              }}
             />
           </View>
         </View>
@@ -522,6 +521,13 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
           }}
         />
       </Modal>
+
+      {/* Info Modal (About / Team) */}
+      <InfoModal
+        visible={showInfoModal}
+        type={infoModalType}
+        onClose={() => setShowInfoModal(false)}
+      />
     </SafeAreaView>
   );
 }
