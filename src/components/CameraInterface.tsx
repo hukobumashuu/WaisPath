@@ -87,19 +87,16 @@ export const CameraInterface: React.FC<CameraInterfaceProps> = ({
 
     try {
       setIsTakingPhoto(true);
-
-      // Haptic feedback for accessibility
       Vibration.vibrate(50);
 
       console.log("📸 Taking photo for obstacle report...");
 
       const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.8, // Good quality before compression
+        quality: 0.8,
         base64: false,
         skipProcessing: false,
       });
 
-      // FIXED: Check if photo exists before processing
       if (!photo || !photo.uri) {
         Alert.alert(
           "❌ May Problema",
@@ -111,17 +108,13 @@ export const CameraInterface: React.FC<CameraInterfaceProps> = ({
 
       console.log("📸 Photo captured, processing...");
 
-      // Process photo (compress, save, validate) - NOW SAFE
       const result = await cameraService.processPhoto(photo.uri);
 
       if (result.success && result.compressedPhoto) {
-        // Success feedback with Filipino message
-        Alert.alert("✅ Nakuha na!", result.message, [
-          {
-            text: "OK, Gamitin (Use This)",
-            onPress: () => onPhotoTaken(result.compressedPhoto!),
-          },
-        ]);
+        onPhotoTaken(result.compressedPhoto);
+
+        // Give subtle feedback
+        Vibration.vibrate([50, 100, 50]); // Success haptic pattern
       } else {
         Alert.alert(
           "❌ May Problema",

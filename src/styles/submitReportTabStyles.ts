@@ -117,17 +117,6 @@ export const submitReportTabStyles = StyleSheet.create({
     lineHeight: 18,
   },
 
-  // Photo Capture
-  photoPreviewContainer: {
-    backgroundColor: COLORS.white,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    elevation: 1,
-  },
-
   photoPreview: {
     backgroundColor: `${COLORS.success}15`,
     borderRadius: 8,
@@ -147,24 +136,6 @@ export const submitReportTabStyles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.success,
     opacity: 0.8,
-  },
-
-  retakeButton: {
-    backgroundColor: COLORS.softBlue,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    alignSelf: "center",
-  },
-
-  retakeButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: COLORS.white,
-    marginLeft: 8,
   },
 
   cameraActions: {
@@ -339,5 +310,101 @@ export const submitReportTabStyles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     color: COLORS.white,
+  },
+  // 📸 ENHANCED PHOTO PREVIEW STYLES
+  photoPreviewContainer: {
+    backgroundColor: COLORS.white,
+    borderRadius: 16,
+    overflow: "hidden", // CRITICAL: Keeps image within rounded corners
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+
+  // 🆕 NEW: Actual image display
+  photoPreviewImage: {
+    width: "100%",
+    height: 280, // Fixed height for consistent layout
+    backgroundColor: COLORS.lightGray, // Fallback while loading
+  },
+
+  // 🆕 NEW: Metadata overlay on top of image
+  photoMetadataOverlay: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    backgroundColor: "rgba(0, 0, 0, 0.75)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+
+  photoMetadataText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: COLORS.white,
+  },
+
+  // 🆕 NEW: Action buttons container
+  photoActionsContainer: {
+    flexDirection: "row",
+    padding: 16,
+    gap: 12,
+    backgroundColor: COLORS.white,
+  },
+
+  // MODIFIED: Retake button now shares space with confirm
+  retakeButton: {
+    flex: 1, // Takes 50% width
+    backgroundColor: COLORS.muted,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    borderRadius: 10,
+    gap: 8,
+    minHeight: 50, // PWD-friendly touch target
+  },
+
+  retakeButtonText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: COLORS.white,
+  },
+
+  // 🆕 NEW: Confirm button (primary action)
+  confirmPhotoButton: {
+    flex: 1, // Takes 50% width
+    backgroundColor: COLORS.success,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    borderRadius: 10,
+    gap: 8,
+    minHeight: 50,
+  },
+
+  confirmPhotoButtonText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: COLORS.white,
+  },
+
+  // 🆕 NEW: Helper text below buttons
+  photoHelperText: {
+    fontSize: 12,
+    color: COLORS.muted,
+    textAlign: "center",
+    marginTop: -8,
+    paddingBottom: 4,
   },
 });

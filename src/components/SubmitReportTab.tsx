@@ -12,6 +12,7 @@ import {
   Alert,
   Vibration,
   useWindowDimensions,
+  Image,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -187,8 +188,7 @@ export const SubmitReportTab: React.FC<SubmitReportTabProps> = ({
   const handlePhotoTaken = (photo: CompressedPhoto) => {
     setCapturedPhoto(photo);
     setShowCamera(false);
-    setCurrentStep("details");
-    Vibration.vibrate([50, 100, 50]);
+    Vibration.vibrate([50, 100, 50]); // Success feedback
   };
 
   const handleSkipPhoto = () => {
@@ -278,230 +278,310 @@ export const SubmitReportTab: React.FC<SubmitReportTabProps> = ({
     }
   };
 
-  const renderObstacleSelection = () => (
-    <ScrollView
-      style={styles.stepContent}
-      contentContainerStyle={{ paddingBottom: 140 }} // Consistent padding
-      showsVerticalScrollIndicator={false}
-    >
-      <Text style={[styles.stepTitle, { fontSize: isSmallScreen ? 20 : 24 }]}>
-        Anong uri ng hadlang?
-      </Text>
-      <Text style={styles.stepDescription}>
-        Piliin ang obstacle na nakita mo para ma-report natin
-      </Text>
+  const renderObstacleSelection = () => {
+    // Calculate proper padding to clear all bottom UI elements
+    const scrollPadding =
+      80 + // Navigation buttons height
+      60 + // Tab bar base height
+      insets.bottom + // Device-specific bottom inset
+      20; // Extra safety margin
 
-      <View style={styles.obstacleGrid}>
-        {OBSTACLE_TYPES.map((obstacle) => (
-          <TouchableOpacity
-            key={obstacle.key}
-            style={[
-              styles.obstacleCard,
-              selectedObstacle === obstacle.key && {
-                borderColor: obstacle.color,
-                backgroundColor: COLORS.white, // Keep it clean white
-                borderWidth: 3, // Thicker border for selected
-                shadowColor: obstacle.color, // Add colored shadow
-                shadowOffset: { width: 0, height: 0 },
-                shadowOpacity: 0.3,
-                shadowRadius: 6,
-                elevation: 6,
-              },
-            ]}
-            onPress={() => handleObstacleSelect(obstacle.key)}
-            activeOpacity={0.8}
-          >
-            <View
+    return (
+      <ScrollView
+        style={styles.stepContent}
+        contentContainerStyle={{ paddingBottom: scrollPadding }} // 🔧 FIXED
+        showsVerticalScrollIndicator={false}
+      >
+        <Text style={[styles.stepTitle, { fontSize: isSmallScreen ? 20 : 24 }]}>
+          Anong uri ng hadlang?
+        </Text>
+        <Text style={styles.stepDescription}>
+          Piliin ang obstacle na nakita mo para ma-report natin
+        </Text>
+
+        <View style={styles.obstacleGrid}>
+          {OBSTACLE_TYPES.map((obstacle) => (
+            <TouchableOpacity
+              key={obstacle.key}
               style={[
-                styles.obstacleIcon,
-                {
-                  backgroundColor: obstacle.color,
-                  // Add glow effect for selected
-                  ...(selectedObstacle === obstacle.key && {
-                    shadowColor: obstacle.color,
-                    shadowOffset: { width: 0, height: 0 },
-                    shadowOpacity: 0.5,
-                    shadowRadius: 8,
-                    elevation: 8,
-                  }),
+                styles.obstacleCard,
+                selectedObstacle === obstacle.key && {
+                  borderColor: obstacle.color,
+                  backgroundColor: COLORS.white,
+                  borderWidth: 3,
+                  shadowColor: obstacle.color,
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: 0.3,
+                  shadowRadius: 6,
+                  elevation: 6,
                 },
               ]}
+              onPress={() => handleObstacleSelect(obstacle.key)}
+              activeOpacity={0.8}
             >
-              <Ionicons name={obstacle.icon} size={24} color={COLORS.white} />
-            </View>
-            <View style={styles.obstacleTextContainer}>
-              <Text
+              <View
                 style={[
-                  styles.obstacleTitle,
-                  selectedObstacle === obstacle.key && {
-                    color: obstacle.color,
-                    fontWeight: "700",
+                  styles.obstacleIcon,
+                  {
+                    backgroundColor: obstacle.color,
+                    ...(selectedObstacle === obstacle.key && {
+                      shadowColor: obstacle.color,
+                      shadowOffset: { width: 0, height: 0 },
+                      shadowOpacity: 0.5,
+                      shadowRadius: 8,
+                      elevation: 8,
+                    }),
                   },
                 ]}
               >
-                {obstacle.labelFil}
-              </Text>
-              <Text style={styles.obstacleDescription}>
-                {obstacle.description}
-              </Text>
-            </View>
-            {/* Add checkmark for selected */}
-            {selectedObstacle === obstacle.key && (
-              <Ionicons
-                name="checkmark-circle"
-                size={24}
-                color={obstacle.color}
-                style={{ marginLeft: 8 }}
+                <Ionicons name={obstacle.icon} size={24} color={COLORS.white} />
+              </View>
+              <View style={styles.obstacleTextContainer}>
+                <Text
+                  style={[
+                    styles.obstacleTitle,
+                    selectedObstacle === obstacle.key && {
+                      color: obstacle.color,
+                      fontWeight: "700",
+                    },
+                  ]}
+                >
+                  {obstacle.labelFil}
+                </Text>
+                <Text style={styles.obstacleDescription}>
+                  {obstacle.description}
+                </Text>
+              </View>
+              {selectedObstacle === obstacle.key && (
+                <Ionicons
+                  name="checkmark-circle"
+                  size={24}
+                  color={obstacle.color}
+                  style={{ marginLeft: 8 }}
+                />
+              )}
+            </TouchableOpacity>
+          ))}
+        </View>
+      </ScrollView>
+    );
+  };
+
+  const renderPhotoCapture = () => {
+    // Calculate proper padding to clear all bottom UI elements
+    const scrollPadding =
+      80 + // Navigation buttons height
+      60 + // Tab bar base height
+      insets.bottom + // Device-specific bottom inset
+      20; // Extra safety margin
+
+    return (
+      <ScrollView
+        style={styles.stepContent}
+        contentContainerStyle={{ paddingBottom: scrollPadding }} // 🔧 FIXED
+        showsVerticalScrollIndicator={false}
+      >
+        <Text style={[styles.stepTitle, { fontSize: isSmallScreen ? 20 : 24 }]}>
+          Kumuha ng Photo
+        </Text>
+        <Text style={styles.stepDescription}>
+          Mag-picture para mas malinaw ang report (optional)
+        </Text>
+
+        {/* 🆕 ENHANCED: Photo Preview with Actual Image */}
+        {capturedPhoto ? (
+          <View style={styles.photoPreviewContainer}>
+            {/* Image Display with Metadata Overlay */}
+            <View style={{ position: "relative" }}>
+              <Image
+                source={{ uri: capturedPhoto.uri }}
+                style={styles.photoPreviewImage}
+                resizeMode="cover"
+                accessibilityLabel="Captured obstacle photo preview"
               />
-            )}
-          </TouchableOpacity>
-        ))}
-      </View>
-    </ScrollView>
-  );
 
-  const renderPhotoCapture = () => (
-    <ScrollView
-      style={styles.stepContent}
-      contentContainerStyle={{ paddingBottom: 140 }} // Increased padding for buttons
-      showsVerticalScrollIndicator={false}
-    >
-      <Text style={[styles.stepTitle, { fontSize: isSmallScreen ? 20 : 24 }]}>
-        Kumuha ng Photo
-      </Text>
-      <Text style={styles.stepDescription}>
-        Mag-picture para mas malinaw ang report (optional)
-      </Text>
+              {/* Metadata Badge - Top Right Corner */}
+              <View style={styles.photoMetadataOverlay}>
+                <Ionicons
+                  name="checkmark-circle"
+                  size={14}
+                  color={COLORS.white}
+                />
+                <Text style={styles.photoMetadataText}>
+                  {(capturedPhoto.compressedSize / 1024).toFixed(1)}KB
+                </Text>
+              </View>
+            </View>
 
-      {capturedPhoto ? (
-        <View style={styles.photoPreviewContainer}>
-          <View style={styles.photoPreview}>
-            <Text style={styles.photoPreviewText}>📸 Photo na-capture na!</Text>
-            <Text style={styles.photoPreviewSize}>
-              Size: {(capturedPhoto.compressedSize / 1024).toFixed(1)}KB
+            {/* Action Buttons - Side by Side */}
+            <View style={styles.photoActionsContainer}>
+              {/* Retake Button */}
+              <TouchableOpacity
+                style={styles.retakeButton}
+                onPress={() => setShowCamera(true)}
+                activeOpacity={0.8}
+                accessibilityLabel="Retake photo"
+                accessibilityHint="Opens camera to take a new photo"
+              >
+                <Ionicons name="camera" size={20} color={COLORS.white} />
+                <Text style={styles.retakeButtonText}>I-retake</Text>
+              </TouchableOpacity>
+
+              {/* Confirm Button */}
+              <TouchableOpacity
+                style={styles.confirmPhotoButton}
+                onPress={() => {
+                  setCurrentStep("details"); // ✅ Only navigate when user confirms
+                  Vibration.vibrate([50, 100, 50]);
+                }}
+                activeOpacity={0.8}
+                accessibilityLabel="Confirm photo"
+                accessibilityHint="Use this photo and proceed to next step"
+              >
+                <Ionicons
+                  name="checkmark-circle"
+                  size={20}
+                  color={COLORS.white}
+                />
+                <Text style={styles.confirmPhotoButtonText}>Okay na ito</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Helper Text */}
+            <Text style={styles.photoHelperText}>
+              Tingnan muna kung malinaw ang larawan
             </Text>
           </View>
-          <TouchableOpacity
-            style={styles.retakeButton}
-            onPress={() => setShowCamera(true)}
-          >
-            <Ionicons name="camera" size={20} color={COLORS.white} />
-            <Text style={styles.retakeButtonText}>I-retake</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <View style={styles.cameraActions}>
-          <TouchableOpacity
-            style={[styles.primaryButton, { backgroundColor: COLORS.softBlue }]}
-            onPress={() => setShowCamera(true)}
-          >
-            <Ionicons name="camera" size={24} color={COLORS.white} />
-            <Text style={styles.primaryButtonText}>Mag-picture</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.secondaryButton, { borderColor: COLORS.muted }]}
-            onPress={handleSkipPhoto}
-          >
-            <Text style={[styles.secondaryButtonText, { color: COLORS.muted }]}>
-              Skip Photo
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
-    </ScrollView>
-  );
-
-  const renderDetailsInput = () => (
-    <ScrollView
-      style={styles.stepContent}
-      contentContainerStyle={{ paddingBottom: 140 }} // Increased padding for buttons
-      showsVerticalScrollIndicator={false}
-    >
-      <Text style={[styles.stepTitle, { fontSize: isSmallScreen ? 20 : 24 }]}>
-        Mga Detalye
-      </Text>
-      <Text style={styles.stepDescription}>
-        I-describe ang obstacle at piliin kung gaano ka-severe
-      </Text>
-
-      {/* Severity Selection */}
-      <Text style={styles.inputLabel}>Severity Level:</Text>
-      <View style={styles.severityGrid}>
-        {SEVERITY_LEVELS.map((severity) => (
-          <TouchableOpacity
-            key={severity.key}
-            style={[
-              styles.severityCard,
-              selectedSeverity === severity.key && {
-                borderColor: severity.color,
-                backgroundColor: COLORS.white, // Keep it clean white, just change border
-                borderWidth: 3, // Thicker border for selected state
-              },
-            ]}
-            onPress={() => setSelectedSeverity(severity.key)}
-          >
-            <View
+        ) : (
+          /* Original Camera Buttons - UNCHANGED */
+          <View style={styles.cameraActions}>
+            <TouchableOpacity
               style={[
-                styles.severityDot,
-                {
-                  backgroundColor: severity.color,
-                  // Add a glow effect for selected
-                  ...(selectedSeverity === severity.key && {
-                    shadowColor: severity.color,
-                    shadowOffset: { width: 0, height: 0 },
-                    shadowOpacity: 0.5,
-                    shadowRadius: 4,
-                    elevation: 4,
-                  }),
+                styles.primaryButton,
+                { backgroundColor: COLORS.softBlue },
+              ]}
+              onPress={() => setShowCamera(true)}
+            >
+              <Ionicons name="camera" size={24} color={COLORS.white} />
+              <Text style={styles.primaryButtonText}>Mag-picture</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.secondaryButton, { borderColor: COLORS.muted }]}
+              onPress={handleSkipPhoto}
+            >
+              <Text
+                style={[styles.secondaryButtonText, { color: COLORS.muted }]}
+              >
+                Skip Photo
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </ScrollView>
+    );
+  };
+  const renderDetailsInput = () => {
+    // Calculate proper padding to clear all bottom UI elements
+    const scrollPadding =
+      80 + // Navigation buttons height
+      60 + // Tab bar base height
+      insets.bottom + // Device-specific bottom inset
+      20; // Extra safety margin
+
+    return (
+      <ScrollView
+        style={styles.stepContent}
+        contentContainerStyle={{ paddingBottom: scrollPadding }} // 🔧 FIXED
+        showsVerticalScrollIndicator={false}
+      >
+        <Text style={[styles.stepTitle, { fontSize: isSmallScreen ? 20 : 24 }]}>
+          Mga Detalye ng Report
+        </Text>
+        <Text style={styles.stepDescription}>
+          Magdagdag ng karagdagang impormasyon tungkol sa hadlang
+        </Text>
+
+        {/* Severity Selection */}
+        <Text style={styles.inputLabel}>Gaano kalala? (Severity Level)</Text>
+        <View style={styles.severityGrid}>
+          {SEVERITY_LEVELS.map((severity) => (
+            <TouchableOpacity
+              key={severity.key}
+              style={[
+                styles.severityCard,
+                selectedSeverity === severity.key && {
+                  borderColor: severity.color,
+                  borderWidth: 3,
+                  backgroundColor: `${severity.color}10`,
                 },
               ]}
-            />
-            <View style={styles.severityTextContainer}>
-              <Text
+              onPress={() => {
+                setSelectedSeverity(severity.key);
+                Vibration.vibrate(30);
+              }}
+              activeOpacity={0.8}
+            >
+              <View
                 style={[
-                  styles.severityTitle,
-                  selectedSeverity === severity.key && {
-                    color: severity.color,
-                  },
+                  styles.severityDot,
+                  { backgroundColor: severity.color },
                 ]}
-              >
-                {severity.labelFil}
-              </Text>
-              <Text style={styles.severityDescription}>
-                {severity.description}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        ))}
-      </View>
+              />
+              <View style={styles.severityTextContainer}>
+                <Text
+                  style={[
+                    styles.severityTitle,
+                    selectedSeverity === severity.key && {
+                      color: severity.color,
+                      fontWeight: "700",
+                    },
+                  ]}
+                >
+                  {severity.labelFil}
+                </Text>
+                <Text style={styles.severityDescription}>
+                  {severity.description}
+                </Text>
+              </View>
+              {selectedSeverity === severity.key && (
+                <Ionicons
+                  name="checkmark-circle"
+                  size={24}
+                  color={severity.color}
+                />
+              )}
+            </TouchableOpacity>
+          ))}
+        </View>
 
-      {/* Description Input */}
-      <Text style={styles.inputLabel}>Dagdag na Detalye (Optional):</Text>
-      <TextInput
-        style={styles.textArea}
-        value={description}
-        onChangeText={setDescription}
-        placeholder="I-describe kung ano pa ang makikita mo dito..."
-        placeholderTextColor={COLORS.muted}
-        multiline
-        numberOfLines={4}
-        textAlignVertical="top"
-      />
+        {/* Description Input */}
+        <Text style={styles.inputLabel}>Dagdag na Detalye (Optional)</Text>
+        <TextInput
+          style={styles.textArea}
+          placeholder="Halimbawa: 'May nagtitinda ng taho malapit sa bangketa' o 'Butas sa kalsada malapit sa waiting shed'"
+          placeholderTextColor={COLORS.muted}
+          multiline
+          numberOfLines={4}
+          value={description}
+          onChangeText={setDescription}
+          textAlignVertical="top"
+        />
 
-      {/* Location Info */}
-      <View style={styles.locationInfo}>
-        <Ionicons name="location" size={16} color={COLORS.softBlue} />
-        <Text style={styles.locationText}>
-          {location
-            ? `${location.latitude.toFixed(6)}, ${location.longitude.toFixed(
-                6
-              )}`
-            : "Getting location..."}
-        </Text>
-      </View>
-    </ScrollView>
-  );
+        {/* Location Display */}
+        <View style={styles.locationInfo}>
+          <Ionicons name="location" size={16} color={COLORS.softBlue} />
+          <Text style={styles.locationText}>
+            {location
+              ? `${location.latitude.toFixed(6)}, ${location.longitude.toFixed(
+                  6
+                )}`
+              : "Getting location..."}
+          </Text>
+        </View>
+      </ScrollView>
+    );
+  };
 
   return (
     <View style={styles.container}>
