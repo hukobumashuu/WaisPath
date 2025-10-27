@@ -88,6 +88,9 @@ export default function NavigationScreen() {
 
   const [userBearing, setUserBearing] = useState<number | null>(null);
 
+  const lastValidationCheckRef = useRef<number>(0);
+  const VALIDATION_CHECK_INTERVAL = 30000;
+
   // Existing helper functions
   function getObstacleRouteType(
     obstacle: AccessibilityObstacle,
@@ -419,8 +422,17 @@ export default function NavigationScreen() {
   useEffect(() => {
     if (location) {
       loadValidationRadiusObstacles();
+
       if (profile) {
-        checkForValidationPrompts();
+        // Throttle validation checks to once per 30 seconds
+        const now = Date.now();
+        const timeSinceLastCheck = now - lastValidationCheckRef.current;
+
+        if (timeSinceLastCheck >= VALIDATION_CHECK_INTERVAL) {
+          checkForValidationPrompts();
+          lastValidationCheckRef.current = now;
+          console.log("🎯 Validation prompt check triggered (30s throttle)");
+        }
       }
     }
   }, [location, profile, showAllObstacles]);
@@ -633,6 +645,22 @@ export default function NavigationScreen() {
       console.log(`🧭 User marker bearing updated: ${Math.round(bearing)}°`);
     }
   }, [location, isNavigating, selectedRouteType, routeAnalysis]);
+
+  useEffect(() => {
+    const initServices = async () => {
+      console.log("🚀 Initializing navigation services...");
+
+      // Initialize TTS
+      const ttsReady = await textToSpeechService.initialize();
+      if (ttsReady) {
+        console.log("✅ TTS initialized and ready");
+      } else {
+        console.warn("⚠️ TTS initialization failed");
+      }
+    };
+
+    initServices();
+  }, []); // Run once on component mount
 
   // Existing obstacle rendering
   const renderObstacles = () => {

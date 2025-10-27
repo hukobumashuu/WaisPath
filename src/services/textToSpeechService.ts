@@ -44,7 +44,7 @@ class TextToSpeechService {
   private recentlyAnnouncedObstacles = new Map<string, AnnouncedObstacle>();
 
   // 🔥 NEW: More granular timing controls
-  private readonly OBSTACLE_COOLDOWN_TIME = 12000; // 5 seconds between same obstacle
+  private readonly OBSTACLE_COOLDOWN_TIME = 20000; // 5 seconds between same obstacle
   private readonly DISTANCE_MOVEMENT_THRESHOLD = 15; // 15 meters movement resets announcements
   private readonly MAX_TRACKED_OBSTACLES = 50; // Prevent memory leaks
 

@@ -1,5 +1,5 @@
-// src/screens/HomeScreen.tsx
-// CLEAN VERSION: Better hero layout + Pasig colors + responsive
+// hukobumashuu/waispath/WaisPath-21ce4a07421d2a631c4b49b0aae1df2184ccb345/src/screens/HomeScreen.tsx
+// CONTRAST-OPTIMIZED VERSION: Stronger Text Hierarchy & Better Readability
 
 import React, { useMemo } from "react";
 import {
@@ -15,19 +15,39 @@ import { Ionicons } from "@expo/vector-icons";
 import { useUserProfile } from "../stores/userProfileStore";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-/* Pasig City color scheme */
+/* Optimized Color Palette - Better Contrast */
 const COLORS = {
-  white: "#FFFFFF",
-  softBlue: "#2BA4FF",
-  navy: "#08345A",
-  slate: "#0F172A",
-  muted: "#6B7280",
-  chipBg: "#EFF8FF",
+  // Primary Brand Colors
+  deepNavy: "#08345A", // Back to original darker navy (better contrast)
+  primaryBlue: "#1565C0", // Slightly darker blue (was #1976D2)
+  accentAmber: "#F59E0B", // Kept amber
+
+  // Backgrounds
+  softGray: "#F5F5F5", // Slightly darker gray for better card contrast
+  cardWhite: "#FFFFFF",
+
+  // Supporting Colors
+  lightBlue: "#E3F2FD", // Kept
+  borderLight: "#D1D5DB", // Light border
+
+  // Text (STRONGER CONTRAST)
+  darkText: "#0F172A", // Darker text (was #111827)
+  mediumText: "#475569", // New: For subtitles (darker than muted)
+  mutedText: "#64748B", // For labels only
+
+  // Status
+  successGreen: "#059669", // Darker green (was #10B981)
+
+  // Shadows
+  shadowLight: "rgba(0, 0, 0, 0.08)",
+  shadowMedium: "rgba(0, 0, 0, 0.15)",
 };
 
 interface HomeScreenProps {
   navigation: any;
 }
+
+type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
 
 export default function HomeScreen({ navigation }: HomeScreenProps) {
   const { profile } = useUserProfile();
@@ -35,67 +55,46 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
   const dims = useWindowDimensions();
   const isSmallScreen = dims.width < 380;
 
-  // Personalized content based on mobility profile
   const personalizedContent = useMemo(() => {
     if (!profile) {
       return {
-        greeting: "Welcome sa WAISPATH!",
-        deviceInfo: "I-set up ang profile mo para sa personalized routes",
-        icon: "🗺️",
-        tips: [
-          "Kumpletuhin ang profile mo",
-          "Mag-explore ng Pasig City",
-          "I-report ang mga obstacles",
-        ],
+        greeting: "Welcome to WAISPATH",
+        deviceInfo: "Set up your profile for personalized routes",
+        iconName: "map-outline" as IoniconName,
       };
     }
 
-    const deviceMap = {
+    const deviceMap: {
+      [key: string]: {
+        greeting: string;
+        deviceInfo: string;
+        iconName: IoniconName;
+      };
+    } = {
       wheelchair: {
         greeting: "Kumusta! Ready to roll?",
-        deviceInfo: "Mga ramp at malawak na daan para sa wheelchair.",
-        icon: "♿",
-        tips: [
-          "Check accessible entrances.",
-          "Prefer covered walkways.",
-          "Avoid vendor-heavy times.",
-        ],
+        deviceInfo: "Routes with ramps and wide paths",
+        iconName: "accessibility-outline" as IoniconName,
       },
       walker: {
-        greeting: "Hello! Safe exploration ahead.",
-        deviceInfo: "Steady routes para sa walker mo.",
-        icon: "🚶‍♂️",
-        tips: [
-          "Rest every 400m.",
-          "Use handrails when available.",
-          "Avoid slippery surfaces.",
-        ],
+        greeting: "Hello! Safe journey ahead.",
+        deviceInfo: "Steady routes for walker users",
+        iconName: "walk-outline" as IoniconName,
       },
       cane: {
-        greeting: "Magandang araw! Let's navigate safely.",
-        deviceInfo: "Stable paths para sa walking cane.",
-        icon: "🦯",
-        tips: [
-          "Watch for uneven sidewalks.",
-          "Use well-lit routes at night.",
-          "Report loose tiles.",
-        ],
+        greeting: "Magandang araw! Navigate safely.",
+        deviceInfo: "Stable paths for cane users",
+        iconName: "walk-outline" as IoniconName,
       },
       crutches: {
         greeting: "Ready ka na? Let's go!",
-        deviceInfo: "Space para sa crutches mo.",
-        icon: "🩼",
-        tips: ["Allow extra time", "Avoid crowded areas", "Rest frequently"],
+        deviceInfo: "Accessible routes for crutches",
+        iconName: "walk-outline" as IoniconName,
       },
       none: {
-        greeting: "Kumusta! Comfortable routes para sa'yo.",
-        deviceInfo: "Short distances with rest stops.",
-        icon: "👥",
-        tips: [
-          "Take frequent breaks.",
-          "Choose shaded paths.",
-          "Stay hydrated!",
-        ],
+        greeting: "Kumusta! Comfortable routes.",
+        deviceInfo: "Short distances with rest stops",
+        iconName: "walk-outline" as IoniconName,
       },
     };
 
@@ -107,28 +106,34 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{
-          paddingBottom: Math.max(insets.bottom, 60) + 16,
+          paddingBottom: Math.max(insets.bottom, 60) + 20,
         }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Clean Hero Section */}
+        {/* Hero Section */}
         <View
           style={[
             styles.heroSection,
             {
-              paddingTop: Math.max(insets.top, 20) + 24,
+              paddingTop: Math.max(insets.top, 20) + 20,
               paddingHorizontal: 20,
-              paddingBottom: 32,
+              paddingBottom: 28,
             },
           ]}
         >
           <View style={styles.heroContent}>
-            <Text style={styles.heroIcon}>{personalizedContent.icon}</Text>
+            <View style={styles.heroIconContainer}>
+              <Ionicons
+                name={personalizedContent.iconName}
+                size={42}
+                color={COLORS.cardWhite}
+              />
+            </View>
             <View style={styles.heroText}>
               <Text
                 style={[
                   styles.heroTitle,
-                  { fontSize: isSmallScreen ? 22 : 26 },
+                  { fontSize: isSmallScreen ? 23 : 27 },
                 ]}
               >
                 {personalizedContent.greeting}
@@ -136,7 +141,7 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
               <Text
                 style={[
                   styles.heroSubtitle,
-                  { fontSize: isSmallScreen ? 14 : 16 },
+                  { fontSize: isSmallScreen ? 15 : 17 },
                 ]}
               >
                 {personalizedContent.deviceInfo}
@@ -145,123 +150,114 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
           </View>
 
           <View style={styles.locationBadge}>
-            <Ionicons name="location" size={14} color={COLORS.softBlue} />
+            <Ionicons name="location" size={16} color={COLORS.primaryBlue} />
             <Text style={styles.locationText}>Pasig City, Philippines</Text>
           </View>
         </View>
 
         {/* Main Content */}
-        <View style={{ paddingHorizontal: 20 }}>
-          {/* Primary Actions */}
-          <View style={{ marginBottom: 24 }}>
-            <Text
-              style={[
-                styles.sectionTitle,
-                { fontSize: isSmallScreen ? 20 : 24, marginBottom: 16 },
-              ]}
-            >
-              Ano ang kailangan mo?
-            </Text>
+        <View style={styles.mainContent}>
+          {/* Section Title */}
+          <Text
+            style={[styles.sectionTitle, { fontSize: isSmallScreen ? 21 : 25 }]}
+          >
+            Ano ang kailangan mo?
+          </Text>
 
-            {/* Navigate Button - Primary */}
+          {/* Primary Actions */}
+          <View style={styles.actionsContainer}>
+            {/* Navigate Button */}
             <TouchableOpacity
-              style={[
-                styles.primaryAction,
-                { backgroundColor: COLORS.softBlue },
-              ]}
+              style={styles.navigateButton}
               onPress={() => navigation.navigate("Navigate")}
-              activeOpacity={0.8}
+              activeOpacity={0.85}
+              accessibilityLabel="Find accessible route"
+              accessibilityRole="button"
             >
-              <View style={styles.actionIcon}>
-                <Ionicons name="navigate" size={24} color={COLORS.white} />
+              <View style={styles.buttonIconCircle}>
+                <Ionicons
+                  name="navigate-circle"
+                  size={30}
+                  color={COLORS.cardWhite}
+                />
               </View>
-              <View style={styles.actionText}>
-                <Text style={styles.primaryActionTitle}>Maghanap ng Route</Text>
-                <Text style={styles.primaryActionSubtitle}>
-                  Find accessible paths sa Pasig
+              <View style={styles.buttonTextArea}>
+                <Text style={styles.buttonTitle}>Find Accessible Route</Text>
+                <Text style={styles.buttonSubtitle}>
+                  Navigate Pasig with confidence
                 </Text>
               </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.white} />
+              <Ionicons
+                name="chevron-forward"
+                size={24}
+                color={COLORS.cardWhite}
+              />
             </TouchableOpacity>
 
-            {/* Secondary Actions */}
-            <View style={styles.secondaryActions}>
-              <TouchableOpacity
-                style={[
-                  styles.secondaryAction,
-                  { backgroundColor: COLORS.navy },
-                ]}
-                onPress={() => navigation.navigate("Report")}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="alert-circle" size={20} color={COLORS.white} />
-                <Text style={styles.secondaryActionText}>
-                  I-report ang Obstacle
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.secondaryAction,
-                  { backgroundColor: COLORS.muted },
-                ]}
-                onPress={() => navigation.navigate("Profile")}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="person" size={20} color={COLORS.white} />
-                <Text style={styles.secondaryActionText}>Profile Settings</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Tips Section */}
-          <View style={{ marginBottom: 24 }}>
-            <Text
-              style={[
-                styles.sectionTitle,
-                { fontSize: isSmallScreen ? 18 : 20, marginBottom: 12 },
-              ]}
+            {/* Report Button */}
+            <TouchableOpacity
+              style={styles.reportButton}
+              onPress={() => navigation.navigate("Report")}
+              activeOpacity={0.85}
+              accessibilityLabel="Report obstacle"
+              accessibilityRole="button"
             >
-              Tips para sa'yo:
-            </Text>
-
-            <View style={styles.tipsContainer}>
-              {personalizedContent.tips.map((tip, index) => (
-                <View key={index} style={styles.tipItem}>
-                  <View style={styles.tipBullet} />
-                  <Text
-                    style={[
-                      styles.tipText,
-                      { fontSize: isSmallScreen ? 14 : 15 },
-                    ]}
-                  >
-                    {tip}
-                  </Text>
-                </View>
-              ))}
-            </View>
+              <View style={styles.buttonIconCircle}>
+                <Ionicons
+                  name="alert-circle"
+                  size={30}
+                  color={COLORS.cardWhite}
+                />
+              </View>
+              <View style={styles.buttonTextArea}>
+                <Text style={styles.buttonTitle}>Report Obstacle</Text>
+                <Text style={styles.buttonSubtitle}>
+                  Help improve accessibility
+                </Text>
+              </View>
+              <Ionicons
+                name="chevron-forward"
+                size={24}
+                color={COLORS.cardWhite}
+              />
+            </TouchableOpacity>
           </View>
 
-          {/* Profile Summary */}
+          {/* Profile Card */}
           {profile && (
             <TouchableOpacity
               style={styles.profileCard}
               onPress={() => navigation.navigate("Profile")}
               activeOpacity={0.9}
+              accessibilityLabel="View your mobility profile"
+              accessibilityRole="button"
             >
-              <View style={styles.profileHeader}>
-                <Ionicons name="person-circle" size={40} color={COLORS.navy} />
-                <View style={styles.profileInfo}>
-                  <Text style={styles.profileTitle}>Profile mo</Text>
-                  <Text style={styles.profileSubtitle}>
-                    {profile.type} •{" "}
-                    {profile.avoidStairs ? "Iwas stairs" : "OK sa stairs"}
+              <View style={styles.profileRow}>
+                <View style={styles.profileIconCircle}>
+                  <Ionicons
+                    name="person-circle"
+                    size={48}
+                    color={COLORS.primaryBlue}
+                  />
+                </View>
+                <View style={styles.profileTextArea}>
+                  <Text style={styles.profileLabel}>YOUR PROFILE</Text>
+                  <Text style={styles.profileType}>
+                    {profile.type === "wheelchair"
+                      ? "Wheelchair User"
+                      : profile.type === "walker"
+                      ? "Walker User"
+                      : profile.type === "cane"
+                      ? "Cane User"
+                      : profile.type === "crutches"
+                      ? "Crutches User"
+                      : "Mobility Profile"}
                   </Text>
                 </View>
                 <Ionicons
                   name="chevron-forward"
-                  size={18}
-                  color={COLORS.muted}
+                  size={22}
+                  color={COLORS.mediumText}
                 />
               </View>
             </TouchableOpacity>
@@ -269,35 +265,32 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
 
           {/* Community Stats */}
           <View style={styles.statsCard}>
-            <Text
-              style={[styles.statsTitle, { fontSize: isSmallScreen ? 16 : 18 }]}
-            >
-              Community Impact
-            </Text>
-
+            <Text style={styles.statsHeader}>Community Impact</Text>
             <View style={styles.statsGrid}>
               <View style={styles.statItem}>
-                <Text
-                  style={[
-                    styles.statNumber,
-                    { fontSize: isSmallScreen ? 20 : 24 },
-                  ]}
-                >
-                  47+
-                </Text>
-                <Text style={styles.statLabel}>Obstacles na-report</Text>
+                <View style={styles.statIconBadge}>
+                  <Ionicons
+                    name="alert-circle"
+                    size={24}
+                    color={COLORS.accentAmber}
+                  />
+                </View>
+                <Text style={styles.statNumber}>47+</Text>
+                <Text style={styles.statLabel}>Obstacles{"\n"}Reported</Text>
               </View>
 
+              <View style={styles.statDivider} />
+
               <View style={styles.statItem}>
-                <Text
-                  style={[
-                    styles.statNumber,
-                    { fontSize: isSmallScreen ? 20 : 24 },
-                  ]}
-                >
-                  150+
-                </Text>
-                <Text style={styles.statLabel}>Routes calculated</Text>
+                <View style={styles.statIconBadge}>
+                  <Ionicons
+                    name="people"
+                    size={24}
+                    color={COLORS.successGreen}
+                  />
+                </View>
+                <Text style={styles.statNumber}>150+</Text>
+                <Text style={styles.statLabel}>People{"\n"}Assisted</Text>
               </View>
             </View>
           </View>
@@ -310,209 +303,223 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.softGray,
   },
 
-  // Clean Hero Section
+  // Hero Section
   heroSection: {
-    backgroundColor: COLORS.navy,
-    marginBottom: 24,
+    backgroundColor: COLORS.deepNavy,
+    marginBottom: 16,
   },
   heroContent: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 20,
   },
-  heroIcon: {
-    fontSize: 48,
+  heroIconContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    justifyContent: "center",
+    alignItems: "center",
     marginRight: 16,
   },
   heroText: {
     flex: 1,
   },
   heroTitle: {
-    fontWeight: "700",
-    color: COLORS.white,
-    marginBottom: 4,
+    fontWeight: "800",
+    color: COLORS.cardWhite,
+    marginBottom: 6,
+    lineHeight: 34,
   },
   heroSubtitle: {
-    color: COLORS.white,
-    opacity: 0.85,
-    lineHeight: 20,
+    fontWeight: "500",
+    color: COLORS.cardWhite,
+    lineHeight: 24,
   },
   locationBadge: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: COLORS.white,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 16,
+    backgroundColor: COLORS.cardWhite,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 20,
     alignSelf: "flex-start",
   },
   locationText: {
-    color: COLORS.softBlue,
-    fontSize: 12,
-    fontWeight: "600",
-    marginLeft: 4,
-  },
-
-  // Sections
-  sectionTitle: {
+    color: COLORS.primaryBlue,
+    fontSize: 14,
     fontWeight: "700",
-    color: COLORS.slate,
+    marginLeft: 6,
   },
 
-  // Primary Action
-  primaryAction: {
+  // Main Content
+  mainContent: {
+    paddingHorizontal: 20,
+  },
+  sectionTitle: {
+    fontWeight: "800",
+    color: COLORS.darkText,
+    marginBottom: 16,
+    letterSpacing: -0.5,
+  },
+
+  // Actions Container
+  actionsContainer: {
+    gap: 14,
+    marginBottom: 20,
+  },
+
+  // Buttons (Both Navigate & Report)
+  navigateButton: {
+    backgroundColor: COLORS.primaryBlue,
+    borderRadius: 18,
+    padding: 20,
     flexDirection: "row",
     alignItems: "center",
-    padding: 18,
-    borderRadius: 12,
-    marginBottom: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
+    minHeight: 84,
+    shadowColor: COLORS.primaryBlue,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 6,
   },
-  actionIcon: {
+  reportButton: {
+    backgroundColor: COLORS.accentAmber,
+    borderRadius: 18,
+    padding: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 84,
+    shadowColor: COLORS.accentAmber,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  buttonIconCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "rgba(255, 255, 255, 0.25)",
+    justifyContent: "center",
+    alignItems: "center",
     marginRight: 14,
   },
-  actionText: {
+  buttonTextArea: {
     flex: 1,
   },
-  primaryActionTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: COLORS.white,
-    marginBottom: 2,
+  buttonTitle: {
+    fontSize: 19,
+    fontWeight: "800",
+    color: COLORS.cardWhite,
+    marginBottom: 4,
+    letterSpacing: -0.3,
   },
-  primaryActionSubtitle: {
-    fontSize: 14,
-    color: COLORS.white,
-    opacity: 0.9,
-  },
-
-  // Secondary Actions
-  secondaryActions: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  secondaryAction: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 14,
-    borderRadius: 10,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  secondaryActionText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: COLORS.white,
-    marginLeft: 8,
-  },
-
-  // Tips
-  tipsContainer: {
-    backgroundColor: COLORS.chipBg,
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#E0F2FE",
-  },
-  tipItem: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    marginBottom: 8,
-  },
-  tipBullet: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: COLORS.softBlue,
-    marginTop: 6,
-    marginRight: 12,
-  },
-  tipText: {
-    flex: 1,
-    color: COLORS.slate,
-    lineHeight: 20,
+  buttonSubtitle: {
+    fontSize: 15,
+    fontWeight: "500",
+    color: COLORS.cardWhite,
   },
 
   // Profile Card
   profileCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: "#F1F5F9",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
+    backgroundColor: COLORS.cardWhite,
+    borderRadius: 18,
+    padding: 20,
+    marginBottom: 20,
+    borderWidth: 1.5,
+    borderColor: COLORS.borderLight,
+    shadowColor: COLORS.shadowLight,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 8,
+    elevation: 3,
+    minHeight: 84,
   },
-  profileHeader: {
+  profileRow: {
     flexDirection: "row",
     alignItems: "center",
   },
-  profileInfo: {
+  profileIconCircle: {
+    marginRight: 14,
+  },
+  profileTextArea: {
     flex: 1,
-    marginLeft: 12,
   },
-  profileTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: COLORS.slate,
-    marginBottom: 2,
+  profileLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: COLORS.mutedText,
+    letterSpacing: 1,
+    marginBottom: 5,
   },
-  profileSubtitle: {
-    fontSize: 13,
-    color: COLORS.muted,
+  profileType: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: COLORS.darkText,
+    letterSpacing: -0.3,
   },
 
-  // Stats
+  // Stats Card
   statsCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: 12,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: "#F8FAFC",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
+    backgroundColor: COLORS.cardWhite,
+    borderRadius: 18,
+    padding: 24,
+    borderWidth: 1.5,
+    borderColor: COLORS.borderLight,
+    shadowColor: COLORS.shadowLight,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  statsTitle: {
-    fontWeight: "600",
-    color: COLORS.slate,
-    marginBottom: 16,
+  statsHeader: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: COLORS.darkText,
     textAlign: "center",
+    marginBottom: 20,
+    textTransform: "uppercase",
+    letterSpacing: 1.2,
   },
   statsGrid: {
     flexDirection: "row",
-    justifyContent: "space-around",
+    alignItems: "center",
   },
   statItem: {
-    alignItems: "center",
     flex: 1,
+    alignItems: "center",
+  },
+  statIconBadge: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: COLORS.lightBlue,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 10,
   },
   statNumber: {
-    fontWeight: "700",
-    color: COLORS.softBlue,
+    fontSize: 32,
+    fontWeight: "800",
+    color: COLORS.darkText,
     marginBottom: 4,
+    letterSpacing: -0.5,
   },
   statLabel: {
-    fontSize: 12,
-    color: COLORS.muted,
+    fontSize: 13,
+    fontWeight: "600",
+    color: COLORS.mediumText,
     textAlign: "center",
+    lineHeight: 18,
+  },
+  statDivider: {
+    width: 1.5,
+    height: 72,
+    backgroundColor: COLORS.borderLight,
+    marginHorizontal: 16,
   },
 });
