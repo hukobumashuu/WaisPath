@@ -1,6 +1,5 @@
 // src/components/EnhancedSearchBar.tsx
-// Enhanced search component with Google Places integration
-// Fixed: prevents keyboard flashing by deferring modal/popular open until keyboard state is settled.
+// UPDATED: Added "Choose on Map" option for Option A implementation
 
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import {
@@ -29,6 +28,7 @@ import { UserLocation } from "../types";
 
 interface EnhancedSearchBarProps {
   onDestinationSelect: (destination: PlaceSearchResult) => void;
+  onChooseOnMap?: () => void; // ✅ NEW: Callback for "Choose on Map" option
   userLocation?: UserLocation;
   style?: any;
   placeholder?: string;
@@ -37,6 +37,7 @@ interface EnhancedSearchBarProps {
 
 export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
   onDestinationSelect,
+  onChooseOnMap, // ✅ NEW
   userLocation,
   style,
   placeholder = "Where do you want to go?",
@@ -54,7 +55,6 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
   const inputWrapperRef = useRef<View | null>(null);
   const suggestionTimeout = useRef<NodeJS.Timeout | null>(null);
 
-  // layout for anchoring dropdown
   const [inputLayout, setInputLayout] = useState<{
     x: number;
     y: number;
@@ -62,11 +62,9 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
     height: number;
   } | null>(null);
 
-  // track keyboard visibility to decide modal vs inline
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
-  const keyboardVisibleRef = useRef(false); // immediate-ref to avoid stale closures
+  const keyboardVisibleRef = useRef(false);
 
-  // Popular destinations for quick access
   const popularDestinations = googlePlacesService.getPopularDestinations();
 
   useEffect(() => {
@@ -74,6 +72,7 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
       keyboardVisibleRef.current = true;
       setIsKeyboardVisible(true);
     });
+
     const hideSub = Keyboard.addListener("keyboardDidHide", () => {
       keyboardVisibleRef.current = false;
       setIsKeyboardVisible(false);
@@ -84,9 +83,6 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
     };
   }, []);
 
-  /**
-   * Measure input position in window coordinates so we can anchor the modal dropdown
-   */
   const measureInput = useCallback(() => {
     const node = findNodeHandle(inputWrapperRef.current as any);
     if (!node) {
@@ -101,9 +97,6 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
     );
   }, []);
 
-  /**
-   * Debounced autocomplete suggestions
-   */
   const getSuggestions = useCallback(
     async (searchText: string) => {
       if (searchText.length < 2) {
@@ -122,15 +115,12 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
         setSuggestions(results);
         setShowSuggestions(true);
         setShowPopularDestinations(false);
-        // measure when opening so modal anchor is correct
         setTimeout(measureInput, 80);
       } catch (error) {
         console.error("Autocomplete error:", error);
-        // Show popular destinations as fallback (but only inline if keyboard visible)
         if (keyboardVisibleRef.current) {
           setShowPopularDestinations(true);
         } else {
-          // if keyboard not visible, don't immediately open modal — measure & set after a short delay
           setTimeout(() => {
             measureInput();
             setShowPopularDestinations(true);
@@ -186,35 +176,35 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
     }
   };
 
-  const handlePopularDestinationPress = async (destination: {
+  const handlePopularDestinationPress = async (item: {
     name: string;
+    category: string;
     query: string;
   }) => {
     try {
       setIsLoadingResults(true);
       setShowPopularDestinations(false);
-      setQuery(destination.name);
+      setQuery(item.query);
 
-      const results = await googlePlacesService.searchPlaces(
-        destination.query,
-        userLocation,
-        5000
+      const searchResults = await googlePlacesService.searchPlaces(
+        item.query,
+        userLocation
       );
 
-      if (results.length > 0) {
-        onDestinationSelect(results[0]);
+      if (searchResults && searchResults.length > 0) {
+        onDestinationSelect(searchResults[0]);
         Keyboard.dismiss();
       } else {
         Alert.alert(
-          "Location Not Found",
-          `Unable to find ${destination.name}. Please try a manual search.`
+          "Location Error",
+          `Unable to find ${item.name}. Please try searching manually.`
         );
       }
     } catch (error) {
       console.error("Popular destination error:", error);
       Alert.alert(
         "Search Error",
-        "Unable to load this destination. Please try manual search."
+        "Unable to load this destination. Please try searching manually."
       );
     } finally {
       setIsLoadingResults(false);
@@ -226,40 +216,27 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
 
     try {
       setIsLoadingResults(true);
-      setShowSuggestions(false);
-      setShowPopularDestinations(false);
-
       const results = await googlePlacesService.searchPlaces(
         query,
-        userLocation,
-        10000
+        userLocation
       );
 
-      if (results.length > 0) {
+      if (results && results.length > 0) {
         setSearchResults(results);
-        if (
-          results.length === 1 ||
-          query.toLowerCase().includes(results[0].name.toLowerCase())
-        ) {
-          onDestinationSelect(results[0]);
-          Keyboard.dismiss();
-        } else {
-          setShowSuggestions(true);
-          setSuggestions(
-            results.map((result) => ({
-              placeId: result.placeId,
-              description: `${result.name} - ${result.address}`,
+        setSuggestions(
+          results.map((result) => ({
+            placeId: result.placeId,
+            description: `${result.name}, ${result.address}`, // ✅ ADDED: Required field
+            mainText: result.name,
+            secondaryText: result.address,
+            types: result.types || [],
+            structured: {
               mainText: result.name,
               secondaryText: result.address,
-              types: result.types ?? [],
-              structured: {
-                mainText: result.name,
-                secondaryText: result.address,
-              },
-            }))
-          );
-          setTimeout(measureInput, 80);
-        }
+            },
+          }))
+        );
+        setTimeout(measureInput, 80);
       } else {
         Alert.alert(
           "No Results",
@@ -269,7 +246,6 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
             {
               text: "Browse Popular",
               onPress: () => {
-                // prefer inline if typing
                 if (keyboardVisibleRef.current) {
                   setShowPopularDestinations(true);
                 } else {
@@ -294,27 +270,18 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
     }
   };
 
-  /**
-   * Clear search and show popular destinations:
-   * - focus input
-   * - wait shortly to let keyboard show, then open inline popular
-   * - if keyboard won't show, open modal after measure
-   */
   const handleClearAndShowPopular = () => {
     setQuery("");
     setSuggestions([]);
     setShowSuggestions(false);
 
-    // focus the input — keyboard should come up
     inputRef.current?.focus();
 
-    // small delay so keyboardDidShow can fire and update keyboardVisibleRef
     setTimeout(() => {
       if (keyboardVisibleRef.current) {
         setShowPopularDestinations(true);
         setTimeout(measureInput, 80);
       } else {
-        // keyboard didn't appear — show modal dropdown anchored
         setTimeout(() => {
           measureInput();
           setShowPopularDestinations(true);
@@ -323,12 +290,7 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
     }, 260);
   };
 
-  /**
-   * onFocus: don't immediately open modal/popular (avoids modal stealing focus).
-   * Wait briefly and open inline popular only if keyboard actually visible.
-   */
   const handleInputFocus = () => {
-    // let the keyboard event arrive; after small delay, open popular inline if keyboard is visible
     setTimeout(() => {
       if (keyboardVisibleRef.current) {
         setShowPopularDestinations(true);
@@ -338,14 +300,12 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
   };
 
   const handleInputBlur = () => {
-    // Delay hiding to allow suggestion tap
     setTimeout(() => {
       setShowSuggestions(false);
       setShowPopularDestinations(false);
     }, 160);
   };
 
-  // keep measurement updated while visible (small interval)
   useEffect(() => {
     let tid: number | undefined;
     if (showSuggestions || showPopularDestinations) {
@@ -422,9 +382,41 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
     </TouchableOpacity>
   );
 
-  // Dropdown content wrapper (shared for modal & inline)
+  // ✅ NEW: Dropdown content with "Choose on Map" option at the top
   const DropdownContent = (
     <>
+      {/* ✅ NEW: "Choose on Map" option - ALWAYS FIRST when dropdown is open */}
+      {(showSuggestions || showPopularDestinations) && onChooseOnMap && (
+        <TouchableOpacity
+          style={styles.chooseOnMapOption}
+          onPress={() => {
+            // Close dropdown and keyboard
+            setShowSuggestions(false);
+            setShowPopularDestinations(false);
+            Keyboard.dismiss();
+
+            // Trigger map selection mode
+            onChooseOnMap();
+          }}
+          accessibilityLabel="Choose location on map"
+          accessibilityHint="Tap to select a custom location by tapping anywhere on the map"
+        >
+          <View style={styles.chooseOnMapContent}>
+            <View style={styles.chooseOnMapIcon}>
+              <Ionicons name="location-sharp" size={24} color="#3B82F6" />
+            </View>
+            <View style={styles.chooseOnMapText}>
+              <Text style={styles.chooseOnMapTitle}>Choose on map</Text>
+              <Text style={styles.chooseOnMapSubtitle}>
+                Tap anywhere to select location
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+          </View>
+        </TouchableOpacity>
+      )}
+
+      {/* Existing suggestions list */}
       {showSuggestions && suggestions.length > 0 && (
         <FlatList
           data={suggestions}
@@ -436,6 +428,7 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
         />
       )}
 
+      {/* Existing popular destinations list */}
       {showPopularDestinations && popularDestinations.length > 0 && (
         <>
           <Text style={styles.popularDestinationsTitle}>
@@ -463,7 +456,6 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
       }}
     >
       <View style={[styles.container, style]}>
-        {/* Input wrapper for measurement */}
         <View ref={inputWrapperRef} style={styles.inputWrapper}>
           <View style={styles.searchInputContainer}>
             <Ionicons
@@ -493,7 +485,6 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
                   setQuery("");
                   setSuggestions([]);
                   setShowSuggestions(false);
-                  // focus and then allow keyboardDidShow handler to decide showing popular
                   inputRef.current?.focus();
                   setTimeout(() => {
                     if (keyboardVisibleRef.current) {
@@ -526,7 +517,6 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
             )}
           </View>
 
-          {/* Inline dropdown: render when keyboard visible so typing & keyboard remain functional */}
           {isKeyboardVisible &&
             (showSuggestions || showPopularDestinations) && (
               <View
@@ -538,7 +528,6 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
             )}
         </View>
 
-        {/* Modal-backed dropdown: only when keyboard is NOT visible (prevents touch-through to map) */}
         {!isKeyboardVisible && (showSuggestions || showPopularDestinations) && (
           <Modal
             visible
@@ -579,7 +568,6 @@ export const EnhancedSearchBar: React.FC<EnhancedSearchBarProps> = ({
           </Modal>
         )}
 
-        {/* Compact searchResults (if you still want to show under input without modal) */}
         {searchResults.length > 0 &&
           !showSuggestions &&
           !showPopularDestinations && (
@@ -673,7 +661,6 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
 
-  // Inline & modal dropdown inner (shared style)
   dropdownInner: {
     backgroundColor: "white",
     borderRadius: 12,
@@ -686,7 +673,41 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
 
-  // Inline suggestions list styling
+  // ✅ NEW: "Choose on Map" option styles
+  chooseOnMapOption: {
+    paddingVertical: 16,
+    paddingHorizontal: 14,
+    borderBottomWidth: 2,
+    borderBottomColor: "#E5E7EB",
+    backgroundColor: "#F0F9FF",
+  },
+  chooseOnMapContent: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  chooseOnMapIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#DBEAFE",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+  chooseOnMapText: {
+    flex: 1,
+  },
+  chooseOnMapTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#1E40AF",
+  },
+  chooseOnMapSubtitle: {
+    fontSize: 14,
+    color: "#6B7280",
+    marginTop: 2,
+  },
+
   suggestionsList: {
     maxHeight: 380,
   },
@@ -727,13 +748,11 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
 
-  // Modal overlay (fills screen and prevents touch-through)
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.18)",
   },
 
-  // anchored dropdown container inside modal
   modalDropdownContainer: {
     position: "absolute",
     maxHeight: "70%",

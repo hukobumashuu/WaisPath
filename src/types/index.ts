@@ -192,6 +192,15 @@ export interface RouteSegment {
   notes?: string; // "Vendor usually here 8-10am"
 }
 
+export type POIType =
+  | "government"
+  | "shopping"
+  | "hospital"
+  | "school"
+  | "transport"
+  | "park"
+  | "custom";
+
 export interface WaispathRoute {
   id: string;
   segments: RouteSegment[];
@@ -221,13 +230,7 @@ export interface PointOfInterest {
   id: string;
   name: string;
   location: UserLocation;
-  type:
-    | "government"
-    | "hospital"
-    | "mall"
-    | "school"
-    | "transport"
-    | "business";
+  type: POIType; // ✅ CHANGED: Now uses POIType union instead of inline types
   accessibilityRating?: AccessibilityScore;
   verified: boolean;
 

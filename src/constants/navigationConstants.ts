@@ -6,30 +6,45 @@
  * Sample Points of Interest for testing navigation in Pasig City
  * These are real locations that can be used for route testing
  */
-export const SAMPLE_POIS = [
+// src/constants/navigationConstants.ts
+import { PointOfInterest } from "../types";
+
+/**
+ * Sample Points of Interest for testing navigation in Pasig City
+ * These are real locations that can be used for route testing
+ */
+export const SAMPLE_POIS: PointOfInterest[] = [
   {
     id: "poi_1",
     name: "Pasig City Hall",
+    location: {
+      latitude: 14.5764,
+      longitude: 121.0851,
+    },
     type: "government",
-    lat: 14.5764,
-    lng: 121.0851,
+    verified: true,
   },
   {
     id: "poi_2",
     name: "Robinson's Metro East",
+    location: {
+      latitude: 14.6042,
+      longitude: 121.0753,
+    },
     type: "shopping",
-    lat: 14.6042,
-    lng: 121.0753,
+    verified: true,
   },
   {
     id: "poi_3",
     name: "SM City Pasig",
+    location: {
+      latitude: 14.5863,
+      longitude: 121.0614,
+    },
     type: "shopping",
-    lat: 14.5863,
-    lng: 121.0614,
+    verified: true,
   },
-] as const;
-
+];
 /**
  * Default map configuration for Pasig City
  */

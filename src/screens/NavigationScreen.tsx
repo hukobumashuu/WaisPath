@@ -1,5 +1,5 @@
 // src/screens/NavigationScreen.tsx
-// CLEAN: Removed debug panel, ready for production
+// UPDATED: Added map selection mode for "Choose on Map" feature
 
 import React, {
   useState,
@@ -13,13 +13,10 @@ import {
   Text,
   TouchableOpacity,
   Alert,
-  TextInput,
-  StyleSheet,
   ActivityIndicator,
   Modal,
   Vibration,
   SafeAreaView,
-  Platform,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MapView, { Marker, Callout, Polyline } from "react-native-maps";
@@ -28,13 +25,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocation } from "../hooks/useLocation";
 import { useUserProfile } from "../stores/userProfileStore";
 import { firebaseServices } from "../services/firebase";
-import { UserLocation, AccessibilityObstacle, ObstacleType } from "../types";
+import { UserLocation, AccessibilityObstacle } from "../types";
 import { calculateUserBearingFromRoute } from "../utils/navigationUtils";
 
-// Import existing styles
+// ✅ Import the hook
+import { useMapInteraction } from "../hooks/useMapInteraction";
+
 import { navigationStyles as styles } from "../styles/navigationStyles";
 
-// Import existing hooks and components
 import { useProximityDetection } from "../hooks/useProximityDetection";
 import { useRouteCalculation } from "../hooks/useRouteCalculation";
 import { ProximityAlertsOverlay } from "../components/ProximityAlertsOverlay";
@@ -42,11 +40,9 @@ import { EnhancedObstacleMarker } from "../components/EnhancedObstacleMarker";
 import { RouteInfoBottomSheet } from "../components/RouteInfoPanel";
 import { NavigationControls } from "../components/NavigationControls";
 
-// Enhanced search component
 import EnhancedSearchBar from "../components/EnhancedSearchBar";
 import { PlaceSearchResult } from "../services/googlePlacesService";
 
-// Import existing utilities and services
 import { getPOIIcon } from "../utils/mapUtils";
 import { SAMPLE_POIS } from "../constants/navigationConstants";
 import {
@@ -59,6 +55,29 @@ import {
   type ValidationPrompt as ValidationPromptType,
 } from "../services/obstacleValidationService";
 import { textToSpeechService } from "../services/textToSpeechService";
+
+/**
+ * Haversine distance calculation (inline for map selection)
+ */
+const haversineDistance = (
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number => {
+  const R = 6371e3;
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+};
 
 export default function NavigationScreen() {
   const insets = useSafeAreaInsets();
@@ -80,36 +99,41 @@ export default function NavigationScreen() {
   const [validationRadiusObstacles, setValidationRadiusObstacles] = useState<
     AccessibilityObstacle[]
   >([]);
-
   const [hasArrived, setHasArrived] = useState(false);
-
-  // ADD: New state to control route panel visibility
   const [showRoutePanel, setShowRoutePanel] = useState(true);
-
   const [userBearing, setUserBearing] = useState<number | null>(null);
+  const [isNavigating, setIsNavigating] = useState(false);
+  const [showValidationPrompt, setShowValidationPrompt] = useState(false);
+  const [currentValidationPrompt, setCurrentValidationPrompt] =
+    useState<ValidationPromptType | null>(null);
+  const [showSidewalks, setShowSidewalks] = useState(true);
+  const [navigationPausedByBlur, setNavigationPausedByBlur] = useState(false);
+
+  // ✅ NEW: Map selection mode state
+  const [isMapSelectionMode, setIsMapSelectionMode] = useState(false);
+  const [selectedMapLocation, setSelectedMapLocation] =
+    useState<UserLocation | null>(null);
 
   const lastValidationCheckRef = useRef<number>(0);
   const VALIDATION_CHECK_INTERVAL = 30000;
 
-  // Existing helper functions
+  // Helper functions
   function getObstacleRouteType(
     obstacle: AccessibilityObstacle,
     routeAnalysis: any
   ): "fastest" | "clearest" | "both" | undefined {
-    // ✅ Change "accessible" to "clearest"
     if (!routeAnalysis) return undefined;
 
     const onFastest = routeAnalysis.fastestRoute?.obstacles?.some(
       (obs: any) => obs.id === obstacle.id
     );
     const onClearest = routeAnalysis.clearestRoute?.obstacles?.some(
-      // ✅ Change accessibleRoute to clearestRoute
       (obs: any) => obs.id === obstacle.id
     );
 
     if (onFastest && onClearest) return "both";
     if (onFastest) return "fastest";
-    if (onClearest) return "clearest"; // ✅ Change "accessible" to "clearest"
+    if (onClearest) return "clearest";
     return undefined;
   }
 
@@ -117,7 +141,6 @@ export default function NavigationScreen() {
     (userLocation: UserLocation, fullRoute: UserLocation[]): UserLocation[] => {
       if (!fullRoute || fullRoute.length === 0 || !userLocation) return [];
 
-      // Ensure points use {latitude, longitude}
       const norm = (p: any) =>
         ({
           latitude: p.latitude ?? p.lat,
@@ -127,7 +150,6 @@ export default function NavigationScreen() {
       const route = fullRoute.map(norm);
       const user = norm(userLocation);
 
-      // Fast equirectangular approximation to meters (centered at user)
       const R = 6371000;
       const toRad = (d: number) => (d * Math.PI) / 180;
       const lat0 = toRad(user.latitude);
@@ -139,7 +161,7 @@ export default function NavigationScreen() {
         return { x, y };
       };
 
-      const userXY = { x: 0, y: 0 }; // by construction
+      const userXY = { x: 0, y: 0 };
       const routeXY = route.map(toXY);
 
       const sq = (a: { x: number; y: number }, b: { x: number; y: number }) =>
@@ -160,7 +182,6 @@ export default function NavigationScreen() {
         return { t, proj: { x: vXY.x + t * dx, y: vXY.y + t * dy } };
       };
 
-      // Find best projection on any segment
       let bestDist = Infinity;
       let bestIndex = -1;
       let bestProjXY: { x: number; y: number } | null = null;
@@ -175,7 +196,6 @@ export default function NavigationScreen() {
         }
       }
 
-      // Also check final point
       const lastIdx = routeXY.length - 1;
       const dLast = sq(userXY, routeXY[lastIdx]);
       if (dLast < bestDist) {
@@ -185,11 +205,9 @@ export default function NavigationScreen() {
       }
 
       if (!bestProjXY || bestIndex === -1) {
-        // Fallback — prefix user location
         return [user, ...route];
       }
 
-      // Convert projection XY back to lat/lng
       const projToLatLng = (xy: { x: number; y: number }) => {
         const lat = user.latitude + (xy.y / R) * (180 / Math.PI);
         const lon = user.longitude + (xy.x / (R * cosLat0)) * (180 / Math.PI);
@@ -197,19 +215,15 @@ export default function NavigationScreen() {
       };
 
       const projLatLng = projToLatLng(bestProjXY);
-
-      // Build output: user location, projection (if different), then remaining points
       const out: UserLocation[] = [];
       out.push({ latitude: user.latitude, longitude: user.longitude });
 
-      const EPS_M_SQ = 0.01; // 0.1m^2 threshold
-      // include proj if it is meaningfully different from user
+      const EPS_M_SQ = 0.01;
       if (sq(userXY, bestProjXY) > EPS_M_SQ) {
         out.push(projLatLng);
       }
 
       if (bestIndex >= lastIdx) {
-        // Closest to end; append last point
         const lastPt = route[lastIdx];
         if (
           out.length === 0 ||
@@ -221,7 +235,6 @@ export default function NavigationScreen() {
         return out;
       }
 
-      // Append remaining points from bestIndex+1 onward (avoid duplicates)
       const start = bestIndex + 1;
       for (let k = start; k < route.length; k++) {
         const pt = route[k];
@@ -246,7 +259,7 @@ export default function NavigationScreen() {
     return Array.from(map.values());
   };
 
-  // Existing hook usage
+  // Existing hooks
   const {
     routeAnalysis,
     isCalculating,
@@ -265,15 +278,146 @@ export default function NavigationScreen() {
     destination,
   });
 
-  // All existing state variables
-  const [isNavigating, setIsNavigating] = useState(false);
-  const [showValidationPrompt, setShowValidationPrompt] = useState(false);
-  const [currentValidationPrompt, setCurrentValidationPrompt] =
-    useState<ValidationPromptType | null>(null);
-  const [showSidewalks, setShowSidewalks] = useState(true);
-  const [navigationPausedByBlur, setNavigationPausedByBlur] = useState(false);
+  // Touch-and-hold hook
+  const mapInteraction = useMapInteraction({
+    isNavigating: isNavigating || isMapSelectionMode, // ✅ Disable during both navigation AND selection mode
+    nearbyPOIs: SAMPLE_POIS,
+    onLocationSelected: (coordinate, nearestInfo) => {
+      const customPOI = {
+        id: `custom_${Date.now()}`,
+        name: nearestInfo ? `Near ${nearestInfo.name}` : "Custom Location",
+        type: "custom" as const,
+        lat: coordinate.latitude,
+        lng: coordinate.longitude,
+      };
 
-  // Enhanced destination selection handler
+      handlePOIPress(customPOI);
+      setShowRoutePanel(true);
+    },
+    onReportAtLocation: (coordinate) => {
+      Alert.alert(
+        "Report Feature",
+        "This will navigate to Report screen with location pre-filled.",
+        [{ text: "OK" }]
+      );
+    },
+  });
+
+  // ✅ NEW: Handle "Choose on Map" activation
+  const handleChooseOnMap = useCallback(() => {
+    console.log("📍 Map selection mode activated");
+
+    // Activate map selection mode
+    setIsMapSelectionMode(true);
+    setShowRoutePanel(false);
+    setSelectedMapLocation(null);
+
+    // Center map on user location with animation
+    if (location && mapRef.current) {
+      mapRef.current.animateToRegion(
+        {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          latitudeDelta: 0.01,
+          longitudeDelta: 0.01,
+        },
+        500
+      );
+    }
+  }, [location]);
+
+  // ✅ NEW: Cancel map selection mode
+  const cancelMapSelection = useCallback(() => {
+    console.log("❌ Map selection mode cancelled");
+    setIsMapSelectionMode(false);
+    setSelectedMapLocation(null);
+  }, []);
+
+  // ✅ NEW: Handle single tap on map (when in selection mode)
+  const handleMapSingleTap = useCallback(
+    (coordinate: UserLocation) => {
+      if (!isMapSelectionMode) return;
+
+      console.log("📍 Location tapped:", coordinate);
+      setSelectedMapLocation(coordinate);
+
+      // ✅ PROPERLY TYPE-SAFE: Find nearest POI
+      type POI = (typeof SAMPLE_POIS)[number]; // Gets the array element type
+
+      const nearestInfo = SAMPLE_POIS.reduce<{
+        poi: POI;
+        distance: number;
+      } | null>(
+        (nearest, poi) => {
+          const distance = haversineDistance(
+            poi.location.latitude,
+            poi.location.longitude,
+            coordinate.latitude,
+            coordinate.longitude
+          );
+
+          if (!nearest || distance < nearest.distance) {
+            return { poi, distance };
+          }
+          return nearest;
+        },
+        null // Initial value
+      );
+
+      // ✅ NOW TypeScript knows nearestInfo is either null or { poi, distance }
+      // No type narrowing issues!
+
+      Alert.alert(
+        "Location Selected",
+        nearestInfo
+          ? `Near ${nearestInfo.poi.name} (${Math.round(
+              nearestInfo.distance
+            )}m away)`
+          : "Custom location selected",
+        [
+          {
+            text: "Cancel",
+            style: "cancel",
+            onPress: () => setSelectedMapLocation(null),
+          },
+          {
+            text: "Set as Destination",
+            onPress: () => {
+              const customPOI = {
+                id: `custom_${Date.now()}`,
+                name: nearestInfo
+                  ? `Near ${nearestInfo.poi.name}`
+                  : "Custom Location",
+                type: "custom" as const,
+                lat: coordinate.latitude,
+                lng: coordinate.longitude,
+              };
+
+              handlePOIPress(customPOI);
+              setShowRoutePanel(true);
+              setIsMapSelectionMode(false);
+              setSelectedMapLocation(null);
+            },
+          },
+          {
+            text: "Report Obstacle Here",
+            onPress: () => {
+              Alert.alert(
+                "Report Feature",
+                "This will navigate to Report screen with location pre-filled.",
+                [{ text: "OK" }]
+              );
+              setIsMapSelectionMode(false);
+              setSelectedMapLocation(null);
+            },
+          },
+        ]
+      );
+    },
+    [isMapSelectionMode, handlePOIPress]
+  );
+
+  // All existing functions (unchanged)
   const handleDestinationSelect = async (destination: PlaceSearchResult) => {
     try {
       setDestination(destination.name);
@@ -287,7 +431,7 @@ export default function NavigationScreen() {
       };
 
       await calculateUnifiedRoutes(poiObject);
-      setShowRoutePanel(true); // ADDED: Show panel when new routes are calculated
+      setShowRoutePanel(true);
 
       if (destination.accessibilityFeatures?.wheelchairAccessible) {
         Alert.alert(
@@ -302,7 +446,6 @@ export default function NavigationScreen() {
     }
   };
 
-  // Helper function
   const getDestinationTypeFromGoogleTypes = (types: string[]): string => {
     if (types.includes("hospital") || types.includes("pharmacy"))
       return "healthcare";
@@ -313,7 +456,6 @@ export default function NavigationScreen() {
     return "business";
   };
 
-  // All existing functions unchanged
   const loadValidationRadiusObstacles = async () => {
     if (!location) return;
 
@@ -379,10 +521,6 @@ export default function NavigationScreen() {
     }
   };
 
-  // Removed micro-reroute/detour handlers and state to simplify navigation flow
-
-  // All other existing handlers
-
   const handleProximityAlertPress = useCallback((alert: ProximityAlert) => {
     if (mapRef.current) {
       mapRef.current.animateToRegion(
@@ -396,7 +534,6 @@ export default function NavigationScreen() {
       );
     }
 
-    // Show a read-only details alert without any detour/alternative actions
     Alert.alert(
       "Obstacle Details",
       `Type: ${alert.obstacle.type.replace("_", " ")}\n` +
@@ -406,12 +543,10 @@ export default function NavigationScreen() {
     );
   }, []);
 
-  // All existing effects and memos
   const routePolyline = useMemo(() => {
     return routeAnalysis?.fastestRoute?.polyline || [];
   }, [routeAnalysis?.fastestRoute?.polyline]);
 
-  // Removed onCriticalObstacle wiring — proximity detection will still report alerts
   const proximityState = useProximityDetection({
     isNavigating,
     userLocation: location,
@@ -424,7 +559,6 @@ export default function NavigationScreen() {
       loadValidationRadiusObstacles();
 
       if (profile) {
-        // Throttle validation checks to once per 30 seconds
         const now = Date.now();
         const timeSinceLastCheck = now - lastValidationCheckRef.current;
 
@@ -469,7 +603,7 @@ export default function NavigationScreen() {
 
     setIsNavigating(true);
     setSelectedRouteType(routeType);
-    setHasArrived(false); // 🔄 RESET arrival flag for new navigation
+    setHasArrived(false);
     Vibration.vibrate(100);
 
     const selectedRoute =
@@ -477,7 +611,6 @@ export default function NavigationScreen() {
         ? routeAnalysis.fastestRoute
         : routeAnalysis.clearestRoute;
 
-    // Initialize the polyline
     setRemainingPolyline(selectedRoute.polyline);
 
     Alert.alert(
@@ -489,7 +622,7 @@ export default function NavigationScreen() {
 
   const stopNavigation = useCallback(() => {
     setIsNavigating(false);
-    setHasArrived(false); // 🔄 RESET arrival flag on manual stop
+    setHasArrived(false);
     setSelectedRouteType(null);
     setRemainingPolyline([]);
     setDestination("");
@@ -500,7 +633,7 @@ export default function NavigationScreen() {
 
   const clearRoutesAndPanel = useCallback(() => {
     setIsNavigating(false);
-    setHasArrived(false); // 🔄 RESET arrival flag when clearing routes
+    setHasArrived(false);
     setSelectedRouteType(null);
     setRemainingPolyline([]);
     setShowRoutePanel(false);
@@ -510,7 +643,6 @@ export default function NavigationScreen() {
   }, [clearRoutes]);
 
   const checkArrival = useCallback(() => {
-    // 🛡️ NEW: Exit early if already arrived
     if (hasArrived) {
       return;
     }
@@ -521,12 +653,10 @@ export default function NavigationScreen() {
       location,
       selectedDestination
     );
-    const ARRIVAL_THRESHOLD = 20; // 20 meters
+    const ARRIVAL_THRESHOLD = 20;
 
     if (distance <= ARRIVAL_THRESHOLD) {
-      // 🛡️ NEW: Set arrival flag FIRST to prevent re-entry
       setHasArrived(true);
-
       setIsNavigating(false);
       setDestination("");
       proximityDetectionService.resetDetectionState();
@@ -536,7 +666,6 @@ export default function NavigationScreen() {
         `🎉 Arrival detected - ${distance.toFixed(1)}m from destination`
       );
 
-      // ✅ NOW SAFE - Will only show ONCE
       Alert.alert("🎉 Arrival", `You have reached your destination!`, [
         { text: "Great!" },
       ]);
@@ -547,9 +676,8 @@ export default function NavigationScreen() {
     isNavigating,
     destinationName,
     hasArrived,
-  ]); // 🛡️ Added hasArrived to deps
+  ]);
 
-  // 🔥 NEW: Arrival monitoring useEffect - MUST be after checkArrival declaration
   useEffect(() => {
     if (isNavigating && location && selectedDestination) {
       checkArrival();
@@ -570,13 +698,11 @@ export default function NavigationScreen() {
       return;
     }
 
-    // 🔥 FIX: Calculate remaining route from user's position
     const updatedPolyline = calculateRemainingRoute(
       location,
       selectedRoute.polyline
     );
 
-    // 🔥 CRITICAL: Validate before updating
     if (updatedPolyline.length > 0) {
       setRemainingPolyline(updatedPolyline);
       console.log(
@@ -597,18 +723,21 @@ export default function NavigationScreen() {
     useCallback(() => {
       console.log("📱 NavigationScreen focused");
 
-      // If navigation was paused due to screen blur, resume it
-      if (navigationPausedByBlur && selectedDestination) {
+      // ONLY resume if navigation was actually paused
+      if (
+        navigationPausedByBlur &&
+        selectedDestination &&
+        isNavigating === false
+      ) {
         setIsNavigating(true);
         setNavigationPausedByBlur(false);
         console.log("▶️ Resuming navigation after screen focus");
       }
 
-      // Cleanup function runs when screen loses focus
       return () => {
         console.log("📱 NavigationScreen blurred");
 
-        // If currently navigating, pause it
+        // ONLY pause if actively navigating
         if (isNavigating) {
           setIsNavigating(false);
           setNavigationPausedByBlur(true);
@@ -618,10 +747,9 @@ export default function NavigationScreen() {
     }, [isNavigating, selectedDestination, navigationPausedByBlur])
   );
 
-  // 🔥 NEW: Calculate and update user bearing from route
   useEffect(() => {
     if (!isNavigating || !location || !selectedRouteType || !routeAnalysis) {
-      setUserBearing(null); // Reset when not navigating
+      setUserBearing(null);
       return;
     }
 
@@ -634,7 +762,6 @@ export default function NavigationScreen() {
       return;
     }
 
-    // Import at top: import { calculateUserBearingFromRoute } from "../utils/navigationUtils";
     const bearing = calculateUserBearingFromRoute(
       location,
       selectedRoute.polyline
@@ -650,7 +777,6 @@ export default function NavigationScreen() {
     const initServices = async () => {
       console.log("🚀 Initializing navigation services...");
 
-      // Initialize TTS
       const ttsReady = await textToSpeechService.initialize();
       if (ttsReady) {
         console.log("✅ TTS initialized and ready");
@@ -660,9 +786,8 @@ export default function NavigationScreen() {
     };
 
     initServices();
-  }, []); // Run once on component mount
+  }, []);
 
-  // Existing obstacle rendering
   const renderObstacles = () => {
     const allObstacleIds = new Set<string>();
     const renderedObstacles: JSX.Element[] = [];
@@ -671,7 +796,7 @@ export default function NavigationScreen() {
       obstacle: AccessibilityObstacle,
       keyPrefix: string,
       isOnRoute: boolean,
-      routeType?: "fastest" | "clearest" | "both" | undefined, // ✅ Change "accessible" to "clearest"
+      routeType?: "fastest" | "clearest" | "both" | undefined,
       opacity: number = 1.0
     ) => {
       const obstacleId = String(obstacle.id);
@@ -717,7 +842,6 @@ export default function NavigationScreen() {
     return renderedObstacles;
   };
 
-  // Loading and error screens
   if (!location && !locationError) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
@@ -759,14 +883,27 @@ export default function NavigationScreen() {
         onMapReady={() => {
           console.log("Map is ready!");
         }}
+        onPress={(event) => {
+          // ✅ NEW: Handle single tap in selection mode
+          if (isMapSelectionMode) {
+            const coordinate = event.nativeEvent.coordinate;
+            handleMapSingleTap(coordinate);
+          }
+        }}
+        onLongPress={(event) => {
+          // Touch-and-hold only works when NOT in selection mode
+          if (!isMapSelectionMode) {
+            const coordinate = event.nativeEvent.coordinate;
+            mapInteraction.handleMapLongPress(coordinate);
+          }
+        }}
       >
-        {/* USER MARKER */}
         {location && (
           <Marker
             coordinate={location}
             anchor={{ x: 0.5, y: 0.5 }}
-            rotation={userBearing || 0} // 🔥 Add rotation based on bearing
-            flat={true} // 🔥 Keep icon flat on map (rotates with map rotation)
+            rotation={userBearing || 0}
+            flat={true}
           >
             <View style={styles.userLocationMarker}>
               <Ionicons name="navigate" size={20} color="white" />
@@ -774,7 +911,6 @@ export default function NavigationScreen() {
           </Marker>
         )}
 
-        {/* DESTINATION MARKER */}
         {selectedDestination && (
           <Marker coordinate={selectedDestination} anchor={{ x: 0.5, y: 1 }}>
             <View style={styles.destinationMarker}>
@@ -783,17 +919,17 @@ export default function NavigationScreen() {
           </Marker>
         )}
 
-        {/* OBSTACLES */}
         {renderObstacles()}
 
-        {/* POI MARKERS */}
         {SAMPLE_POIS.map((poi) => (
           <Marker
             key={poi.id}
-            coordinate={{ latitude: poi.lat, longitude: poi.lng }}
+            coordinate={poi.location}
             onPress={() => {
-              handlePOIPress(poi);
-              setShowRoutePanel(true); // ADDED: Show panel when POI selected
+              if (!isMapSelectionMode) {
+                handlePOIPress(poi);
+                setShowRoutePanel(true);
+              }
             }}
           >
             <View style={styles.poiMarker}>
@@ -813,10 +949,103 @@ export default function NavigationScreen() {
           </Marker>
         ))}
 
-        {/* ROUTE VISUALIZATION */}
+        {mapInteraction.isHoldingMap && mapInteraction.holdLocation && (
+          <Marker
+            coordinate={mapInteraction.holdLocation}
+            anchor={{ x: 0.5, y: 0.5 }}
+            pointerEvents="none"
+          >
+            <View
+              style={{
+                width: 80,
+                height: 80,
+                justifyContent: "center",
+                alignItems: "center",
+              }}
+            >
+              <View
+                style={{
+                  position: "absolute",
+                  width: 80,
+                  height: 80,
+                  borderRadius: 40,
+                  borderWidth: 4,
+                  borderColor: "#3B82F6",
+                  opacity: mapInteraction.holdProgress / 100,
+                }}
+              />
+
+              <View
+                style={{
+                  width: 24,
+                  height: 24,
+                  borderRadius: 12,
+                  backgroundColor: "#3B82F6",
+                  borderWidth: 3,
+                  borderColor: "white",
+                  shadowColor: "#000",
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.3,
+                  shadowRadius: 4,
+                  elevation: 5,
+                }}
+              />
+
+              <Text
+                style={{
+                  position: "absolute",
+                  bottom: -25,
+                  fontSize: 12,
+                  color: "#3B82F6",
+                  fontWeight: "700",
+                  backgroundColor: "white",
+                  paddingHorizontal: 8,
+                  paddingVertical: 2,
+                  borderRadius: 10,
+                  shadowColor: "#000",
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: 0.2,
+                  shadowRadius: 2,
+                  elevation: 3,
+                }}
+              >
+                Hold... {Math.round(mapInteraction.holdProgress)}%
+              </Text>
+            </View>
+          </Marker>
+        )}
+
+        {/* ✅ NEW: Selected location marker (when in selection mode) */}
+        {isMapSelectionMode && selectedMapLocation && (
+          <Marker
+            coordinate={selectedMapLocation}
+            anchor={{ x: 0.5, y: 0.5 }}
+            pointerEvents="none"
+          >
+            <View
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                backgroundColor: "#3B82F6",
+                borderWidth: 3,
+                borderColor: "white",
+                justifyContent: "center",
+                alignItems: "center",
+                elevation: 5,
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.3,
+                shadowRadius: 4,
+              }}
+            >
+              <Ionicons name="location-sharp" size={24} color="white" />
+            </View>
+          </Marker>
+        )}
+
         {routeAnalysis && (
           <>
-            {/* Show both routes when NOT navigating */}
             {!isNavigating && (
               <>
                 {routeAnalysis.fastestRoute.polyline && (
@@ -836,7 +1065,6 @@ export default function NavigationScreen() {
               </>
             )}
 
-            {/* Show ONLY selected route when navigating - TRIMMED! */}
             {isNavigating &&
               selectedRouteType &&
               remainingPolyline.length > 0 && (
@@ -857,9 +1085,9 @@ export default function NavigationScreen() {
         )}
       </MapView>
 
-      {/* ENHANCED SEARCH */}
       <EnhancedSearchBar
         onDestinationSelect={handleDestinationSelect}
+        onChooseOnMap={handleChooseOnMap}
         userLocation={location || undefined}
         style={{
           position: "absolute",
@@ -871,7 +1099,37 @@ export default function NavigationScreen() {
         placeholder="Search for accessible destinations..."
       />
 
-      {/* NAVIGATION CONTROLS */}
+      {/* ✅ NEW: Map Selection Mode Banner */}
+      {isMapSelectionMode && (
+        <View style={[styles.mapSelectionBanner, { top: insets.top + 70 }]}>
+          <View style={styles.mapSelectionBannerContent}>
+            <Ionicons name="hand-left-outline" size={20} color="#3B82F6" />
+            <Text style={styles.mapSelectionBannerText}>
+              Tap anywhere on map to select location
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={styles.mapSelectionCancelButton}
+            onPress={cancelMapSelection}
+          >
+            <Text style={styles.mapSelectionCancelText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* ✅ NEW: Optional Crosshair (center of screen indicator) */}
+      {isMapSelectionMode && !selectedMapLocation && (
+        <View style={styles.mapSelectionCrosshair} pointerEvents="none">
+          <View style={styles.crosshairLines}>
+            <View style={styles.crosshairVertical} />
+            <View style={styles.crosshairHorizontal} />
+          </View>
+          <View style={styles.crosshairCenter}>
+            <Ionicons name="add" size={24} color="#3B82F6" />
+          </View>
+        </View>
+      )}
+
       <NavigationControls
         showFAB={false}
         onFABPress={() => calculateUnifiedRoutes()}
@@ -887,7 +1145,6 @@ export default function NavigationScreen() {
         obstacleToggleStyle={{ top: insets.top + 70 }}
       />
 
-      {/* All existing overlays */}
       <ProximityAlertsOverlay
         alerts={proximityState.proximityAlerts}
         onAlertPress={handleProximityAlertPress}
@@ -897,11 +1154,10 @@ export default function NavigationScreen() {
         routeAnalysis={routeAnalysis}
         isVisible={!!routeAnalysis && showRoutePanel}
         onSelectRoute={(routeType) => {
-          // ✅ Updated prop name
           if (routeType === "fastest") {
             startNavigation("fastest");
           } else {
-            startNavigation("clearest"); // ✅ Changed "accessible" to "clearest"
+            startNavigation("clearest");
           }
         }}
         onStopNavigation={clearRoutesAndPanel}
@@ -921,8 +1177,6 @@ export default function NavigationScreen() {
           />
         )}
       </Modal>
-
-      {/* Detour/micro-reroute UI removed to simplify behavior */}
     </SafeAreaView>
   );
 }
