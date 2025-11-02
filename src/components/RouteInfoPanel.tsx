@@ -73,9 +73,10 @@ interface RouteInfoBottomSheetProps {
   isVisible: boolean;
   isCalculating?: boolean;
   isCalculatingObstacles?: boolean;
-  onClose?: () => void; // Made optional since we removed close button
+  onClose?: () => void;
   onSelectRoute: (routeType: "fastest" | "clearest") => void;
   onStopNavigation?: () => void;
+  isNavigating?: boolean; // ✅ ADD THIS LINE
 }
 
 type SheetState = "expanded" | "minimized";
@@ -87,6 +88,7 @@ export function RouteInfoBottomSheet({
   isCalculatingObstacles = false,
   onSelectRoute,
   onStopNavigation,
+  isNavigating = false, // ✅ ADD THIS LINE
 }: RouteInfoBottomSheetProps) {
   // ALL HOOKS AT THE TOP
   const [sheetState, setSheetState] = useState<SheetState>("expanded");
@@ -168,6 +170,13 @@ export function RouteInfoBottomSheet({
     },
     [sheetState, expandSheet, minimizeSheet]
   );
+
+  useEffect(() => {
+    if (isNavigating && sheetState === "expanded") {
+      console.log("🔽 Auto-minimizing panel for navigation");
+      minimizeSheet();
+    }
+  }, [isNavigating]);
 
   // Initialize position on visibility change
   useEffect(() => {

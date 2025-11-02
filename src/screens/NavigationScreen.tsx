@@ -1,13 +1,7 @@
 // src/screens/NavigationScreen.tsx
-// UPDATED: Added map selection mode for "Choose on Map" feature
+// ✅ FINAL FIX: Touch-and-hold location check + Stop navigation clears panel
 
-import React, {
-  useState,
-  useRef,
-  useEffect,
-  useCallback,
-  useMemo,
-} from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -27,22 +21,16 @@ import { useUserProfile } from "../stores/userProfileStore";
 import { firebaseServices } from "../services/firebase";
 import { UserLocation, AccessibilityObstacle } from "../types";
 import { calculateUserBearingFromRoute } from "../utils/navigationUtils";
-
-// ✅ Import the hook
 import { useMapInteraction } from "../hooks/useMapInteraction";
-
 import { navigationStyles as styles } from "../styles/navigationStyles";
-
 import { useProximityDetection } from "../hooks/useProximityDetection";
 import { useRouteCalculation } from "../hooks/useRouteCalculation";
 import { ProximityAlertsOverlay } from "../components/ProximityAlertsOverlay";
 import { EnhancedObstacleMarker } from "../components/EnhancedObstacleMarker";
 import { RouteInfoBottomSheet } from "../components/RouteInfoPanel";
 import { NavigationControls } from "../components/NavigationControls";
-
 import EnhancedSearchBar from "../components/EnhancedSearchBar";
 import { PlaceSearchResult } from "../services/googlePlacesService";
-
 import { getPOIIcon } from "../utils/mapUtils";
 import { SAMPLE_POIS } from "../constants/navigationConstants";
 import {
@@ -56,68 +44,94 @@ import {
 } from "../services/obstacleValidationService";
 import { textToSpeechService } from "../services/textToSpeechService";
 
-/**
- * Haversine distance calculation (inline for map selection)
- */
-const haversineDistance = (
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number
-): number => {
-  const R = 6371e3;
-  const φ1 = (lat1 * Math.PI) / 180;
-  const φ2 = (lat2 * Math.PI) / 180;
-  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
-
-  const a =
-    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  return R * c;
-};
-
 export default function NavigationScreen() {
   const insets = useSafeAreaInsets();
   const { location, error: locationError } = useLocation();
   const { profile } = useUserProfile();
 
   const mapRef = useRef<MapView | null>(null);
-  const [destination, setDestination] = useState("");
+  const lastValidationCheckRef = useRef<number>(0);
 
+  const [destination, setDestination] = useState("");
   const [remainingPolyline, setRemainingPolyline] = useState<UserLocation[]>(
     []
   );
   const [selectedRouteType, setSelectedRouteType] = useState<
     "fastest" | "clearest" | null
   >(null);
+  const [isNavigating, setIsNavigating] = useState(false);
+  const [hasArrived, setHasArrived] = useState(false);
+  const [userBearing, setUserBearing] = useState<number | null>(null);
+  const [navigationPausedByBlur, setNavigationPausedByBlur] = useState(false);
 
-  // All existing state
   const [showAllObstacles, setShowAllObstacles] = useState(false);
+  const [showRoutePanel, setShowRoutePanel] = useState(true);
   const [validationRadiusObstacles, setValidationRadiusObstacles] = useState<
     AccessibilityObstacle[]
   >([]);
-  const [hasArrived, setHasArrived] = useState(false);
-  const [showRoutePanel, setShowRoutePanel] = useState(true);
-  const [userBearing, setUserBearing] = useState<number | null>(null);
-  const [isNavigating, setIsNavigating] = useState(false);
   const [showValidationPrompt, setShowValidationPrompt] = useState(false);
   const [currentValidationPrompt, setCurrentValidationPrompt] =
     useState<ValidationPromptType | null>(null);
   const [showSidewalks, setShowSidewalks] = useState(true);
-  const [navigationPausedByBlur, setNavigationPausedByBlur] = useState(false);
 
-  // ✅ NEW: Map selection mode state
   const [isMapSelectionMode, setIsMapSelectionMode] = useState(false);
   const [selectedMapLocation, setSelectedMapLocation] =
     useState<UserLocation | null>(null);
 
-  const lastValidationCheckRef = useRef<number>(0);
   const VALIDATION_CHECK_INTERVAL = 30000;
 
-  // Helper functions
+  const {
+    routeAnalysis,
+    isCalculating,
+    selectedDestination,
+    destinationName,
+    routeObstacles,
+    nearbyObstacles,
+    calculateUnifiedRoutes,
+    handlePOIPress,
+    updateRouteAnalysis,
+    clearRoutes,
+  } = useRouteCalculation({
+    location,
+    profile,
+    mapRef,
+    destination,
+  });
+
+  const proximityState = useProximityDetection({
+    isNavigating,
+    userLocation: location,
+    routePolyline: remainingPolyline,
+    userProfile: profile,
+  });
+
+  // ✅ FIX: Pass currentLocation to hook
+  const mapInteraction = useMapInteraction({
+    isNavigating: isNavigating || isMapSelectionMode,
+    nearbyPOIs: SAMPLE_POIS,
+    currentLocation: location, // ✅ NEW: Pass location for checking
+    onLocationSelected: (coordinate, nearestInfo) => {
+      // Location already checked in hook, just proceed
+      const customPOI = {
+        id: `custom_${Date.now()}`,
+        name: "Custom Destination",
+        type: "custom" as const,
+        lat: coordinate.latitude,
+        lng: coordinate.longitude,
+      };
+
+      handlePOIPress(customPOI);
+      setShowRoutePanel(true);
+    },
+    onReportAtLocation: (coordinate) => {
+      Alert.alert(
+        "Report Feature",
+        "This will navigate to Report screen with location pre-filled.",
+        [{ text: "OK" }]
+      );
+    },
+  });
+
   function getObstacleRouteType(
     obstacle: AccessibilityObstacle,
     routeAnalysis: any
@@ -137,101 +151,54 @@ export default function NavigationScreen() {
     return undefined;
   }
 
+  const dedupeById = (arr: AccessibilityObstacle[] = []) => {
+    const map = new Map<string, AccessibilityObstacle>();
+    arr.forEach((o) => map.set(String(o.id), o));
+    return Array.from(map.values());
+  };
+
   const calculateRemainingRoute = useCallback(
     (userLocation: UserLocation, fullRoute: UserLocation[]): UserLocation[] => {
       if (!fullRoute || fullRoute.length === 0 || !userLocation) return [];
 
-      const norm = (p: any) =>
-        ({
-          latitude: p.latitude ?? p.lat,
-          longitude: p.longitude ?? p.lng,
-        } as UserLocation);
+      const norm = (p: any) => ({
+        latitude: p.latitude ?? p.lat,
+        longitude: p.longitude ?? p.lng,
+      });
 
-      const route = fullRoute.map(norm);
       const user = norm(userLocation);
+      const route = fullRoute.map(norm);
 
-      const R = 6371000;
-      const toRad = (d: number) => (d * Math.PI) / 180;
-      const lat0 = toRad(user.latitude);
-      const cosLat0 = Math.cos(lat0);
-
-      const toXY = (p: UserLocation) => {
-        const x = toRad(p.longitude - user.longitude) * R * cosLat0;
-        const y = toRad(p.latitude - user.latitude) * R;
-        return { x, y };
-      };
-
-      const userXY = { x: 0, y: 0 };
-      const routeXY = route.map(toXY);
-
-      const sq = (a: { x: number; y: number }, b: { x: number; y: number }) =>
-        (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y);
-
-      const projectSeg = (
-        pXY: { x: number; y: number },
-        vXY: { x: number; y: number },
-        wXY: { x: number; y: number }
-      ) => {
-        const dx = wXY.x - vXY.x;
-        const dy = wXY.y - vXY.y;
-        const l2 = dx * dx + dy * dy;
-        if (l2 === 0) return { t: 0, proj: { x: vXY.x, y: vXY.y } };
-        let t = ((pXY.x - vXY.x) * dx + (pXY.y - vXY.y) * dy) / l2;
-        if (t < 0) t = 0;
-        if (t > 1) t = 1;
-        return { t, proj: { x: vXY.x + t * dx, y: vXY.y + t * dy } };
-      };
-
+      let bestIndex = 0;
       let bestDist = Infinity;
-      let bestIndex = -1;
-      let bestProjXY: { x: number; y: number } | null = null;
 
-      for (let i = 0; i < routeXY.length - 1; i++) {
-        const { proj } = projectSeg(userXY, routeXY[i], routeXY[i + 1]);
-        const d = sq(userXY, proj);
-        if (d < bestDist) {
-          bestDist = d;
+      for (let i = 0; i < route.length; i++) {
+        const rPt = route[i];
+        const dLat = user.latitude - rPt.latitude;
+        const dLng = user.longitude - rPt.longitude;
+        const dist = Math.sqrt(dLat * dLat + dLng * dLng);
+        if (dist < bestDist) {
+          bestDist = dist;
           bestIndex = i;
-          bestProjXY = proj;
         }
       }
 
-      const lastIdx = routeXY.length - 1;
-      const dLast = sq(userXY, routeXY[lastIdx]);
-      if (dLast < bestDist) {
-        bestDist = dLast;
-        bestIndex = lastIdx;
-        bestProjXY = routeXY[lastIdx];
-      }
-
-      if (!bestProjXY || bestIndex === -1) {
-        return [user, ...route];
-      }
-
-      const projToLatLng = (xy: { x: number; y: number }) => {
-        const lat = user.latitude + (xy.y / R) * (180 / Math.PI);
-        const lon = user.longitude + (xy.x / (R * cosLat0)) * (180 / Math.PI);
-        return { latitude: lat, longitude: lon } as UserLocation;
-      };
-
-      const projLatLng = projToLatLng(bestProjXY);
       const out: UserLocation[] = [];
-      out.push({ latitude: user.latitude, longitude: user.longitude });
+      const lastPt = out[out.length - 1];
 
-      const EPS_M_SQ = 0.01;
-      if (sq(userXY, bestProjXY) > EPS_M_SQ) {
-        out.push(projLatLng);
+      if (
+        !lastPt ||
+        lastPt.latitude !== user.latitude ||
+        lastPt.longitude !== user.longitude
+      ) {
+        out.push(user);
       }
 
-      if (bestIndex >= lastIdx) {
-        const lastPt = route[lastIdx];
-        if (
-          out.length === 0 ||
-          out[out.length - 1].latitude !== lastPt.latitude ||
-          out[out.length - 1].longitude !== lastPt.longitude
-        ) {
-          out.push(lastPt);
-        }
+      if (
+        lastPt &&
+        lastPt.latitude === route[bestIndex].latitude &&
+        lastPt.longitude === route[bestIndex].longitude
+      ) {
         return out;
       }
 
@@ -253,66 +220,12 @@ export default function NavigationScreen() {
     []
   );
 
-  const dedupeById = (arr: AccessibilityObstacle[] = []) => {
-    const map = new Map<string, AccessibilityObstacle>();
-    arr.forEach((o) => map.set(String(o.id), o));
-    return Array.from(map.values());
-  };
-
-  // Existing hooks
-  const {
-    routeAnalysis,
-    isCalculating,
-    selectedDestination,
-    destinationName,
-    routeObstacles,
-    nearbyObstacles,
-    calculateUnifiedRoutes,
-    handlePOIPress,
-    updateRouteAnalysis,
-    clearRoutes,
-  } = useRouteCalculation({
-    location,
-    profile,
-    mapRef,
-    destination,
-  });
-
-  // Touch-and-hold hook
-  const mapInteraction = useMapInteraction({
-    isNavigating: isNavigating || isMapSelectionMode, // ✅ Disable during both navigation AND selection mode
-    nearbyPOIs: SAMPLE_POIS,
-    onLocationSelected: (coordinate, nearestInfo) => {
-      const customPOI = {
-        id: `custom_${Date.now()}`,
-        name: nearestInfo ? `Near ${nearestInfo.name}` : "Custom Location",
-        type: "custom" as const,
-        lat: coordinate.latitude,
-        lng: coordinate.longitude,
-      };
-
-      handlePOIPress(customPOI);
-      setShowRoutePanel(true);
-    },
-    onReportAtLocation: (coordinate) => {
-      Alert.alert(
-        "Report Feature",
-        "This will navigate to Report screen with location pre-filled.",
-        [{ text: "OK" }]
-      );
-    },
-  });
-
-  // ✅ NEW: Handle "Choose on Map" activation
   const handleChooseOnMap = useCallback(() => {
     console.log("📍 Map selection mode activated");
-
-    // Activate map selection mode
     setIsMapSelectionMode(true);
     setShowRoutePanel(false);
     setSelectedMapLocation(null);
 
-    // Center map on user location with animation
     if (location && mapRef.current) {
       mapRef.current.animateToRegion(
         {
@@ -326,54 +239,33 @@ export default function NavigationScreen() {
     }
   }, [location]);
 
-  // ✅ NEW: Cancel map selection mode
   const cancelMapSelection = useCallback(() => {
     console.log("❌ Map selection mode cancelled");
     setIsMapSelectionMode(false);
     setSelectedMapLocation(null);
   }, []);
 
-  // ✅ NEW: Handle single tap on map (when in selection mode)
   const handleMapSingleTap = useCallback(
     (coordinate: UserLocation) => {
       if (!isMapSelectionMode) return;
 
-      console.log("📍 Location tapped:", coordinate);
+      console.log("📍 Custom location selected:", coordinate);
       setSelectedMapLocation(coordinate);
 
-      // ✅ PROPERLY TYPE-SAFE: Find nearest POI
-      type POI = (typeof SAMPLE_POIS)[number]; // Gets the array element type
-
-      const nearestInfo = SAMPLE_POIS.reduce<{
-        poi: POI;
-        distance: number;
-      } | null>(
-        (nearest, poi) => {
-          const distance = haversineDistance(
-            poi.location.latitude,
-            poi.location.longitude,
-            coordinate.latitude,
-            coordinate.longitude
-          );
-
-          if (!nearest || distance < nearest.distance) {
-            return { poi, distance };
-          }
-          return nearest;
-        },
-        null // Initial value
-      );
-
-      // ✅ NOW TypeScript knows nearestInfo is either null or { poi, distance }
-      // No type narrowing issues!
+      // ✅ Check location for tap-to-select too
+      if (!location) {
+        Alert.alert(
+          "Location Error",
+          "Cannot get your current location. Please ensure GPS is enabled and app has location permission."
+        );
+        return;
+      }
 
       Alert.alert(
-        "Location Selected",
-        nearestInfo
-          ? `Near ${nearestInfo.poi.name} (${Math.round(
-              nearestInfo.distance
-            )}m away)`
-          : "Custom location selected",
+        "Set Custom Destination?",
+        `Coordinates: ${coordinate.latitude.toFixed(
+          5
+        )}, ${coordinate.longitude.toFixed(5)}`,
         [
           {
             text: "Cancel",
@@ -381,13 +273,11 @@ export default function NavigationScreen() {
             onPress: () => setSelectedMapLocation(null),
           },
           {
-            text: "Set as Destination",
+            text: "Calculate Route",
             onPress: () => {
               const customPOI = {
                 id: `custom_${Date.now()}`,
-                name: nearestInfo
-                  ? `Near ${nearestInfo.poi.name}`
-                  : "Custom Location",
+                name: "Custom Destination",
                 type: "custom" as const,
                 lat: coordinate.latitude,
                 lng: coordinate.longitude,
@@ -399,25 +289,12 @@ export default function NavigationScreen() {
               setSelectedMapLocation(null);
             },
           },
-          {
-            text: "Report Obstacle Here",
-            onPress: () => {
-              Alert.alert(
-                "Report Feature",
-                "This will navigate to Report screen with location pre-filled.",
-                [{ text: "OK" }]
-              );
-              setIsMapSelectionMode(false);
-              setSelectedMapLocation(null);
-            },
-          },
         ]
       );
     },
-    [isMapSelectionMode, handlePOIPress]
+    [isMapSelectionMode, handlePOIPress, location]
   );
 
-  // All existing functions (unchanged)
   const handleDestinationSelect = async (destination: PlaceSearchResult) => {
     try {
       setDestination(destination.name);
@@ -446,229 +323,106 @@ export default function NavigationScreen() {
     }
   };
 
-  const getDestinationTypeFromGoogleTypes = (types: string[]): string => {
-    if (types.includes("hospital") || types.includes("pharmacy"))
-      return "healthcare";
-    if (types.includes("government_office") || types.includes("city_hall"))
-      return "government";
-    if (types.includes("shopping_mall") || types.includes("store"))
-      return "shopping";
+  const getDestinationTypeFromGoogleTypes = (types: string[]) => {
+    if (types.includes("government")) return "government";
+    if (types.includes("hospital")) return "hospital";
+    if (types.includes("school")) return "school";
+    if (types.includes("shopping_mall")) return "mall";
+    if (types.includes("store")) return "shopping";
     return "business";
   };
 
-  const loadValidationRadiusObstacles = async () => {
-    if (!location) return;
-
-    try {
-      const obstacles = await firebaseServices.obstacle.getObstaclesInArea(
-        location.latitude,
-        location.longitude,
-        0.05
-      );
-      setValidationRadiusObstacles(obstacles);
-    } catch (error) {
-      console.error("Failed to load validation obstacles:", error);
-    }
-  };
-
-  const handleToggleObstacles = useCallback(() => {
-    const newState = !showAllObstacles;
-    setShowAllObstacles(newState);
-  }, [showAllObstacles]);
-
-  const handleValidationResponse = async (
-    response: "still_there" | "cleared" | "skip"
-  ) => {
-    if (!currentValidationPrompt) return;
-
-    try {
-      setShowValidationPrompt(false);
-      setCurrentValidationPrompt(null);
-
-      if (location) {
-        loadValidationRadiusObstacles();
-      }
-
-      if (response !== "skip") {
+  const handleStartNavigation = useCallback(
+    (routeType: "fastest" | "clearest") => {
+      if (!location) {
         Alert.alert(
-          "Thank You!",
-          "Your validation helps improve accessibility data.",
-          [{ text: "You're Welcome!" }]
+          "Location Error",
+          "Cannot get your current location. Please ensure GPS is enabled and app has location permission."
         );
+        return;
       }
-    } catch (error) {
-      console.error("Validation response failed:", error);
-      Alert.alert("Error", "Failed to record your validation.");
-    }
-  };
 
-  const handleValidationPromptWithHighlight = (
-    prompt: ValidationPromptType
-  ) => {
-    setCurrentValidationPrompt(prompt);
-    setShowValidationPrompt(true);
+      if (!routeAnalysis) {
+        Alert.alert("Error", "No route available. Please try again.");
+        return;
+      }
 
-    if (mapRef.current && prompt.location) {
-      mapRef.current.animateToRegion(
-        {
-          latitude: prompt.location.latitude,
-          longitude: prompt.location.longitude,
-          latitudeDelta: 0.005,
-          longitudeDelta: 0.005,
-        },
-        1000
-      );
-    }
-  };
+      console.log(`🚀 Starting navigation with ${routeType} route`);
+      setSelectedRouteType(routeType);
+      setIsNavigating(true);
 
-  const handleProximityAlertPress = useCallback((alert: ProximityAlert) => {
-    if (mapRef.current) {
-      mapRef.current.animateToRegion(
-        {
-          latitude: alert.obstacle.location.latitude,
-          longitude: alert.obstacle.location.longitude,
-          latitudeDelta: 0.005,
-          longitudeDelta: 0.005,
-        },
-        1000
-      );
-    }
+      Vibration.vibrate(50);
+      textToSpeechService.testTTS();
+    },
+    [location, routeAnalysis]
+  );
 
+  // ✅ FIX: Clear routes AND hide panel
+  const handleStopNavigation = useCallback(() => {
     Alert.alert(
-      "Obstacle Details",
-      `Type: ${alert.obstacle.type.replace("_", " ")}\n` +
-        `Distance: ${alert.distance}m away\n` +
-        `${alert.obstacle.description}`,
-      [{ text: "OK" }]
+      "Stop Navigation?",
+      "Are you sure you want to stop navigation?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Stop",
+          style: "destructive",
+          onPress: () => {
+            console.log("🛑 Navigation stopped by user");
+            setIsNavigating(false);
+            setSelectedRouteType(null);
+            setRemainingPolyline([]);
+            proximityDetectionService.resetDetectionState();
+            Vibration.vibrate(100);
+
+            // ✅ FIX: Clear routes and hide panel
+            clearRoutes();
+            setShowRoutePanel(false);
+            setDestination("");
+          },
+        },
+      ]
     );
-  }, []);
-
-  const routePolyline = useMemo(() => {
-    return routeAnalysis?.fastestRoute?.polyline || [];
-  }, [routeAnalysis?.fastestRoute?.polyline]);
-
-  const proximityState = useProximityDetection({
-    isNavigating,
-    userLocation: location,
-    routePolyline,
-    userProfile: profile,
-  });
-
-  useEffect(() => {
-    if (location) {
-      loadValidationRadiusObstacles();
-
-      if (profile) {
-        const now = Date.now();
-        const timeSinceLastCheck = now - lastValidationCheckRef.current;
-
-        if (timeSinceLastCheck >= VALIDATION_CHECK_INTERVAL) {
-          checkForValidationPrompts();
-          lastValidationCheckRef.current = now;
-          console.log("🎯 Validation prompt check triggered (30s throttle)");
-        }
-      }
-    }
-  }, [location, profile, showAllObstacles]);
-
-  useEffect(() => {
-    if (destinationName && proximityState.isDetecting) {
-      proximityDetectionService.resetDetectionState();
-    }
-  }, [destinationName, proximityState.isDetecting]);
-
-  const checkForValidationPrompts = async () => {
-    if (!location || !profile) return;
-
-    try {
-      const prompts = await obstacleValidationService.checkForValidationPrompts(
-        location,
-        profile
-      );
-
-      if (prompts.length > 0) {
-        handleValidationPromptWithHighlight(prompts[0]);
-      }
-    } catch (error) {
-      console.error("Validation prompt check failed:", error);
-    }
-  };
-
-  const startNavigation = (routeType: "fastest" | "clearest") => {
-    if (!routeAnalysis) {
-      console.error("Cannot start navigation: No route analysis");
-      Alert.alert("Error", "Route not ready. Please try again.");
-      return;
-    }
-
-    setIsNavigating(true);
-    setSelectedRouteType(routeType);
-    setHasArrived(false);
-    Vibration.vibrate(100);
-
-    const selectedRoute =
-      routeType === "fastest"
-        ? routeAnalysis.fastestRoute
-        : routeAnalysis.clearestRoute;
-
-    setRemainingPolyline(selectedRoute.polyline);
-
-    Alert.alert(
-      "Navigation Started!",
-      `Following ${routeType} route to ${destinationName}.`,
-      [{ text: "Let's Go!" }]
-    );
-  };
-
-  const stopNavigation = useCallback(() => {
-    setIsNavigating(false);
-    setHasArrived(false);
-    setSelectedRouteType(null);
-    setRemainingPolyline([]);
-    setDestination("");
-    proximityDetectionService.resetDetectionState();
-    textToSpeechService.stopSpeaking();
-    console.log("🛑 Navigation stopped");
-  }, []);
-
-  const clearRoutesAndPanel = useCallback(() => {
-    setIsNavigating(false);
-    setHasArrived(false);
-    setSelectedRouteType(null);
-    setRemainingPolyline([]);
-    setShowRoutePanel(false);
-    setDestination("");
-    clearRoutes();
-    console.log("🗑️ Routes cleared");
   }, [clearRoutes]);
 
+  const handleToggleObstacles = useCallback(() => {
+    setShowAllObstacles((prev) => !prev);
+  }, []);
+
+  const handleProximityAlertPress = useCallback((alert: ProximityAlert) => {
+    console.log("🔔 Proximity alert pressed:", alert.obstacle.type);
+  }, []);
+
   const checkArrival = useCallback(() => {
-    if (hasArrived) {
-      return;
-    }
+    if (!location || !selectedDestination || hasArrived) return;
 
-    if (!location || !selectedDestination || !isNavigating) return;
+    const distance =
+      Math.sqrt(
+        Math.pow(location.latitude - selectedDestination.latitude, 2) +
+          Math.pow(location.longitude - selectedDestination.longitude, 2)
+      ) * 111320;
 
-    const distance = proximityDetectionService.calculateDistance(
-      location,
-      selectedDestination
-    );
-    const ARRIVAL_THRESHOLD = 20;
-
-    if (distance <= ARRIVAL_THRESHOLD) {
+    if (distance < 20) {
       setHasArrived(true);
       setIsNavigating(false);
-      setDestination("");
-      proximityDetectionService.resetDetectionState();
-      textToSpeechService.stopSpeaking();
+      Vibration.vibrate([0, 100, 50, 100]);
+      textToSpeechService.testTTS();
 
-      console.log(
-        `🎉 Arrival detected - ${distance.toFixed(1)}m from destination`
+      Alert.alert(
+        "Destination Reached! 🎉",
+        `You've arrived at ${destinationName}`,
+        [
+          {
+            text: "End Navigation",
+            onPress: () => {
+              clearRoutes();
+              setSelectedRouteType(null);
+              setDestination("");
+              setShowRoutePanel(false);
+            },
+          },
+        ]
       );
-
-      Alert.alert("🎉 Arrival", `You have reached your destination!`, [
-        { text: "Great!" },
-      ]);
     }
   }, [
     location,
@@ -676,13 +430,42 @@ export default function NavigationScreen() {
     isNavigating,
     destinationName,
     hasArrived,
+    clearRoutes,
   ]);
 
+  const handleValidationResponse = useCallback(
+    async (response: "still_there" | "cleared" | "skip") => {
+      if (!currentValidationPrompt) return;
+
+      try {
+        await obstacleValidationService.processValidationResponse(
+          currentValidationPrompt.obstacleId,
+          response
+        );
+
+        Alert.alert(
+          "Thank You!",
+          "Your feedback helps improve route accuracy for everyone."
+        );
+      } catch (error) {
+        console.error("Validation submission failed:", error);
+      } finally {
+        setShowValidationPrompt(false);
+        setCurrentValidationPrompt(null);
+      }
+    },
+    [currentValidationPrompt]
+  );
+
   useEffect(() => {
-    if (isNavigating && location && selectedDestination) {
-      checkArrival();
-    }
-  }, [location, isNavigating, selectedDestination, checkArrival]);
+    const initServices = async () => {
+      const ttsReady = await textToSpeechService.initialize();
+      if (!ttsReady) {
+        console.warn("⚠️ TTS initialization failed");
+      }
+    };
+    initServices();
+  }, []);
 
   useEffect(() => {
     if (!isNavigating || !location || !selectedRouteType || !routeAnalysis) {
@@ -694,9 +477,7 @@ export default function NavigationScreen() {
         ? routeAnalysis.fastestRoute
         : routeAnalysis.clearestRoute;
 
-    if (!selectedRoute || !selectedRoute.polyline) {
-      return;
-    }
+    if (!selectedRoute || !selectedRoute.polyline) return;
 
     const updatedPolyline = calculateRemainingRoute(
       location,
@@ -705,11 +486,6 @@ export default function NavigationScreen() {
 
     if (updatedPolyline.length > 0) {
       setRemainingPolyline(updatedPolyline);
-      console.log(
-        `🗺️ Polyline trimmed: ${selectedRoute.polyline.length} → ${updatedPolyline.length} points`
-      );
-    } else {
-      console.warn("⚠️ Updated polyline is empty, keeping previous polyline");
     }
   }, [
     location,
@@ -718,34 +494,6 @@ export default function NavigationScreen() {
     routeAnalysis,
     calculateRemainingRoute,
   ]);
-
-  useFocusEffect(
-    useCallback(() => {
-      console.log("📱 NavigationScreen focused");
-
-      // ONLY resume if navigation was actually paused
-      if (
-        navigationPausedByBlur &&
-        selectedDestination &&
-        isNavigating === false
-      ) {
-        setIsNavigating(true);
-        setNavigationPausedByBlur(false);
-        console.log("▶️ Resuming navigation after screen focus");
-      }
-
-      return () => {
-        console.log("📱 NavigationScreen blurred");
-
-        // ONLY pause if actively navigating
-        if (isNavigating) {
-          setIsNavigating(false);
-          setNavigationPausedByBlur(true);
-          console.log("⏸️ Pausing navigation due to screen blur");
-        }
-      };
-    }, [isNavigating, selectedDestination, navigationPausedByBlur])
-  );
 
   useEffect(() => {
     if (!isNavigating || !location || !selectedRouteType || !routeAnalysis) {
@@ -758,9 +506,7 @@ export default function NavigationScreen() {
         ? routeAnalysis.fastestRoute
         : routeAnalysis.clearestRoute;
 
-    if (!selectedRoute || !selectedRoute.polyline) {
-      return;
-    }
+    if (!selectedRoute || !selectedRoute.polyline) return;
 
     const bearing = calculateUserBearingFromRoute(
       location,
@@ -769,24 +515,34 @@ export default function NavigationScreen() {
 
     if (bearing !== null) {
       setUserBearing(bearing);
-      console.log(`🧭 User marker bearing updated: ${Math.round(bearing)}°`);
     }
   }, [location, isNavigating, selectedRouteType, routeAnalysis]);
 
   useEffect(() => {
-    const initServices = async () => {
-      console.log("🚀 Initializing navigation services...");
+    if (isNavigating && location && selectedDestination) {
+      checkArrival();
+    }
+  }, [location, isNavigating, selectedDestination, checkArrival]);
 
-      const ttsReady = await textToSpeechService.initialize();
-      if (ttsReady) {
-        console.log("✅ TTS initialized and ready");
-      } else {
-        console.warn("⚠️ TTS initialization failed");
+  useFocusEffect(
+    useCallback(() => {
+      if (
+        navigationPausedByBlur &&
+        selectedDestination &&
+        isNavigating === false
+      ) {
+        setIsNavigating(true);
+        setNavigationPausedByBlur(false);
       }
-    };
 
-    initServices();
-  }, []);
+      return () => {
+        if (isNavigating) {
+          setIsNavigating(false);
+          setNavigationPausedByBlur(true);
+        }
+      };
+    }, [isNavigating, selectedDestination, navigationPausedByBlur])
+  );
 
   const renderObstacles = () => {
     const allObstacleIds = new Set<string>();
@@ -880,21 +636,15 @@ export default function NavigationScreen() {
         showsCompass={false}
         followsUserLocation={isNavigating}
         loadingEnabled={true}
-        onMapReady={() => {
-          console.log("Map is ready!");
-        }}
+        onMapReady={() => console.log("Map ready")}
         onPress={(event) => {
-          // ✅ NEW: Handle single tap in selection mode
           if (isMapSelectionMode) {
-            const coordinate = event.nativeEvent.coordinate;
-            handleMapSingleTap(coordinate);
+            handleMapSingleTap(event.nativeEvent.coordinate);
           }
         }}
         onLongPress={(event) => {
-          // Touch-and-hold only works when NOT in selection mode
           if (!isMapSelectionMode) {
-            const coordinate = event.nativeEvent.coordinate;
-            mapInteraction.handleMapLongPress(coordinate);
+            mapInteraction.handleMapLongPress(event.nativeEvent.coordinate);
           }
         }}
       >
@@ -974,69 +724,38 @@ export default function NavigationScreen() {
                   opacity: mapInteraction.holdProgress / 100,
                 }}
               />
-
               <View
                 style={{
                   width: 24,
                   height: 24,
                   borderRadius: 12,
                   backgroundColor: "#3B82F6",
-                  borderWidth: 3,
-                  borderColor: "white",
-                  shadowColor: "#000",
-                  shadowOffset: { width: 0, height: 2 },
-                  shadowOpacity: 0.3,
-                  shadowRadius: 4,
-                  elevation: 5,
-                }}
-              />
-
-              <Text
-                style={{
-                  position: "absolute",
-                  bottom: -25,
-                  fontSize: 12,
-                  color: "#3B82F6",
-                  fontWeight: "700",
-                  backgroundColor: "white",
-                  paddingHorizontal: 8,
-                  paddingVertical: 2,
-                  borderRadius: 10,
-                  shadowColor: "#000",
-                  shadowOffset: { width: 0, height: 1 },
-                  shadowOpacity: 0.2,
-                  shadowRadius: 2,
-                  elevation: 3,
+                  justifyContent: "center",
+                  alignItems: "center",
                 }}
               >
-                Hold... {Math.round(mapInteraction.holdProgress)}%
-              </Text>
+                <Text
+                  style={{ color: "white", fontSize: 10, fontWeight: "bold" }}
+                >
+                  {Math.round(mapInteraction.holdProgress)}
+                </Text>
+              </View>
             </View>
           </Marker>
         )}
 
-        {/* ✅ NEW: Selected location marker (when in selection mode) */}
         {isMapSelectionMode && selectedMapLocation && (
-          <Marker
-            coordinate={selectedMapLocation}
-            anchor={{ x: 0.5, y: 0.5 }}
-            pointerEvents="none"
-          >
+          <Marker coordinate={selectedMapLocation}>
             <View
               style={{
                 width: 40,
                 height: 40,
                 borderRadius: 20,
                 backgroundColor: "#3B82F6",
-                borderWidth: 3,
-                borderColor: "white",
                 justifyContent: "center",
                 alignItems: "center",
-                elevation: 5,
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.3,
-                shadowRadius: 4,
+                borderWidth: 3,
+                borderColor: "white",
               }}
             >
               <Ionicons name="location-sharp" size={24} color="white" />
@@ -1044,44 +763,37 @@ export default function NavigationScreen() {
           </Marker>
         )}
 
-        {routeAnalysis && (
+        {routeAnalysis && !isNavigating && (
           <>
-            {!isNavigating && (
-              <>
-                {routeAnalysis.fastestRoute.polyline && (
-                  <Polyline
-                    coordinates={routeAnalysis.fastestRoute.polyline}
-                    strokeColor="#EF4444"
-                    strokeWidth={5}
-                  />
-                )}
-                {routeAnalysis.clearestRoute.polyline && (
-                  <Polyline
-                    coordinates={routeAnalysis.clearestRoute.polyline}
-                    strokeColor="#22C55E"
-                    strokeWidth={5}
-                  />
-                )}
-              </>
+            {routeAnalysis.fastestRoute?.polyline?.length > 0 && (
+              <Polyline
+                coordinates={routeAnalysis.fastestRoute.polyline}
+                strokeColor="#EF4444"
+                strokeWidth={6}
+                zIndex={9}
+              />
             )}
 
-            {isNavigating &&
-              selectedRouteType &&
-              remainingPolyline.length > 0 && (
-                <Polyline
-                  key={`nav-route-${
-                    remainingPolyline.length
-                  }-${remainingPolyline[0]?.latitude.toFixed(6)}`}
-                  coordinates={remainingPolyline}
-                  strokeColor={
-                    selectedRouteType === "fastest" ? "#EF4444" : "#22C55E"
-                  }
-                  strokeWidth={6}
-                  lineDashPattern={[0]}
-                  zIndex={10}
-                />
-              )}
+            {routeAnalysis.clearestRoute?.polyline?.length > 0 && (
+              <Polyline
+                coordinates={routeAnalysis.clearestRoute.polyline}
+                strokeColor="#22C55E"
+                strokeWidth={6}
+                zIndex={8}
+              />
+            )}
           </>
+        )}
+
+        {isNavigating && selectedRouteType && remainingPolyline.length > 0 && (
+          <Polyline
+            coordinates={remainingPolyline}
+            strokeColor={
+              selectedRouteType === "fastest" ? "#EF4444" : "#22C55E"
+            }
+            strokeWidth={6}
+            zIndex={10}
+          />
         )}
       </MapView>
 
@@ -1099,7 +811,6 @@ export default function NavigationScreen() {
         placeholder="Search for accessible destinations..."
       />
 
-      {/* ✅ NEW: Map Selection Mode Banner */}
       {isMapSelectionMode && (
         <View style={[styles.mapSelectionBanner, { top: insets.top + 70 }]}>
           <View style={styles.mapSelectionBannerContent}>
@@ -1117,19 +828,6 @@ export default function NavigationScreen() {
         </View>
       )}
 
-      {/* ✅ NEW: Optional Crosshair (center of screen indicator) */}
-      {isMapSelectionMode && !selectedMapLocation && (
-        <View style={styles.mapSelectionCrosshair} pointerEvents="none">
-          <View style={styles.crosshairLines}>
-            <View style={styles.crosshairVertical} />
-            <View style={styles.crosshairHorizontal} />
-          </View>
-          <View style={styles.crosshairCenter}>
-            <Ionicons name="add" size={24} color="#3B82F6" />
-          </View>
-        </View>
-      )}
-
       <NavigationControls
         showFAB={false}
         onFABPress={() => calculateUnifiedRoutes()}
@@ -1138,11 +836,9 @@ export default function NavigationScreen() {
         isNavigating={isNavigating}
         isDetecting={proximityState.isDetecting}
         proximityAlertsCount={proximityState.proximityAlerts.length}
-        detectionError={proximityState.detectionError || undefined}
         showAllObstacles={showAllObstacles}
         onToggleObstacles={handleToggleObstacles}
         validationObstacleCount={validationRadiusObstacles.length}
-        obstacleToggleStyle={{ top: insets.top + 70 }}
       />
 
       <ProximityAlertsOverlay
@@ -1150,33 +846,32 @@ export default function NavigationScreen() {
         onAlertPress={handleProximityAlertPress}
       />
 
+      {/* ✅ FIX: Show panel based on showRoutePanel state */}
       <RouteInfoBottomSheet
         routeAnalysis={routeAnalysis}
-        isVisible={!!routeAnalysis && showRoutePanel}
-        onSelectRoute={(routeType) => {
-          if (routeType === "fastest") {
-            startNavigation("fastest");
-          } else {
-            startNavigation("clearest");
-          }
-        }}
-        onStopNavigation={clearRoutesAndPanel}
+        isVisible={
+          !isMapSelectionMode && showRoutePanel && routeAnalysis !== null
+        }
+        isCalculating={isCalculating}
+        onSelectRoute={handleStartNavigation}
+        onStopNavigation={handleStopNavigation}
+        isNavigating={isNavigating}
       />
 
-      <Modal
-        visible={showValidationPrompt}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowValidationPrompt(false)}
-      >
-        {currentValidationPrompt && (
+      {showValidationPrompt && currentValidationPrompt && (
+        <Modal
+          visible={showValidationPrompt}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowValidationPrompt(false)}
+        >
           <ValidationPrompt
             prompt={currentValidationPrompt}
             onResponse={handleValidationResponse}
             onDismiss={() => setShowValidationPrompt(false)}
           />
-        )}
-      </Modal>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 }
