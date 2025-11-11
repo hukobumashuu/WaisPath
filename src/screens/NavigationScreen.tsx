@@ -140,7 +140,9 @@ export default function NavigationScreen() {
       handlePOIPress(customPOI);
       setShowRoutePanel(true);
     },
-    onReportAtLocation: (coordinate) => {},
+    onReportAtLocation: (coordinate) => {
+      // Archive this feature -- dev
+    },
   });
 
   /**
