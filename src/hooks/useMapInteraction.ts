@@ -1,21 +1,14 @@
 // src/hooks/useMapInteraction.ts
-// ✅ COMPLETE FIX: Removed POI context + Added location check
+// ✅ FINAL FIX: Use ref to always get FRESH isLocationLoading value
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Vibration, Alert } from "react-native";
 import { UserLocation, PointOfInterest } from "../types";
 
-/**
- * Custom hook for map touch-and-hold interactions
- *
- * Manages 1.2 second hold timer with visual progress and haptic feedback
- * Automatically checks for location availability before proceeding
- */
-
 interface UseMapInteractionProps {
   isNavigating: boolean;
   nearbyPOIs: PointOfInterest[];
-  currentLocation: UserLocation | null; // ✅ NEW: Need current location to check
+  isLocationLoading: boolean;
   onLocationSelected: (
     location: UserLocation,
     nearestInfo?: { name: string; distance: number }
@@ -26,7 +19,7 @@ interface UseMapInteractionProps {
 export const useMapInteraction = ({
   isNavigating,
   nearbyPOIs,
-  currentLocation, // ✅ NEW
+  isLocationLoading,
   onLocationSelected,
   onReportAtLocation,
 }: UseMapInteractionProps) => {
@@ -36,6 +29,18 @@ export const useMapInteraction = ({
 
   const holdTimerRef = useRef<NodeJS.Timeout | null>(null);
   const progressTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ✅ CRITICAL FIX: Store isLocationLoading in ref to always get fresh value
+  const isLocationLoadingRef = useRef(isLocationLoading);
+
+  // ✅ Update ref whenever isLocationLoading changes
+  useEffect(() => {
+    isLocationLoadingRef.current = isLocationLoading;
+    console.log(
+      "🔍 [useMapInteraction] isLocationLoading updated to:",
+      isLocationLoading
+    );
+  }, [isLocationLoading]);
 
   const clearAllTimers = useCallback(() => {
     if (holdTimerRef.current) {
@@ -99,18 +104,36 @@ export const useMapInteraction = ({
       setIsHoldingMap(false);
       setHoldProgress(0);
 
-      // ✅ FIX: Check location BEFORE showing dialog
-      if (!currentLocation) {
-        Alert.alert(
-          "Location Error",
-          "Cannot get your current location. Please ensure GPS is enabled and app has location permission.",
-          [{ text: "OK" }]
+      // ✅ CRITICAL FIX: Read from ref to get FRESH value
+      const currentLoadingState = isLocationLoadingRef.current;
+      console.log(
+        "🔍 [handleHoldComplete] Checking isLocationLoading from REF:",
+        currentLoadingState
+      );
+
+      if (currentLoadingState) {
+        console.log(
+          "❌ [handleHoldComplete] SHOWING LOADING ALERT - isLocationLoading is TRUE"
         );
-        setHoldLocation(null);
+        Alert.alert(
+          "⏳ Loading Location",
+          "Please wait while we get your GPS location. This usually takes just a few seconds.",
+          [
+            {
+              text: "OK",
+              onPress: () => {
+                setHoldLocation(null);
+              },
+            },
+          ]
+        );
         return;
       }
 
-      // ✅ SIMPLIFIED: No POI context checking
+      console.log(
+        "✅ [handleHoldComplete] PASSED - isLocationLoading is FALSE, showing dialog"
+      );
+
       Alert.alert(
         "Set Custom Destination?",
         `Coordinates: ${coordinate.latitude.toFixed(
@@ -141,7 +164,7 @@ export const useMapInteraction = ({
         ]
       );
     },
-    [clearAllTimers, currentLocation, onLocationSelected, onReportAtLocation]
+    [clearAllTimers, onLocationSelected, onReportAtLocation] // ✅ Removed isLocationLoading from deps - using ref instead
   );
 
   return {

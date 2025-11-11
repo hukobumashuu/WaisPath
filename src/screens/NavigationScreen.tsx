@@ -1,5 +1,5 @@
 // src/screens/NavigationScreen.tsx
-// ✅ FINAL FIX: Touch-and-hold location check + Stop navigation clears panel
+// ✅ COMPLETE FINAL FIX: Touch-and-hold + Stop navigation + Loading state
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
@@ -46,12 +46,21 @@ import { textToSpeechService } from "../services/textToSpeechService";
 
 export default function NavigationScreen() {
   const insets = useSafeAreaInsets();
-  const { location, error: locationError } = useLocation();
+
+  // ✅ CRITICAL FIX: Destructure 'loading' from useLocation
+  const {
+    location,
+    loading: locationLoading, // ✅ NEW: Get loading state for tap-and-hold
+    error: locationError,
+  } = useLocation();
+
   const { profile } = useUserProfile();
 
+  // Refs
   const mapRef = useRef<MapView | null>(null);
   const lastValidationCheckRef = useRef<number>(0);
 
+  // Navigation state
   const [destination, setDestination] = useState("");
   const [remainingPolyline, setRemainingPolyline] = useState<UserLocation[]>(
     []
@@ -64,6 +73,7 @@ export default function NavigationScreen() {
   const [userBearing, setUserBearing] = useState<number | null>(null);
   const [navigationPausedByBlur, setNavigationPausedByBlur] = useState(false);
 
+  // UI state
   const [showAllObstacles, setShowAllObstacles] = useState(false);
   const [showRoutePanel, setShowRoutePanel] = useState(true);
   const [validationRadiusObstacles, setValidationRadiusObstacles] = useState<
@@ -74,12 +84,14 @@ export default function NavigationScreen() {
     useState<ValidationPromptType | null>(null);
   const [showSidewalks, setShowSidewalks] = useState(true);
 
+  // Map selection mode state
   const [isMapSelectionMode, setIsMapSelectionMode] = useState(false);
   const [selectedMapLocation, setSelectedMapLocation] =
     useState<UserLocation | null>(null);
 
   const VALIDATION_CHECK_INTERVAL = 30000;
 
+  // Route calculation hook
   const {
     routeAnalysis,
     isCalculating,
@@ -98,6 +110,7 @@ export default function NavigationScreen() {
     destination,
   });
 
+  // Proximity detection
   const proximityState = useProximityDetection({
     isNavigating,
     userLocation: location,
@@ -105,13 +118,17 @@ export default function NavigationScreen() {
     userProfile: profile,
   });
 
-  // ✅ FIX: Pass currentLocation to hook
+  // ✅ CRITICAL FIX: Pass isLocationLoading instead of currentLocation
   const mapInteraction = useMapInteraction({
     isNavigating: isNavigating || isMapSelectionMode,
     nearbyPOIs: SAMPLE_POIS,
-    currentLocation: location, // ✅ NEW: Pass location for checking
+    isLocationLoading: locationLoading, // ✅ Pass loading state, not location
     onLocationSelected: (coordinate, nearestInfo) => {
-      // Location already checked in hook, just proceed
+      // ✅ No location check here - let calculateUnifiedRoutes handle it
+      console.log(
+        "🔍 [onLocationSelected] Called with locationLoading:",
+        locationLoading
+      );
       const customPOI = {
         id: `custom_${Date.now()}`,
         name: "Custom Destination",
@@ -123,15 +140,12 @@ export default function NavigationScreen() {
       handlePOIPress(customPOI);
       setShowRoutePanel(true);
     },
-    onReportAtLocation: (coordinate) => {
-      Alert.alert(
-        "Report Feature",
-        "This will navigate to Report screen with location pre-filled.",
-        [{ text: "OK" }]
-      );
-    },
+    onReportAtLocation: (coordinate) => {},
   });
 
+  /**
+   * Helper: Get which route type an obstacle is on
+   */
   function getObstacleRouteType(
     obstacle: AccessibilityObstacle,
     routeAnalysis: any
@@ -151,12 +165,19 @@ export default function NavigationScreen() {
     return undefined;
   }
 
+  /**
+   * Helper: Remove duplicate obstacles by ID
+   */
   const dedupeById = (arr: AccessibilityObstacle[] = []) => {
     const map = new Map<string, AccessibilityObstacle>();
     arr.forEach((o) => map.set(String(o.id), o));
     return Array.from(map.values());
   };
 
+  /**
+   * Calculate remaining route from current position
+   * Used during navigation to show only the path ahead
+   */
   const calculateRemainingRoute = useCallback(
     (userLocation: UserLocation, fullRoute: UserLocation[]): UserLocation[] => {
       if (!fullRoute || fullRoute.length === 0 || !userLocation) return [];
@@ -169,6 +190,7 @@ export default function NavigationScreen() {
       const user = norm(userLocation);
       const route = fullRoute.map(norm);
 
+      // Find closest point on route to user
       let bestIndex = 0;
       let bestDist = Infinity;
 
@@ -183,6 +205,7 @@ export default function NavigationScreen() {
         }
       }
 
+      // Build remaining route
       const out: UserLocation[] = [];
       const lastPt = out[out.length - 1];
 
@@ -220,6 +243,10 @@ export default function NavigationScreen() {
     []
   );
 
+  /**
+   * Activate map selection mode
+   * Allows user to tap anywhere on map to set destination
+   */
   const handleChooseOnMap = useCallback(() => {
     console.log("📍 Map selection mode activated");
     setIsMapSelectionMode(true);
@@ -239,12 +266,19 @@ export default function NavigationScreen() {
     }
   }, [location]);
 
+  /**
+   * Cancel map selection mode
+   */
   const cancelMapSelection = useCallback(() => {
     console.log("❌ Map selection mode cancelled");
     setIsMapSelectionMode(false);
     setSelectedMapLocation(null);
   }, []);
 
+  /**
+   * Handle single tap on map when in selection mode
+   * ✅ Also checks loading state like tap-and-hold
+   */
   const handleMapSingleTap = useCallback(
     (coordinate: UserLocation) => {
       if (!isMapSelectionMode) return;
@@ -252,7 +286,16 @@ export default function NavigationScreen() {
       console.log("📍 Custom location selected:", coordinate);
       setSelectedMapLocation(coordinate);
 
-      // ✅ Check location for tap-to-select too
+      // ✅ Check if location is loading
+      if (locationLoading) {
+        Alert.alert(
+          "⏳ Loading Location",
+          "Please wait while we get your GPS location."
+        );
+        return;
+      }
+
+      // ✅ Check if location exists
       if (!location) {
         Alert.alert(
           "Location Error",
@@ -292,9 +335,12 @@ export default function NavigationScreen() {
         ]
       );
     },
-    [isMapSelectionMode, handlePOIPress, location]
+    [isMapSelectionMode, handlePOIPress, location, locationLoading]
   );
 
+  /**
+   * Handle destination selected from search bar
+   */
   const handleDestinationSelect = async (destination: PlaceSearchResult) => {
     try {
       setDestination(destination.name);
@@ -323,6 +369,9 @@ export default function NavigationScreen() {
     }
   };
 
+  /**
+   * Helper: Convert Google place types to our POI types
+   */
   const getDestinationTypeFromGoogleTypes = (types: string[]) => {
     if (types.includes("government")) return "government";
     if (types.includes("hospital")) return "hospital";
@@ -332,6 +381,10 @@ export default function NavigationScreen() {
     return "business";
   };
 
+  /**
+   * Start navigation with selected route type
+   * ✅ Panel stays visible and minimizes automatically
+   */
   const handleStartNavigation = useCallback(
     (routeType: "fastest" | "clearest") => {
       if (!location) {
@@ -351,13 +404,19 @@ export default function NavigationScreen() {
       setSelectedRouteType(routeType);
       setIsNavigating(true);
 
+      // ✅ DON'T hide panel - let it minimize automatically
+      // setShowRoutePanel(false); // ❌ REMOVED
+
       Vibration.vibrate(50);
       textToSpeechService.testTTS();
     },
     [location, routeAnalysis]
   );
 
-  // ✅ FIX: Clear routes AND hide panel
+  /**
+   * Stop navigation
+   * ✅ CRITICAL FIX: Clear routes AND hide panel
+   */
   const handleStopNavigation = useCallback(() => {
     Alert.alert(
       "Stop Navigation?",
@@ -369,15 +428,18 @@ export default function NavigationScreen() {
           style: "destructive",
           onPress: () => {
             console.log("🛑 Navigation stopped by user");
+
+            // Stop navigation state
             setIsNavigating(false);
             setSelectedRouteType(null);
             setRemainingPolyline([]);
             proximityDetectionService.resetDetectionState();
+
             Vibration.vibrate(100);
 
-            // ✅ FIX: Clear routes and hide panel
+            // ✅ CRITICAL: Clear routes AND hide panel
             clearRoutes();
-            setShowRoutePanel(false);
+            setShowRoutePanel(false); // ✅ ADDED - Closes panel
             setDestination("");
           },
         },
@@ -385,14 +447,23 @@ export default function NavigationScreen() {
     );
   }, [clearRoutes]);
 
+  /**
+   * Toggle showing all obstacles on map
+   */
   const handleToggleObstacles = useCallback(() => {
     setShowAllObstacles((prev) => !prev);
   }, []);
 
+  /**
+   * Handle proximity alert pressed
+   */
   const handleProximityAlertPress = useCallback((alert: ProximityAlert) => {
     console.log("🔔 Proximity alert pressed:", alert.obstacle.type);
   }, []);
 
+  /**
+   * Check if user has arrived at destination
+   */
   const checkArrival = useCallback(() => {
     if (!location || !selectedDestination || hasArrived) return;
 
@@ -433,6 +504,9 @@ export default function NavigationScreen() {
     clearRoutes,
   ]);
 
+  /**
+   * Handle validation response from user
+   */
   const handleValidationResponse = useCallback(
     async (response: "still_there" | "cleared" | "skip") => {
       if (!currentValidationPrompt) return;
@@ -458,6 +532,18 @@ export default function NavigationScreen() {
   );
 
   useEffect(() => {
+    console.log("🔍 [NavigationScreen] Received from useLocation:", {
+      hasLocation: !!location,
+      locationLoading: locationLoading,
+      lat: location?.latitude,
+      lng: location?.longitude,
+    });
+  }, [location, locationLoading]);
+
+  /**
+   * Initialize TTS service on mount
+   */
+  useEffect(() => {
     const initServices = async () => {
       const ttsReady = await textToSpeechService.initialize();
       if (!ttsReady) {
@@ -467,6 +553,9 @@ export default function NavigationScreen() {
     initServices();
   }, []);
 
+  /**
+   * Update remaining route during navigation
+   */
   useEffect(() => {
     if (!isNavigating || !location || !selectedRouteType || !routeAnalysis) {
       return;
@@ -495,6 +584,9 @@ export default function NavigationScreen() {
     calculateRemainingRoute,
   ]);
 
+  /**
+   * Update user bearing during navigation
+   */
   useEffect(() => {
     if (!isNavigating || !location || !selectedRouteType || !routeAnalysis) {
       setUserBearing(null);
@@ -518,12 +610,18 @@ export default function NavigationScreen() {
     }
   }, [location, isNavigating, selectedRouteType, routeAnalysis]);
 
+  /**
+   * Check for arrival during navigation
+   */
   useEffect(() => {
     if (isNavigating && location && selectedDestination) {
       checkArrival();
     }
   }, [location, isNavigating, selectedDestination, checkArrival]);
 
+  /**
+   * Handle navigation pause/resume on screen blur/focus
+   */
   useFocusEffect(
     useCallback(() => {
       if (
@@ -544,6 +642,41 @@ export default function NavigationScreen() {
     }, [isNavigating, selectedDestination, navigationPausedByBlur])
   );
 
+  useEffect(() => {
+    // When routes finish calculating and we have route analysis
+    if (!isCalculating && routeAnalysis) {
+      console.log("🗺️ Route calculation complete, ensuring visibility");
+
+      // Make sure panel is visible
+      setShowRoutePanel(true);
+
+      // Make sure we're not in navigation mode (so routes display)
+      // Only reset if we weren't already navigating
+      if (!isNavigating) {
+        setSelectedRouteType(null);
+        setRemainingPolyline([]);
+      }
+    }
+  }, [isCalculating, routeAnalysis, isNavigating]);
+
+  useEffect(() => {
+    if (routeAnalysis) {
+      console.log("📊 Route analysis updated:", {
+        hasFastestPolyline: routeAnalysis.fastestRoute?.polyline?.length > 0,
+        hasClearestPolyline: routeAnalysis.clearestRoute?.polyline?.length > 0,
+        fastestPolylineLength: routeAnalysis.fastestRoute?.polyline?.length,
+        clearestPolylineLength: routeAnalysis.clearestRoute?.polyline?.length,
+        isNavigating,
+        showRoutePanel,
+      });
+    } else {
+      console.log("📊 Route analysis cleared");
+    }
+  }, [routeAnalysis, isNavigating, showRoutePanel]);
+
+  /**
+   * Render all obstacles on map
+   */
   const renderObstacles = () => {
     const allObstacleIds = new Set<string>();
     const renderedObstacles: JSX.Element[] = [];
@@ -571,6 +704,7 @@ export default function NavigationScreen() {
       }
     };
 
+    // Route obstacles
     if (routeObstacles && routeObstacles.length > 0) {
       dedupeById(routeObstacles).forEach((obstacle) => {
         const routeType = getObstacleRouteType(obstacle, routeAnalysis);
@@ -578,10 +712,12 @@ export default function NavigationScreen() {
       });
     }
 
+    // Validation radius obstacles
     validationRadiusObstacles.forEach((obstacle) => {
       addObstacleIfUnique(obstacle, "validation", false, undefined, 0.8);
     });
 
+    // Extended nearby obstacles (if enabled)
     if (showAllObstacles && nearbyObstacles && nearbyObstacles.length > 0) {
       const extendedOpacity = isNavigating ? 0.5 : 0.7;
       dedupeById(nearbyObstacles).forEach((obstacle) => {
@@ -598,28 +734,36 @@ export default function NavigationScreen() {
     return renderedObstacles;
   };
 
-  if (!location && !locationError) {
+  // ===== LOADING SCREEN =====
+  if (locationLoading && !location) {
     return (
-      <SafeAreaView style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#3B82F6" />
-        <Text style={styles.loadingText}>Getting your location...</Text>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#3B82F6" />
+          <Text style={styles.loadingText}>Getting your location...</Text>
+          <Text style={styles.loadingText}>Please ensure GPS is enabled</Text>
+        </View>
       </SafeAreaView>
     );
   }
 
-  if (locationError) {
+  // ===== ERROR SCREEN =====
+  if (locationError && !location) {
     return (
-      <SafeAreaView style={styles.errorContainer}>
-        <Ionicons name="location-outline" size={48} color="#EF4444" />
-        <Text style={styles.errorTitle}>Location Required</Text>
-        <Text style={styles.errorMessage}>
-          WAISPATH needs your location to provide accessible navigation.
-        </Text>
-        <Text style={styles.errorMessage}>{locationError}</Text>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.errorContainer}>
+          <Ionicons name="location-outline" size={48} color="#EF4444" />
+          <Text style={styles.errorTitle}>Location Required</Text>
+          <Text style={styles.errorMessage}>
+            WAISPATH needs your location to provide accessible navigation.
+          </Text>
+          <Text style={styles.errorMessage}>{locationError}</Text>
+        </View>
       </SafeAreaView>
     );
   }
 
+  // ===== MAIN SCREEN =====
   return (
     <SafeAreaView style={styles.container}>
       <MapView
@@ -648,6 +792,7 @@ export default function NavigationScreen() {
           }
         }}
       >
+        {/* User location marker */}
         {location && (
           <Marker
             coordinate={location}
@@ -661,6 +806,7 @@ export default function NavigationScreen() {
           </Marker>
         )}
 
+        {/* Destination marker */}
         {selectedDestination && (
           <Marker coordinate={selectedDestination} anchor={{ x: 0.5, y: 1 }}>
             <View style={styles.destinationMarker}>
@@ -669,8 +815,10 @@ export default function NavigationScreen() {
           </Marker>
         )}
 
+        {/* Obstacles */}
         {renderObstacles()}
 
+        {/* Sample POI markers */}
         {SAMPLE_POIS.map((poi) => (
           <Marker
             key={poi.id}
@@ -699,6 +847,7 @@ export default function NavigationScreen() {
           </Marker>
         ))}
 
+        {/* Hold progress indicator */}
         {mapInteraction.isHoldingMap && mapInteraction.holdLocation && (
           <Marker
             coordinate={mapInteraction.holdLocation}
@@ -744,6 +893,7 @@ export default function NavigationScreen() {
           </Marker>
         )}
 
+        {/* Selected location marker in map selection mode */}
         {isMapSelectionMode && selectedMapLocation && (
           <Marker coordinate={selectedMapLocation}>
             <View
@@ -763,6 +913,7 @@ export default function NavigationScreen() {
           </Marker>
         )}
 
+        {/* Route polylines (before navigation starts) */}
         {routeAnalysis && !isNavigating && (
           <>
             {routeAnalysis.fastestRoute?.polyline?.length > 0 && (
@@ -785,6 +936,7 @@ export default function NavigationScreen() {
           </>
         )}
 
+        {/* Active route polyline (during navigation) */}
         {isNavigating && selectedRouteType && remainingPolyline.length > 0 && (
           <Polyline
             coordinates={remainingPolyline}
@@ -797,6 +949,7 @@ export default function NavigationScreen() {
         )}
       </MapView>
 
+      {/* Search Bar */}
       <EnhancedSearchBar
         onDestinationSelect={handleDestinationSelect}
         onChooseOnMap={handleChooseOnMap}
@@ -811,6 +964,7 @@ export default function NavigationScreen() {
         placeholder="Search for accessible destinations..."
       />
 
+      {/* Map Selection Banner */}
       {isMapSelectionMode && (
         <View style={[styles.mapSelectionBanner, { top: insets.top + 70 }]}>
           <View style={styles.mapSelectionBannerContent}>
@@ -828,6 +982,7 @@ export default function NavigationScreen() {
         </View>
       )}
 
+      {/* Navigation Controls */}
       <NavigationControls
         showFAB={false}
         onFABPress={() => calculateUnifiedRoutes()}
@@ -841,12 +996,14 @@ export default function NavigationScreen() {
         validationObstacleCount={validationRadiusObstacles.length}
       />
 
+      {/* Proximity Alerts Overlay */}
       <ProximityAlertsOverlay
         alerts={proximityState.proximityAlerts}
         onAlertPress={handleProximityAlertPress}
       />
 
-      {/* ✅ FIX: Show panel based on showRoutePanel state */}
+      {/* Route Info Bottom Sheet */}
+      {/* ✅ Panel visibility controlled by showRoutePanel */}
       <RouteInfoBottomSheet
         routeAnalysis={routeAnalysis}
         isVisible={
@@ -858,6 +1015,7 @@ export default function NavigationScreen() {
         isNavigating={isNavigating}
       />
 
+      {/* Validation Prompt Modal */}
       {showValidationPrompt && currentValidationPrompt && (
         <Modal
           visible={showValidationPrompt}

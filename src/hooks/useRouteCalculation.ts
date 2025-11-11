@@ -1,8 +1,8 @@
 // src/hooks/useRouteCalculation.ts
-// FIXED & ENHANCED: Interface compatibility + All proposed improvements
-// Clean interface that just shows obstacle counts to users
+// ✅ COMPLETE FIX: TypeScript errors + Location closure issue + Proper polyline conversion
+// Converts service data to UI-friendly format
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { Alert, Vibration } from "react-native";
 import MapView from "react-native-maps";
 import {
@@ -14,32 +14,20 @@ import {
   routeAnalysisService,
   SimpleRouteComparison,
 } from "../services/routeAnalysisService";
-import { routeObstacleService } from "../services/routeObstacleService";
 import { decodePolyline } from "../utils/mapUtils";
 import { SAMPLE_POIS } from "../constants/navigationConstants";
 
-// ENHANCED: Added loading states for better UX
-interface RouteCalculationState {
-  routeAnalysis: SimpleUIRouteAnalysis | null;
-  isCalculating: boolean;
-  isCalculatingObstacles: boolean; // New loading state
-  selectedDestination: UserLocation | null;
-  destinationName: string;
-  routeObstacles: AccessibilityObstacle[];
-  nearbyObstacles: AccessibilityObstacle[];
-}
-
-// ENHANCED: Better TypeScript interfaces
+// ✅ UI-Friendly interface (what the components expect)
 interface SimpleUIRouteAnalysis {
   fastestRoute: {
-    polyline: UserLocation[];
+    polyline: UserLocation[]; // ✅ Direct polyline array
     duration: number; // seconds
     distance: number; // meters
     obstacleCount: number;
     obstacles: AccessibilityObstacle[];
   };
   clearestRoute: {
-    polyline: UserLocation[];
+    polyline: UserLocation[]; // ✅ Direct polyline array
     duration: number; // seconds
     distance: number; // meters
     obstacleCount: number;
@@ -53,6 +41,16 @@ interface SimpleUIRouteAnalysis {
   };
 }
 
+interface RouteCalculationState {
+  routeAnalysis: SimpleUIRouteAnalysis | null; // ✅ UI-friendly format
+  isCalculating: boolean;
+  isCalculatingObstacles: boolean;
+  selectedDestination: UserLocation | null;
+  destinationName: string;
+  routeObstacles: AccessibilityObstacle[];
+  nearbyObstacles: AccessibilityObstacle[];
+}
+
 interface UseRouteCalculationOptions {
   location: UserLocation | null;
   profile: UserMobilityProfile | null;
@@ -60,15 +58,59 @@ interface UseRouteCalculationOptions {
   destination: string;
 }
 
-// ENHANCEMENT: Route caching for performance
+// Route caching
 interface CachedRoute {
-  result: SimpleUIRouteAnalysis;
+  result: SimpleUIRouteAnalysis; // ✅ Cache the converted format
   timestamp: number;
 }
 
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 const routeCache = new Map<string, CachedRoute>();
 
+/**
+ * Convert GoogleRoute polyline to UserLocation array
+ */
+function convertRouteToPolyline(googleRoute: any): UserLocation[] {
+  try {
+    if (!googleRoute) {
+      return [];
+    }
+
+    // If already an array, return it
+    if (Array.isArray(googleRoute.polyline)) {
+      return googleRoute.polyline;
+    }
+
+    // If encoded string, decode it
+    if (typeof googleRoute.polyline === "string") {
+      return decodePolyline(googleRoute.polyline);
+    }
+
+    // Fallback: use route steps
+    if (googleRoute.steps && googleRoute.steps.length > 0) {
+      const stepPoints: UserLocation[] = [];
+      googleRoute.steps.forEach((step: any) => {
+        if (step.startLocation) {
+          stepPoints.push(step.startLocation);
+        }
+      });
+      const lastStep = googleRoute.steps[googleRoute.steps.length - 1];
+      if (lastStep.endLocation) {
+        stepPoints.push(lastStep.endLocation);
+      }
+      return stepPoints;
+    }
+
+    return [];
+  } catch (error) {
+    console.error("❌ Error converting polyline:", error);
+    return [];
+  }
+}
+
+/**
+ * Custom hook for route calculation and management
+ */
 export function useRouteCalculation({
   location,
   profile,
@@ -85,7 +127,20 @@ export function useRouteCalculation({
     nearbyObstacles: [],
   });
 
-  // ENHANCEMENT: Memoized route obstacles for better performance
+  // ✅ FIX: Store location and profile in refs to avoid closure issues
+  const locationRef = useRef<UserLocation | null>(location);
+  const profileRef = useRef<UserMobilityProfile | null>(profile);
+
+  // ✅ Update refs whenever values change
+  useEffect(() => {
+    locationRef.current = location;
+  }, [location]);
+
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
+
+  // Memoized route obstacles
   const routeObstacles = useMemo(() => {
     if (!state.routeAnalysis) return [];
 
@@ -94,14 +149,13 @@ export function useRouteCalculation({
       ...state.routeAnalysis.clearestRoute.obstacles,
     ];
 
-    // Remove duplicates by ID
     return allObstacles.filter(
       (obstacle, index, self) =>
         index === self.findIndex((t) => t.id === obstacle.id)
     );
   }, [state.routeAnalysis]);
 
-  // ENHANCEMENT: Generate cache key for route caching
+  // Generate cache key
   const getCacheKey = useCallback(
     (start: UserLocation, dest: UserLocation): string => {
       return `${start.latitude.toFixed(4)},${start.longitude.toFixed(
@@ -111,7 +165,7 @@ export function useRouteCalculation({
     []
   );
 
-  // ENHANCEMENT: Check if cache is still valid
+  // Check cache
   const getCachedRoute = useCallback(
     (cacheKey: string): SimpleUIRouteAnalysis | null => {
       const cached = routeCache.get(cacheKey);
@@ -120,22 +174,35 @@ export function useRouteCalculation({
         return cached.result;
       }
       if (cached) {
-        routeCache.delete(cacheKey); // Clean up expired cache
+        routeCache.delete(cacheKey);
       }
       return null;
     },
     []
   );
 
+  /**
+   * Main route calculation function
+   */
   const calculateUnifiedRoutes = useCallback(
     async (poi?: any) => {
-      // ENHANCEMENT: Better input validation
-      if (!location) {
-        Alert.alert("Location Error", "Cannot get your current location.");
+      // ✅ FIX: Read from refs instead of closure
+      const currentLocation = locationRef.current;
+      const currentProfile = profileRef.current;
+
+      console.log("🔍 [calculateUnifiedRoutes] Location check:", {
+        hasLocation: !!currentLocation,
+      });
+
+      if (!currentLocation) {
+        Alert.alert(
+          "Location Error",
+          "Cannot get your current location. Please ensure GPS is enabled and app has location permission."
+        );
         return;
       }
 
-      if (!profile) {
+      if (!currentProfile) {
         Alert.alert("Profile Error", "Please set up your profile first.");
         return;
       }
@@ -144,20 +211,39 @@ export function useRouteCalculation({
       let destName: string;
 
       if (poi) {
-        destLocation = { latitude: poi.lat, longitude: poi.lng };
-        destName = poi.name;
+        // ✅ FIX: Handle both POI formats
+        if (poi.location) {
+          // Standard PointOfInterest format: { location: { latitude, longitude } }
+          destLocation = poi.location;
+        } else if (poi.lat !== undefined && poi.lng !== undefined) {
+          // Custom POI format: { lat, lng }
+          destLocation = {
+            latitude: poi.lat,
+            longitude: poi.lng,
+          };
+        } else {
+          console.error("❌ Invalid POI format:", poi);
+          Alert.alert(
+            "Invalid Destination",
+            "The selected destination has an invalid format."
+          );
+          return;
+        }
+        destName = poi.name || "Custom Destination";
       } else {
         if (!destination.trim()) {
           Alert.alert("No Destination", "Please enter a destination first.");
           return;
         }
         const firstPOI = SAMPLE_POIS[0];
-        destLocation = { latitude: firstPOI.lat, longitude: firstPOI.lng };
+        destLocation = firstPOI.location;
         destName = destination;
       }
 
-      // ENHANCEMENT: Check cache first
-      const cacheKey = getCacheKey(location, destLocation);
+      console.log("🎯 Calculating route to:", destName);
+
+      // Check cache first
+      const cacheKey = getCacheKey(currentLocation, destLocation);
       const cachedResult = getCachedRoute(cacheKey);
 
       if (cachedResult) {
@@ -183,66 +269,42 @@ export function useRouteCalculation({
       }));
 
       try {
-        console.log("🗺️ Calculating SIMPLIFIED routes to", destName + "...");
+        console.log("🗺️ Fetching routes from service...");
 
-        // Use our simplified route analysis service
-        const analysis = await routeAnalysisService.analyzeRoutes(
-          location,
-          destLocation,
-          profile
-        );
+        // Get routes from service (returns SimpleRouteComparison)
+        const analysis: SimpleRouteComparison =
+          await routeAnalysisService.analyzeRoutes(
+            currentLocation,
+            destLocation,
+            currentProfile
+          );
 
-        // ENHANCEMENT: Better error handling
-        if (!analysis) {
-          throw new Error("Route analysis service returned null");
-        }
-
-        if (!analysis.fastestRoute || !analysis.clearestRoute) {
+        if (!analysis || !analysis.fastestRoute || !analysis.clearestRoute) {
           throw new Error("Invalid route analysis - missing required routes");
         }
 
-        // Success vibration feedback
-        Vibration.vibrate([100, 50, 100]);
-
-        console.log("✅ Got simplified route analysis!");
+        console.log("✅ Got route analysis from service");
         console.log(
-          `🚀 Fastest: ${Math.round(
-            analysis.fastestRoute.googleRoute.duration / 60
-          )}min, ${analysis.fastestRoute.obstacleCount} obstacles`
+          `   - Fastest: ${analysis.fastestRoute.obstacleCount} obstacles`
         );
         console.log(
-          `🛡️ Clearest: ${Math.round(
-            analysis.clearestRoute.googleRoute.duration / 60
-          )}min, ${analysis.clearestRoute.obstacleCount} obstacles`
+          `   - Clearest: ${analysis.clearestRoute.obstacleCount} obstacles`
         );
 
-        // ENHANCEMENT: Better polyline conversion with error handling
-        const [fastestPolyline, clearestPolyline] = await Promise.all([
-          convertRouteToPolyline(analysis.fastestRoute.googleRoute),
-          convertRouteToPolyline(analysis.clearestRoute.googleRoute),
-        ]);
+        // ✅ FIX: Convert service format to UI format
+        const fastestPolyline = convertRouteToPolyline(
+          analysis.fastestRoute.googleRoute
+        );
+        const clearestPolyline = convertRouteToPolyline(
+          analysis.clearestRoute.googleRoute
+        );
 
-        // FIXED: Use the correct interface for routeObstacleService
-        let nearbyObstacles: AccessibilityObstacle[] = [];
-        try {
-          setState((prev) => ({ ...prev, isCalculatingObstacles: true }));
-
-          nearbyObstacles = await routeObstacleService.getRelevantObstacles(
-            location,
-            {
-              fastestRoute: { polyline: fastestPolyline },
-              accessibleRoute: { polyline: clearestPolyline }, // FIXED: Use accessibleRoute as expected
-            }
-          );
-
-          setState((prev) => ({ ...prev, isCalculatingObstacles: false }));
-        } catch (obstacleError) {
-          console.warn("Could not load nearby obstacles:", obstacleError);
-          setState((prev) => ({ ...prev, isCalculatingObstacles: false }));
+        if (fastestPolyline.length === 0 || clearestPolyline.length === 0) {
+          throw new Error("Failed to extract route polylines");
         }
 
-        // Convert to clean UI format
-        const cleanUIAnalysis: SimpleUIRouteAnalysis = {
+        // ✅ Create UI-friendly format
+        const uiAnalysis: SimpleUIRouteAnalysis = {
           fastestRoute: {
             polyline: fastestPolyline,
             duration: analysis.fastestRoute.googleRoute.duration,
@@ -267,65 +329,41 @@ export function useRouteCalculation({
           },
         };
 
-        // ENHANCEMENT: Cache the result
+        // Success feedback
+        Vibration.vibrate([100, 50, 100]);
+
+        // Cache the result
         routeCache.set(cacheKey, {
-          result: cleanUIAnalysis,
+          result: uiAnalysis,
           timestamp: Date.now(),
         });
 
-        // ENHANCEMENT: Better map centering
-        if (mapRef.current && clearestPolyline.length > 0) {
-          const coordinates = clearestPolyline.map((point) => ({
-            latitude: point.latitude,
-            longitude: point.longitude,
-          }));
-
-          try {
-            mapRef.current.fitToCoordinates(coordinates, {
-              edgePadding: { top: 100, right: 50, bottom: 300, left: 50 },
-              animated: true,
-            });
-          } catch (mapError) {
-            console.warn("Could not fit map to coordinates:", mapError);
-          }
-        }
-
-        // Update state with clean, simple data
         setState((prev) => ({
           ...prev,
-          routeAnalysis: cleanUIAnalysis,
-          nearbyObstacles: nearbyObstacles,
+          routeAnalysis: uiAnalysis,
           selectedDestination: destLocation,
           destinationName: destName,
           isCalculating: false,
           isCalculatingObstacles: false,
         }));
 
-        console.log("✅ SIMPLIFIED route calculation complete!");
-
-        // ENHANCEMENT: Better user feedback
-        const fastestMin = Math.round(
-          cleanUIAnalysis.fastestRoute.duration / 60
-        );
-        const clearestMin = Math.round(
-          cleanUIAnalysis.clearestRoute.duration / 60
-        );
-
-        if (cleanUIAnalysis.summary.fastestIsAlsoClearest) {
-          console.log(
-            `🎉 Perfect! Same route is both fastest (${fastestMin}min) AND clearest (${cleanUIAnalysis.clearestRoute.obstacleCount} obstacles)`
-          );
-        } else {
-          console.log(
-            `⚖️ Choice: Fast (${fastestMin}min, ${cleanUIAnalysis.fastestRoute.obstacleCount} obstacles) vs Clear (${clearestMin}min, ${cleanUIAnalysis.clearestRoute.obstacleCount} obstacles)`
+        // Animate map to show route
+        if (mapRef.current && clearestPolyline.length > 0) {
+          mapRef.current.fitToCoordinates(
+            [currentLocation, destLocation, ...clearestPolyline],
+            {
+              edgePadding: { top: 100, right: 50, bottom: 300, left: 50 },
+              animated: true,
+            }
           );
         }
-      } catch (error) {
-        console.error("❌ Error calculating simplified routes:", error);
 
-        // ENHANCEMENT: Better error messages
+        console.log("✅ Route calculation complete!");
+      } catch (error: any) {
+        console.error("❌ Route calculation error:", error);
+
         let errorMessage =
-          "Unable to calculate routes. Please check your connection and try again.";
+          "Could not calculate route. Please check your connection and try again.";
 
         if (error instanceof Error) {
           if (error.message.includes("No routes found")) {
@@ -351,21 +389,24 @@ export function useRouteCalculation({
         }));
       }
     },
-    [location, profile, destination, mapRef, getCacheKey, getCachedRoute]
+    // ✅ Remove location and profile from deps since we use refs
+    [destination, mapRef, getCacheKey, getCachedRoute]
   );
 
+  /**
+   * Handler for POI selection
+   */
   const handlePOIPress = useCallback(
     (poi: any) => {
-      console.log(
-        "🏢 Selected POI:",
-        poi.name,
-        "- Auto-calculating simplified routes..."
-      );
+      console.log("🏢 Selected POI:", poi.name);
       calculateUnifiedRoutes(poi);
     },
     [calculateUnifiedRoutes]
   );
 
+  /**
+   * Update route analysis
+   */
   const updateRouteAnalysis = useCallback(
     (newAnalysis: SimpleUIRouteAnalysis) => {
       setState((prev) => ({
@@ -376,12 +417,17 @@ export function useRouteCalculation({
     []
   );
 
-  // ENHANCEMENT: Cleanup function for cache management
+  /**
+   * Clear cache
+   */
   const clearCache = useCallback(() => {
     routeCache.clear();
     console.log("🧹 Route cache cleared");
   }, []);
 
+  /**
+   * Clear all routes
+   */
   const clearRoutes = useCallback(() => {
     setState((prev) => ({
       ...prev,
@@ -391,110 +437,22 @@ export function useRouteCalculation({
       routeObstacles: [],
       nearbyObstacles: [],
     }));
-    routeCache.clear(); // Also clear cache
+    routeCache.clear();
     console.log("🧹 All route data cleared");
   }, []);
 
   return {
     routeAnalysis: state.routeAnalysis,
     isCalculating: state.isCalculating,
-    isCalculatingObstacles: state.isCalculatingObstacles, // New loading state
+    isCalculatingObstacles: state.isCalculatingObstacles,
     selectedDestination: state.selectedDestination,
     destinationName: state.destinationName,
-    routeObstacles, // Using memoized version
+    routeObstacles,
     nearbyObstacles: state.nearbyObstacles,
     calculateUnifiedRoutes,
     handlePOIPress,
     updateRouteAnalysis,
-    clearCache, // New utility function
     clearRoutes,
+    clearCache,
   };
-}
-
-// =====================================================
-// ENHANCED UTILITY FUNCTIONS
-// =====================================================
-
-/**
- * ENHANCED: Convert GoogleRoute to polyline with better error handling
- */
-async function convertRouteToPolyline(
-  googleRoute: any
-): Promise<UserLocation[]> {
-  try {
-    // Type guard for valid route
-    if (!googleRoute) {
-      throw new Error("Invalid googleRoute: null or undefined");
-    }
-
-    // If already an array of coordinates, return as-is
-    if (Array.isArray(googleRoute.polyline)) {
-      console.log("✅ Using existing polyline array");
-      return googleRoute.polyline;
-    }
-
-    // If encoded string, decode it
-    if (typeof googleRoute.polyline === "string") {
-      console.log("🔄 Decoding polyline string");
-      const decoded = decodePolyline(googleRoute.polyline);
-
-      if (decoded.length === 0) {
-        throw new Error("Decoded polyline is empty");
-      }
-
-      return decoded;
-    }
-
-    // Fallback: use route steps if available
-    if (googleRoute.steps && googleRoute.steps.length > 0) {
-      console.log("🔄 Using route steps as fallback polyline");
-      const stepPoints: UserLocation[] = [];
-
-      googleRoute.steps.forEach((step: any) => {
-        if (
-          step.startLocation &&
-          typeof step.startLocation.latitude === "number" &&
-          typeof step.startLocation.longitude === "number"
-        ) {
-          stepPoints.push(step.startLocation);
-        }
-      });
-
-      // Add final end location
-      const lastStep = googleRoute.steps[googleRoute.steps.length - 1];
-      if (
-        lastStep.endLocation &&
-        typeof lastStep.endLocation.latitude === "number" &&
-        typeof lastStep.endLocation.longitude === "number"
-      ) {
-        stepPoints.push(lastStep.endLocation);
-      }
-
-      if (stepPoints.length === 0) {
-        throw new Error("No valid step points found");
-      }
-
-      return stepPoints;
-    }
-
-    throw new Error("No valid polyline data found in route");
-  } catch (error) {
-    console.error("❌ Error converting route to polyline:", error);
-
-    // Final fallback: return empty array (UI should handle this gracefully)
-    return [];
-  }
-}
-
-// ENHANCEMENT: Type guard for valid UserLocation
-function isValidUserLocation(location: any): location is UserLocation {
-  return (
-    location &&
-    typeof location.latitude === "number" &&
-    typeof location.longitude === "number" &&
-    !isNaN(location.latitude) &&
-    !isNaN(location.longitude) &&
-    Math.abs(location.latitude) <= 90 &&
-    Math.abs(location.longitude) <= 180
-  );
 }

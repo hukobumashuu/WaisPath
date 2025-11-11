@@ -1,11 +1,10 @@
 // src/hooks/useLocation.ts
-// 🔥 CRITICAL FIX: Enable continuous location tracking for navigation
+// 🔥 CRITICAL DEBUG: Add logs to see why loading stays true
 
 import { useState, useEffect, useRef } from "react";
 import * as Location from "expo-location";
 import { UserLocation } from "../types";
 
-// Pasig City center coordinates for fallback ONLY in case of errors
 const PASIG_CENTER: UserLocation = {
   latitude: 14.5764,
   longitude: 121.0851,
@@ -27,23 +26,26 @@ export function useLocation() {
     hasPermission: false,
   });
 
-  // 🔥 NEW: Store subscription reference for cleanup
   const locationSubscription = useRef<Location.LocationSubscription | null>(
     null
   );
 
-  // Get initial location
   const getCurrentLocation = async (): Promise<UserLocation> => {
     try {
+      // ✅ DEBUG: Log before setting loading
+      console.log("🔍 [useLocation] Setting loading: true");
       setState((prev) => ({ ...prev, loading: true, error: null }));
 
       console.log("📍 Requesting location permission...");
 
-      // Request permission
       const { status } = await Location.requestForegroundPermissionsAsync();
 
       if (status !== "granted") {
         console.log("❌ Location permission denied");
+        // ✅ DEBUG: Log setting loading false (permission denied)
+        console.log(
+          "🔍 [useLocation] Permission denied - Setting loading: false"
+        );
         setState((prev) => ({
           ...prev,
           loading: false,
@@ -58,7 +60,6 @@ export function useLocation() {
         "✅ Location permission granted, getting current position..."
       );
 
-      // Get current position
       const position = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
         timeInterval: 15000,
@@ -74,13 +75,26 @@ export function useLocation() {
         accuracy: position.coords.accuracy || undefined,
       };
 
-      setState((prev) => ({
-        ...prev,
-        loading: false,
-        hasPermission: true,
-        location: userLocation,
-        error: null,
-      }));
+      // ✅ CRITICAL DEBUG: Log BEFORE and AFTER setState
+      console.log(
+        "🔍 [useLocation] BEFORE setState - About to set loading: false"
+      );
+      setState((prev) => {
+        console.log(
+          "🔍 [useLocation] INSIDE setState callback - prev.loading:",
+          prev.loading
+        );
+        return {
+          ...prev,
+          loading: false, // ✅ This should set loading to false
+          hasPermission: true,
+          location: userLocation,
+          error: null,
+        };
+      });
+      console.log(
+        "🔍 [useLocation] AFTER setState - loading should now be false"
+      );
 
       console.log("✅ Initial location set:", userLocation);
 
@@ -98,6 +112,8 @@ export function useLocation() {
           "GPS is disabled. Please enable location services. Using Pasig City center.";
       }
 
+      // ✅ DEBUG: Log setting loading false (error case)
+      console.log("🔍 [useLocation] Error occurred - Setting loading: false");
       setState((prev) => ({
         ...prev,
         loading: false,
@@ -110,7 +126,6 @@ export function useLocation() {
     }
   };
 
-  // 🔥 CRITICAL FIX: Start continuous location tracking
   const startWatchingLocation = async () => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -121,12 +136,11 @@ export function useLocation() {
 
       console.log("🔄 Starting continuous location tracking...");
 
-      // 🔥 IMPORTANT: Store subscription for cleanup
       locationSubscription.current = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.Balanced,
-          timeInterval: 3000, // 🔥 Update every 3 seconds (matches detection interval)
-          distanceInterval: 3, // 🔥 Update when moved 3 meters (matches detection threshold)
+          timeInterval: 3000,
+          distanceInterval: 3,
         },
         (position) => {
           const newLocation: UserLocation = {
@@ -141,9 +155,11 @@ export function useLocation() {
             accuracy: newLocation.accuracy?.toFixed(1) + "m",
           });
 
+          // ✅ IMPORTANT: Don't change loading state during updates
           setState((prev) => ({
             ...prev,
             location: newLocation,
+            // loading stays as-is (should already be false)
           }));
         }
       );
@@ -156,26 +172,26 @@ export function useLocation() {
     }
   };
 
-  // 🔥 CRITICAL FIX: Auto-start tracking on mount
   useEffect(() => {
     let isMounted = true;
 
     const initializeLocation = async () => {
-      // Get initial location
+      console.log("🔍 [useLocation] useEffect - Starting initialization");
       await getCurrentLocation();
+      console.log("🔍 [useLocation] useEffect - getCurrentLocation finished");
 
-      // Start continuous tracking
       if (isMounted) {
         await startWatchingLocation();
+        console.log(
+          "🔍 [useLocation] useEffect - startWatchingLocation finished"
+        );
       }
     };
 
     initializeLocation();
 
-    // 🔥 CRITICAL: Cleanup on unmount
     return () => {
       isMounted = false;
-
       if (locationSubscription.current) {
         console.log("🛑 Stopping location tracking...");
         locationSubscription.current.remove();
@@ -184,7 +200,16 @@ export function useLocation() {
     };
   }, []);
 
-  // Helper functions
+  // ✅ CRITICAL DEBUG: Log whenever state changes
+  useEffect(() => {
+    console.log("🔍 [useLocation] State changed:", {
+      hasLocation: !!state.location,
+      loading: state.loading,
+      hasPermission: state.hasPermission,
+      error: state.error,
+    });
+  }, [state]);
+
   const isNearPasig = (location: UserLocation): boolean => {
     const pasigBounds = {
       north: 14.62,
