@@ -95,16 +95,17 @@ export function useProximityDetection({
         }
       }
 
-      // 🔥 IMPROVED: Process ALL critical alerts (both new and existing) for TTS
-      // This ensures consistent announcements even if detection timing varies
-      if (criticalAlerts.length > 0 && userProfile) {
+      // 🔥 CRITICAL FIX: Process ALL detected alerts for TTS (removed criticalAlerts restriction)
+      // This ensures consistent announcements for all relevant obstacles
+      if (alerts.length > 0 && userProfile) {
         console.log(
-          `🔊 TTS: Processing ${criticalAlerts.length} critical alerts for announcements`
+          `🔊 TTS: Processing ${alerts.length} detected alerts for announcements`
         );
 
         // 🔥 CRITICAL IMPROVEMENT: Let TTS service handle deduplication
-        // We pass ALL critical alerts and let the improved TTS service decide what to announce
-        for (const alert of criticalAlerts) {
+        // We pass ALL alerts and let the improved TTS service decide what to announce
+        for (const alert of alerts) {
+          // Changed from criticalAlerts to alerts
           // 🔥 NON-BLOCKING: Fire and forget TTS (no await, no setTimeout delays)
           textToSpeechService
             .announceProximityAlert(alert.obstacle, alert.distance, userProfile)
